@@ -1,0 +1,24 @@
+{
+  "name": "barril",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace apps/server run dev",
+    "dev:laptop": "npm --workspace apps/laptop run dev",
+    "dev:hub": "start \"Barril API\" cmd /k npm run dev:server && start \"Barril Laptop\" cmd /k npm run dev:laptop",
+    "dev:mobile": "npm --workspace apps/mobile run start",
+    "apk:release": "npm --workspace apps/mobile run apk:release",
+    "tunnel:server": "cloudflared tunnel --url http://localhost:4000",
+    "build": "npm run build -ws"
+  },
+  "keywords": [
+    "restaurante",
+    "comandas"
+  ],
+  "author": "",
+  "license": "MIT",
+  "description": "Asados en el Barril - sistema de comandas, caja y estadisticas"
+}

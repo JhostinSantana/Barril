@@ -1,0 +1,42 @@
+{
+  "restaurantName": "Asados en el Barril",
+  "menu": [
+    {
+      "id": "plato-1",
+      "name": "Asado Barril Tradicional",
+      "category": "Parrilla",
+      "price": 26000
+    },
+    {
+      "id": "plato-2",
+      "name": "Costillas Ahumadas",
+      "category": "Parrilla",
+      "price": 32000
+    },
+    {
+      "id": "plato-3",
+      "name": "Chorizo Artesanal",
+      "category": "Entradas",
+      "price": 12000
+    },
+    {
+      "id": "plato-4",
+      "name": "Papa Criolla al Horno",
+      "category": "Acompanantes",
+      "price": 9000
+    },
+    {
+      "id": "plato-5",
+      "name": "Limonada de la Casa",
+      "category": "Bebidas",
+      "price": 7000
+    },
+    {
+      "id": "plato-6",
+      "name": "Gaseosa",
+      "category": "Bebidas",
+      "price": 6000
+    }
+  ],
+  "orders": []
+}
