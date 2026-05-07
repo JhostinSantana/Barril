@@ -2,16 +2,24 @@
   "expo": {
     "name": "Asados en el Barril",
     "slug": "asados-en-el-barril",
-    "version": "1.0.0",
+    "version": "1.0.3",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.asadosenelbarril.mobile",
-      "versionCode": 1
+      "versionCode": 4
     },
     "splash": {
       "backgroundColor": "#f5efe8"
     },
-    "assetBundlePatterns": ["**/*"]
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a83bac3c-76b9-4b8e-9c3f-1b68a486d5a6"
+      }
+    },
+    "owner": "jasv2004"
   }
 }

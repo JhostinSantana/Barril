@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sqlite3 from 'sqlite3';
-import { DEFAULT_MENU, DEFAULT_RESTAURANT_NAME } from './utils.js';
+import { DEFAULT_MENU, DEFAULT_MENU_VERSION, DEFAULT_RESTAURANT_NAME } from './utils.js';
 
 sqlite3.verbose();
 
@@ -14,6 +14,18 @@ db.serialize(() => {
   db.exec('PRAGMA synchronous = NORMAL;');
   db.exec('PRAGMA busy_timeout = 5000;');
 });
+
+function roundMoney(value) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeWaiterName(name) {
+  return `${name ?? ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function formatWaiterName(name) {
+  return `${name ?? ''}`.trim().replace(/\s+/g, ' ');
+}
 
 function run(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -42,18 +54,52 @@ function all(sql, params = []) {
   });
 }
 
-function mapOrderRow(row, items) {
+function getPaymentSummary(payments) {
+  return payments.reduce(
+    (acc, payment) => {
+      const amount = roundMoney(payment.amount ?? 0);
+      if (payment.paymentMethod === 'efectivo') {
+        acc.efectivo = roundMoney(acc.efectivo + amount);
+      }
+      if (payment.paymentMethod === 'transferencia') {
+        acc.transferencia = roundMoney(acc.transferencia + amount);
+      }
+      return acc;
+    },
+    { efectivo: 0, transferencia: 0 }
+  );
+}
+
+function resolvePaymentMethod(paymentSummary, fallback) {
+  const hasCash = paymentSummary.efectivo > 0;
+  const hasTransfer = paymentSummary.transferencia > 0;
+
+  if (hasCash && hasTransfer) return 'mixto';
+  if (hasCash) return 'efectivo';
+  if (hasTransfer) return 'transferencia';
+  return fallback ?? null;
+}
+
+function mapOrderRow(row, items, payments) {
+  const paidAmount = roundMoney(row.paid_amount ?? 0);
+  const balanceDue = roundMoney(Math.max(Number(row.total ?? 0) - paidAmount, 0));
+  const paymentSummary = getPaymentSummary(payments);
+
   return {
     id: row.id,
     clientName: row.client_name,
     tableNumber: row.table_number,
     waiterName: row.waiter_name,
     status: row.status,
-    paymentMethod: row.payment_method,
+    paymentMethod: resolvePaymentMethod(paymentSummary, row.payment_method),
+    paymentSummary,
+    paidAmount,
+    balanceDue,
     total: row.total,
     createdAt: row.created_at,
     paidAt: row.paid_at,
-    items
+    items,
+    payments
   };
 }
 
@@ -74,7 +120,7 @@ export async function initializeDatabase() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       category TEXT NOT NULL,
-      price INTEGER NOT NULL,
+      price REAL NOT NULL,
       sort_order INTEGER NOT NULL
     )
   `);
@@ -87,7 +133,8 @@ export async function initializeDatabase() {
       waiter_name TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL,
       payment_method TEXT,
-      total INTEGER NOT NULL,
+      total REAL NOT NULL,
+      paid_amount REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       paid_at TEXT
     )
@@ -101,15 +148,41 @@ export async function initializeDatabase() {
       name TEXT NOT NULL,
       category TEXT NOT NULL,
       quantity INTEGER NOT NULL,
-      unit_price INTEGER NOT NULL,
-      subtotal INTEGER NOT NULL,
+      unit_price REAL NOT NULL,
+      subtotal REAL NOT NULL,
       FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS order_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id TEXT NOT NULL,
+      payment_method TEXT NOT NULL,
+      amount REAL NOT NULL,
+      tendered_amount REAL NOT NULL DEFAULT 0,
+      change_given REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS waiters (
+      waiter_key TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     )
   `);
 
   const orderColumns = await all('PRAGMA table_info(orders)');
   if (!orderColumns.some((column) => column.name === 'waiter_name')) {
     await run("ALTER TABLE orders ADD COLUMN waiter_name TEXT NOT NULL DEFAULT ''");
+  }
+  if (!orderColumns.some((column) => column.name === 'paid_amount')) {
+    await run('ALTER TABLE orders ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0');
   }
 
   const itemColumns = await all('PRAGMA table_info(order_items)');
@@ -127,19 +200,61 @@ export async function initializeDatabase() {
     WHERE category IS NULL OR category = '' OR category = 'Sin categoria'
   `);
 
+  await run(`
+    UPDATE orders
+    SET paid_amount = total
+    WHERE status = 'paid' AND (paid_amount IS NULL OR paid_amount = 0)
+  `);
+
+  const legacyPaidOrders = await all(`
+    SELECT id, payment_method, paid_amount, paid_at, created_at
+    FROM orders
+    WHERE status = 'paid'
+      AND paid_amount > 0
+      AND NOT EXISTS (
+        SELECT 1
+        FROM order_payments
+        WHERE order_payments.order_id = orders.id
+      )
+  `);
+
+  for (const legacyOrder of legacyPaidOrders) {
+    const method = legacyOrder.payment_method === 'transferencia' ? 'transferencia' : 'efectivo';
+    await run(
+      `INSERT INTO order_payments(order_id, payment_method, amount, tendered_amount, change_given, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        legacyOrder.id,
+        method,
+        legacyOrder.paid_amount,
+        method === 'efectivo' ? legacyOrder.paid_amount : 0,
+        0,
+        legacyOrder.paid_at ?? legacyOrder.created_at
+      ]
+    );
+  }
+
   const settingsCount = await get('SELECT COUNT(*) AS count FROM settings');
   if ((settingsCount?.count ?? 0) === 0) {
     await run('INSERT INTO settings(key, value) VALUES (?, ?)', ['restaurantName', DEFAULT_RESTAURANT_NAME]);
   }
 
+  const menuVersionRow = await get('SELECT value FROM settings WHERE key = ?', ['menuVersion']);
   const menuCount = await get('SELECT COUNT(*) AS count FROM menu_items');
-  if ((menuCount?.count ?? 0) === 0) {
+  if ((menuCount?.count ?? 0) === 0 || menuVersionRow?.value !== DEFAULT_MENU_VERSION) {
+    await run('DELETE FROM menu_items');
     for (const [index, item] of DEFAULT_MENU.entries()) {
       await run(
         'INSERT INTO menu_items(id, name, category, price, sort_order) VALUES (?, ?, ?, ?, ?)',
         [item.id, item.name, item.category, item.price, index]
       );
     }
+
+    await run(
+      `INSERT INTO settings(key, value) VALUES(?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      ['menuVersion', DEFAULT_MENU_VERSION]
+    );
   }
 }
 
@@ -161,14 +276,77 @@ export async function setSetting(key, value) {
   );
 }
 
+export async function listWaiters() {
+  return all(
+    `SELECT waiter_key AS waiterKey, display_name AS displayName, active, created_at AS createdAt, updated_at AS updatedAt
+     FROM waiters
+     ORDER BY active DESC, display_name ASC`
+  );
+}
+
+export async function getWaiterByName(name) {
+  const waiterKey = normalizeWaiterName(name);
+  if (!waiterKey) return null;
+
+  return get(
+    `SELECT waiter_key AS waiterKey, display_name AS displayName, active, created_at AS createdAt, updated_at AS updatedAt
+     FROM waiters
+     WHERE waiter_key = ?`,
+    [waiterKey]
+  );
+}
+
+export async function isWaiterAuthorized(name) {
+  const waiter = await getWaiterByName(name);
+  return Boolean(waiter && Number(waiter.active) === 1);
+}
+
+export async function upsertWaiter(name, active = 1) {
+  const displayName = formatWaiterName(name);
+  const waiterKey = normalizeWaiterName(displayName);
+  if (!waiterKey) return null;
+
+  const now = new Date().toISOString();
+  await run(
+    `INSERT INTO waiters(waiter_key, display_name, active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(waiter_key) DO UPDATE SET
+       display_name = excluded.display_name,
+       active = excluded.active,
+       updated_at = excluded.updated_at`,
+    [waiterKey, displayName, active ? 1 : 0, now, now]
+  );
+
+  return getWaiterByName(displayName);
+}
+
+export async function setWaiterActive(name, active) {
+  const displayName = formatWaiterName(name);
+  const waiterKey = normalizeWaiterName(displayName);
+  if (!waiterKey) return null;
+
+  const now = new Date().toISOString();
+  const existing = await getWaiterByName(displayName);
+  if (!existing) return null;
+
+  await run(
+    `UPDATE waiters
+     SET active = ?, updated_at = ?
+     WHERE waiter_key = ?`,
+    [active ? 1 : 0, now, waiterKey]
+  );
+
+  return getWaiterByName(displayName);
+}
+
 export async function getMenu() {
   return all('SELECT id, name, category, price FROM menu_items ORDER BY sort_order ASC');
 }
 
 export async function createOrder(order) {
   await run(
-    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, created_at, paid_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id,
       order.clientName,
@@ -176,17 +354,93 @@ export async function createOrder(order) {
       order.waiterName,
       order.status,
       order.paymentMethod,
-      order.total,
+      roundMoney(order.total),
+      0,
       order.createdAt,
       order.paidAt
     ]
+
+export async function updateOrderWithItems(orderId, order) {
+  const currentOrder = await getOrderById(orderId);
+  if (!currentOrder) return null;
+
+  const normalizedTotal = roundMoney(order.total);
+  const paidAmount = roundMoney(currentOrder.paidAmount ?? 0);
+
+  if (currentOrder.status === 'paid') {
+    const error = new Error('La cuenta ya esta pagada y no se puede modificar.');
+    error.code = 'ORDER_LOCKED';
+    throw error;
+  }
+
+  if (paidAmount > normalizedTotal) {
+    const error = new Error('El nuevo total no puede ser menor que lo ya abonado.');
+    error.code = 'PAID_AMOUNT_EXCEEDS_TOTAL';
+    throw error;
+  }
+
+  const nextStatus = paidAmount > 0
+    ? (paidAmount >= normalizedTotal ? 'paid' : 'partial')
+    : 'pending';
+
+  await run('BEGIN TRANSACTION');
+
+  try {
+    await run(
+      `UPDATE orders
+       SET client_name = ?, table_number = ?, waiter_name = ?, total = ?, status = ?
+       WHERE id = ?`,
+      [
+        order.clientName,
+        order.tableNumber,
+        order.waiterName,
+        normalizedTotal,
+        nextStatus,
+        orderId
+      ]
+    );
+
+    await run('DELETE FROM order_items WHERE order_id = ?', [orderId]);
+
+    for (const item of order.items) {
+      await run(
+        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          orderId,
+          item.menuItemId,
+          item.name,
+          item.category,
+          item.quantity,
+          roundMoney(item.unitPrice),
+          roundMoney(item.subtotal)
+        ]
+      );
+    }
+
+    await run('COMMIT');
+  } catch (error) {
+    await run('ROLLBACK');
+    throw error;
+  }
+
+  return getOrderById(orderId);
+}
   );
 
   for (const item of order.items) {
     await run(
       `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [order.id, item.menuItemId, item.name, item.category, item.quantity, item.unitPrice, item.subtotal]
+      [
+        order.id,
+        item.menuItemId,
+        item.name,
+        item.category,
+        item.quantity,
+        roundMoney(item.unitPrice),
+        roundMoney(item.subtotal)
+      ]
     );
   }
 }
@@ -195,7 +449,9 @@ export async function listOrders({ status, query } = {}) {
   const clauses = [];
   const params = [];
 
-  if (status) {
+  if (status === 'pending') {
+    clauses.push("status IN ('pending', 'partial')");
+  } else if (status) {
     clauses.push('status = ?');
     params.push(status);
   }
@@ -209,7 +465,12 @@ export async function listOrders({ status, query } = {}) {
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = await all(`SELECT * FROM orders ${where} ORDER BY created_at DESC`, params);
 
-  return Promise.all(rows.map(async (row) => mapOrderRow(row, await listOrderItems(row.id))));
+  return Promise.all(
+    rows.map(async (row) => {
+      const [items, payments] = await Promise.all([listOrderItems(row.id), listOrderPayments(row.id)]);
+      return mapOrderRow(row, items, payments);
+    })
+  );
 }
 
 export async function listOrdersByDate(dateKey) {
@@ -218,25 +479,71 @@ export async function listOrdersByDate(dateKey) {
     [dateKey]
   );
 
-  return Promise.all(rows.map(async (row) => mapOrderRow(row, await listOrderItems(row.id))));
+  return Promise.all(
+    rows.map(async (row) => {
+      const [items, payments] = await Promise.all([listOrderItems(row.id), listOrderPayments(row.id)]);
+      return mapOrderRow(row, items, payments);
+    })
+  );
 }
 
 export async function getOrderById(orderId) {
   const row = await get('SELECT * FROM orders WHERE id = ?', [orderId]);
   if (!row) return null;
-  return mapOrderRow(row, await listOrderItems(row.id));
+
+  const [items, payments] = await Promise.all([listOrderItems(row.id), listOrderPayments(row.id)]);
+  return mapOrderRow(row, items, payments);
+}
+
+export async function addOrderPayment(orderId, paymentMethod, amount, tenderedAmount, changeGiven, paidAt) {
+  const order = await getOrderById(orderId);
+  if (!order) return null;
+
+  const normalizedAmount = roundMoney(amount);
+  const normalizedTendered = roundMoney(tenderedAmount);
+  const normalizedChange = roundMoney(changeGiven);
+
+  await run(
+    `INSERT INTO order_payments(order_id, payment_method, amount, tendered_amount, change_given, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [orderId, paymentMethod, normalizedAmount, normalizedTendered, normalizedChange, paidAt]
+  );
+
+  const nextPaidAmount = roundMoney(Math.min(order.total, order.paidAmount + normalizedAmount));
+  const nextStatus = nextPaidAmount >= order.total ? 'paid' : 'partial';
+
+  const currentPayments = await listOrderPayments(orderId);
+  const summary = getPaymentSummary(currentPayments);
+  const resolvedMethod = resolvePaymentMethod(summary, paymentMethod);
+
+  await run(
+    `UPDATE orders
+     SET status = ?, payment_method = ?, paid_amount = ?, paid_at = ?
+     WHERE id = ?`,
+    [nextStatus, resolvedMethod, nextPaidAmount, nextStatus === 'paid' ? paidAt : null, orderId]
+  );
+
+  return getOrderById(orderId);
 }
 
 export async function updateOrderPayment(orderId, paymentMethod, paidAt) {
-  await run(
-    'UPDATE orders SET status = ?, payment_method = ?, paid_at = ? WHERE id = ?',
-    ['paid', paymentMethod, paidAt, orderId]
-  );
+  const order = await getOrderById(orderId);
+  if (!order) return;
+  if (order.balanceDue <= 0) return;
+
+  await addOrderPayment(orderId, paymentMethod, order.balanceDue, order.balanceDue, 0, paidAt);
 }
 
 async function listOrderItems(orderId) {
   return all(
     'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal FROM order_items WHERE order_id = ? ORDER BY id ASC',
+    [orderId]
+  );
+}
+
+async function listOrderPayments(orderId) {
+  return all(
+    'SELECT id, payment_method AS paymentMethod, amount, tendered_amount AS tenderedAmount, change_given AS changeGiven, created_at AS createdAt FROM order_payments WHERE order_id = ? ORDER BY id ASC',
     [orderId]
   );
 }

@@ -1,0 +1,19 @@
+{
+  "name": "barril",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "setup": "npm --prefix server install && npm --prefix laptop install",
+    "dev:server": "npm --prefix server run dev",
+    "dev:laptop": "npm --prefix laptop run dev",
+    "dev:hub": "start \"Barril API\" cmd /k npm run dev:server && start \"Barril Laptop\" cmd /k npm run dev:laptop",
+    "start:server": "npm --prefix server run start"
+  },
+  "keywords": [
+    "restaurante",
+    "comandas"
+  ],
+  "author": "",
+  "license": "MIT",
+  "description": "Asados en el Barril - sistema de comandas, caja y estadisticas"
+}

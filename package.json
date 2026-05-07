@@ -10,6 +10,7 @@
     "dev:laptop": "npm --workspace apps/laptop run dev",
     "dev:hub": "start \"Barril API\" cmd /k npm run dev:server && start \"Barril Laptop\" cmd /k npm run dev:laptop",
     "dev:mobile": "npm --workspace apps/mobile run start",
+    "apk:init": "npm --workspace apps/mobile run apk:init",
     "apk:release": "npm --workspace apps/mobile run apk:release",
     "tunnel:server": "cloudflared tunnel --url http://localhost:4000",
     "build": "npm run build -ws"

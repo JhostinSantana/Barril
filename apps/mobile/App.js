@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -15,7 +14,10 @@ import {
 } from 'react-native';
 
 const STORAGE_API_KEY = 'barril_api_url';
+const STORAGE_WAITER_KEY = 'barril_waiter_name';
+const STORAGE_DRAFT_ORDER_KEY = 'barril_draft_order';
 const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
+const TABLE_OPTIONS = Array.from({ length: 16 }, (_, index) => String(index + 1));
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 1200) {
   const controller = new AbortController();
@@ -91,10 +93,11 @@ async function discoverServer() {
 }
 
 function formatCurrency(value) {
-  return new Intl.NumberFormat('es-CO', {
+  return new Intl.NumberFormat('es-EC', {
     style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
   }).format(value ?? 0);
 }
 
@@ -106,14 +109,39 @@ export default function App() {
   const [apiUrl, setApiUrl] = useState('');
   const [connecting, setConnecting] = useState(true);
   const [waiterName, setWaiterName] = useState('');
+  const [waiterDraft, setWaiterDraft] = useState('');
+  const [waiterConfigured, setWaiterConfigured] = useState(false);
+  const [showWaiterSettings, setShowWaiterSettings] = useState(false);
   const [clientName, setClientName] = useState('');
   const [tableNumber, setTableNumber] = useState('');
   const [quantities, setQuantities] = useState({});
+  const [pendingOrders, setPendingOrders] = useState([]);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [status, setStatus] = useState('');
+  const [hasDraft, setHasDraft] = useState(false);
 
   const selectedCount = useMemo(
     () => Object.values(quantities).reduce((sum, quantity) => sum + Number(quantity || 0), 0),
     [quantities]
+  );
+
+  const menuSections = useMemo(() => {
+    const grouped = menu.reduce((acc, item) => {
+      const category = item.category || 'Sin categoria';
+      if (!acc[category]) acc[category] = [];
+      acc[category].push(item);
+      return acc;
+    }, {});
+
+    return Object.entries(grouped).map(([category, items]) => ({
+      category,
+      items
+    }));
+  }, [menu]);
+
+  const editingOrder = useMemo(
+    () => pendingOrders.find((order) => order.id === selectedOrderId) ?? null,
+    [pendingOrders, selectedOrderId]
   );
 
   async function loadMenu() {
@@ -124,8 +152,119 @@ export default function App() {
       setMenu(data.menu);
     } catch (error) {
       setStatus('No se pudo conectar con el servidor.');
+    }
+  }
+
+  async function loadOpenOrders() {
+    try {
+      const response = await fetch(`${apiUrl}/api/orders?status=pending`);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? 'No se pudieron cargar las comandas.');
+      }
+      setPendingOrders((Array.isArray(data) ? data : []).filter((order) => order.status === 'pending' || order.status === 'partial'));
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
+  async function saveDraftOrder() {
+    const draft = { clientName, tableNumber, quantities };
+    await AsyncStorage.setItem(STORAGE_DRAFT_ORDER_KEY, JSON.stringify(draft));
+    setHasDraft(true);
+  }
+
+  async function loadDraftOrder() {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_DRAFT_ORDER_KEY);
+      if (stored) {
+        const draft = JSON.parse(stored);
+        if (draft.clientName || draft.tableNumber || Object.keys(draft.quantities || {}).length > 0) {
+          setClientName(draft.clientName || '');
+          setTableNumber(draft.tableNumber || '');
+          setQuantities(draft.quantities || {});
+          setHasDraft(true);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading draft:', error);
+    }
+  }
+
+  async function clearDraftOrder() {
+    await AsyncStorage.removeItem(STORAGE_DRAFT_ORDER_KEY);
+    setHasDraft(false);
+  }
+
+  async function syncWaiterProfile(api) {
+    const storedWaiterName = (await AsyncStorage.getItem(STORAGE_WAITER_KEY)) ?? '';
+    if (!storedWaiterName.trim()) {
+      setWaiterName('');
+      setWaiterDraft('');
+      setWaiterConfigured(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${api}/api/waiters/validate?name=${encodeURIComponent(storedWaiterName)}`);
+      const payload = await response.json();
+
+      if (!response.ok || !payload.authorized) {
+        await AsyncStorage.removeItem(STORAGE_WAITER_KEY);
+        setWaiterName('');
+        setWaiterDraft('');
+        setWaiterConfigured(false);
+        setStatus('El mesero guardado ya no esta autorizado. Registralo de nuevo en la laptop.');
+        return;
+      }
+
+      const displayName = payload.waiter?.displayName ?? storedWaiterName.trim();
+      setWaiterName(displayName);
+      setWaiterDraft(displayName);
+      setWaiterConfigured(true);
+    } catch {
+      setWaiterName(storedWaiterName.trim());
+      setWaiterDraft(storedWaiterName.trim());
+      setWaiterConfigured(true);
+    }
+  }
+
+  async function saveWaiterProfile() {
+    const nextName = waiterDraft.trim().replace(/\s+/g, ' ');
+    if (!nextName) {
+      setStatus('Escribe el nombre del mesero.');
+      return;
+    }
+
+    if (!apiUrl) {
+      setStatus('La app aun no encuentra la laptop en la red.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch(`${apiUrl}/api/waiters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nextName })
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message ?? 'No se pudo autorizar el mesero.');
+      }
+
+      const displayName = payload.displayName ?? nextName;
+      await AsyncStorage.setItem(STORAGE_WAITER_KEY, displayName);
+      setWaiterName(displayName);
+      setWaiterDraft(displayName);
+      setWaiterConfigured(true);
+      setShowWaiterSettings(false);
+      setStatus(`Mesero autorizado: ${displayName}`);
+    } catch (error) {
+      setStatus(error.message);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
@@ -136,6 +275,8 @@ export default function App() {
         setStatus('Buscando laptop en la red WiFi...');
         const discoveredApi = await discoverServer();
         setApiUrl(discoveredApi);
+        await syncWaiterProfile(discoveredApi);
+        await loadDraftOrder();
         setStatus(`Conectado a ${discoveredApi}`);
       } catch (error) {
         setStatus(error.message);
@@ -149,14 +290,54 @@ export default function App() {
 
   useEffect(() => {
     if (!apiUrl) return;
-    loadMenu();
+    setLoading(true);
+    Promise.all([loadMenu(), loadOpenOrders()]).finally(() => setLoading(false));
   }, [apiUrl]);
+
+  useEffect(() => {
+    if (clientName || tableNumber || Object.keys(quantities).length > 0) {
+      saveDraftOrder();
+    }
+  }, [clientName, tableNumber]);
 
   function changeQuantity(id, delta) {
     setQuantities((current) => {
       const next = Math.max(0, Number(current[id] ?? 0) + delta);
-      return { ...current, [id]: next === 0 ? undefined : next };
+      const updated = { ...current, [id]: next === 0 ? undefined : next };
+      saveDraftOrder();
+      return updated;
     });
+  }
+
+  function startOrderEdition(order) {
+    const nextQuantities = order.items.reduce((acc, item) => {
+      acc[item.menuItemId] = Number(item.quantity) || 0;
+      return acc;
+    }, {});
+
+    setSelectedOrderId(order.id);
+    setClientName(order.clientName ?? '');
+    setTableNumber(order.tableNumber ?? '');
+    setQuantities(nextQuantities);
+    setStatus(`Editando ${order.id}. Los cambios actualizaran la misma cuenta.`);
+  }
+
+  function resetDraft() {
+    setSelectedOrderId(null);
+    setClientName('');
+    setTableNumber('');
+    setQuantities({});
+    clearDraftOrder();
+  }
+
+  function openWaiterSettings() {
+    setWaiterDraft(waiterName);
+    setShowWaiterSettings(true);
+  }
+
+  function closeWaiterSettings() {
+    setWaiterDraft(waiterName);
+    setShowWaiterSettings(false);
   }
 
   async function submitOrder() {
@@ -164,8 +345,18 @@ export default function App() {
       .filter(([, quantity]) => Number(quantity) > 0)
       .map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) }));
 
-    if (!waiterName.trim() || !clientName.trim() || !tableNumber.trim() || items.length === 0) {
-      setStatus('Completa mesero, cliente, mesa y al menos un plato.');
+    if (!waiterConfigured || !waiterName.trim()) {
+      setStatus('Primero registra y autoriza el mesero de este dispositivo.');
+      return;
+    }
+
+    if (!clientName.trim() || !tableNumber.trim() || items.length === 0) {
+      setStatus('Completa cliente, mesa y al menos un producto.');
+      return;
+    }
+
+    if (!TABLE_OPTIONS.includes(tableNumber)) {
+      setStatus('Selecciona una mesa valida entre 1 y 16.');
       return;
     }
 
@@ -175,29 +366,48 @@ export default function App() {
     }
 
     setSubmitting(true);
-    setStatus('Enviando comanda...');
+    setStatus(selectedOrderId ? 'Actualizando comanda...' : 'Enviando comanda...');
 
     try {
-      const response = await fetch(`${apiUrl}/api/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waiterName, clientName, tableNumber, items })
-      });
+      const response = await fetch(
+        selectedOrderId ? `${apiUrl}/api/orders/${selectedOrderId}` : `${apiUrl}/api/orders`,
+        {
+          method: selectedOrderId ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ waiterName, clientName, tableNumber, items })
+        }
+      );
 
       const payload = await response.json();
 
       if (!response.ok) {
+        if (response.status === 403) {
+          await AsyncStorage.removeItem(STORAGE_WAITER_KEY);
+          setWaiterName('');
+          setWaiterDraft('');
+          setWaiterConfigured(false);
+        }
         throw new Error(payload.message ?? 'No se pudo enviar la comanda.');
       }
 
-      setClientName('');
-      setTableNumber('');
-      setWaiterName('');
-      setQuantities({});
+      const wasEditing = Boolean(selectedOrderId);
+      resetDraft();
+      await loadOpenOrders();
       setStatus(
-        payload.printer?.printed ? 'Comanda enviada y ticket impreso.' : 'Comanda enviada.'
+        wasEditing
+          ? 'Comanda actualizada en la laptop.'
+          : payload.printer?.printed
+            ? 'Comanda enviada y ticket impreso.'
+            : 'Comanda enviada.'
       );
-      Alert.alert('Pedido enviado', payload.printer?.printed ? 'Ticket de cocina impreso.' : 'Pedido recibido por la caja.');
+      Alert.alert(
+        wasEditing ? 'Comanda actualizada' : 'Pedido enviado',
+        wasEditing
+          ? 'La cuenta se actualizo sin crear una nueva.'
+          : payload.printer?.printed
+            ? 'Ticket de cocina impreso.'
+            : 'Pedido recibido por la caja.'
+      );
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -215,15 +425,74 @@ export default function App() {
         </View>
 
         <View style={styles.formCard}>
+          <Text style={styles.sectionTitle}>Mesero del dispositivo</Text>
+          <Text style={styles.serverBadge}>Este nombre se guarda una sola vez y viaja con cada comanda.</Text>
+          {waiterConfigured ? (
+            <View style={styles.waiterBanner}>
+              <Text style={styles.waiterBannerText}>Conectado como {waiterName}</Text>
+              <Pressable style={styles.waiterChangeButton} onPress={openWaiterSettings}>
+                <Text style={styles.waiterChangeButtonText}>Ajustes</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <TextInput
+                value={waiterDraft}
+                onChangeText={setWaiterDraft}
+                placeholder="Nombre del mesero"
+                placeholderTextColor="#8c7d6f"
+                style={styles.input}
+              />
+              <Pressable style={styles.primaryButton} onPress={saveWaiterProfile} disabled={submitting}>
+                <Text style={styles.primaryButtonText}>{submitting ? 'Guardando...' : 'Autorizar mesero'}</Text>
+              </Pressable>
+            </>
+          )}
+          {showWaiterSettings ? (
+            <View style={styles.waiterSettingsCard}>
+              <Text style={styles.waiterSettingsTitle}>Ajustes del mesero</Text>
+              <TextInput
+                value={waiterDraft}
+                onChangeText={setWaiterDraft}
+                placeholder="Nuevo nombre del mesero"
+                placeholderTextColor="#8c7d6f"
+                style={styles.input}
+              />
+              <View style={styles.waiterSettingsActions}>
+                <Pressable style={styles.primaryButton} onPress={saveWaiterProfile} disabled={submitting}>
+                  <Text style={styles.primaryButtonText}>{submitting ? 'Guardando...' : 'Guardar cambio'}</Text>
+                </Pressable>
+                <Pressable style={styles.secondaryButton} onPress={closeWaiterSettings}>
+                  <Text style={styles.secondaryButtonText}>Cerrar</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.formCard}>
           <Text style={styles.sectionTitle}>Datos de la comanda</Text>
           <Text style={styles.serverBadge}>Servidor: {apiUrl || 'Detectando laptop...'}</Text>
-          <TextInput
-            value={waiterName}
-            onChangeText={setWaiterName}
-            placeholder="Nombre del mesero"
-            placeholderTextColor="#8c7d6f"
-            style={styles.input}
-          />
+          {hasDraft && !editingOrder ? (
+            <View style={styles.draftBanner}>
+              <View>
+                <Text style={styles.draftBannerTitle}>📝 Comanda en progreso</Text>
+                <Text style={styles.draftBannerText}>Tienes una comanda sin enviar.</Text>
+              </View>
+              <Pressable style={styles.discardDraftButton} onPress={resetDraft}>
+                <Text style={styles.discardDraftButtonText}>Descartar</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {editingOrder ? (
+            <View style={styles.editBanner}>
+              <Text style={styles.editBannerText}>Editando {editingOrder.id}</Text>
+              <Pressable style={styles.cancelEditButton} onPress={resetDraft}>
+                <Text style={styles.cancelEditButtonText}>Cancelar</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          <Text style={styles.waiterHint}>Mesero activo: {waiterName || 'sin autorizar'}</Text>
           <TextInput
             value={clientName}
             onChangeText={setClientName}
@@ -233,44 +502,82 @@ export default function App() {
           />
           <TextInput
             value={tableNumber}
-            onChangeText={setTableNumber}
-            placeholder="Mesa"
+            editable={false}
+            placeholder="Selecciona mesa"
             placeholderTextColor="#8c7d6f"
             style={styles.input}
-            keyboardType="numeric"
           />
+          <View style={styles.tableGrid}>
+            {TABLE_OPTIONS.map((table) => (
+              <Pressable
+                key={table}
+                style={[styles.tableChip, tableNumber === table ? styles.tableChipActive : null]}
+                onPress={() => setTableNumber(table)}
+              >
+                <Text style={[styles.tableChipText, tableNumber === table ? styles.tableChipTextActive : null]}>
+                  Mesa {table}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.formCard}>
+          <View style={styles.openOrdersHeader}>
+            <Text style={styles.sectionTitle}>Comandas abiertas</Text>
+            <Pressable onPress={loadOpenOrders}>
+              <Text style={styles.refreshOrdersText}>Actualizar</Text>
+            </Pressable>
+          </View>
+          {pendingOrders.length === 0 ? (
+            <Text style={styles.serverBadge}>No hay comandas pendientes para editar.</Text>
+          ) : (
+            <View style={styles.openOrdersGrid}>
+              {pendingOrders.map((order) => (
+                <Pressable
+                  key={order.id}
+                  style={[styles.openOrderCard, selectedOrderId === order.id ? styles.openOrderCardActive : null]}
+                  onPress={() => startOrderEdition(order)}
+                >
+                  <Text style={styles.openOrderTitle}>{order.clientName}</Text>
+                  <Text style={styles.openOrderMeta}>{order.id} · Mesa {order.tableNumber}</Text>
+                  <Text style={styles.openOrderMeta}>{order.items.length} items</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={styles.menuHeader}>
-          <Text style={styles.sectionTitle}>Menu sin precios</Text>
+          <Text style={styles.sectionTitle}>Menu por secciones</Text>
           <Text style={styles.counter}>{selectedCount} items</Text>
         </View>
 
         {loading || connecting ? <ActivityIndicator color="#1f8f73" /> : null}
 
-        <FlatList
-          data={menu}
-          keyExtractor={(item) => item.id}
-          scrollEnabled={false}
-          renderItem={({ item }) => (
-            <View style={styles.menuCard}>
-              <View style={styles.menuMeta}>
-                <Text style={styles.category}>{item.category}</Text>
-                <Text style={styles.dishName}>{item.name}</Text>
-              </View>
+        {menuSections.map((section) => (
+          <View key={section.category} style={styles.sectionCard}>
+            <Text style={styles.sectionCategory}>{section.category}</Text>
+            {section.items.map((item) => (
+              <View key={item.id} style={styles.menuCard}>
+                <View style={styles.menuMeta}>
+                  <Text style={styles.dishName}>{item.name}</Text>
+                  <Text style={styles.price}>{formatCurrency(Number(item.price) || 0)}</Text>
+                </View>
 
-              <View style={styles.quantityRow}>
-                <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, -1)}>
-                  <Text style={styles.quantityButtonText}>-</Text>
-                </Pressable>
-                <Text style={styles.quantityValue}>{quantities[item.id] ?? 0}</Text>
-                <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, 1)}>
-                  <Text style={styles.quantityButtonText}>+</Text>
-                </Pressable>
+                <View style={styles.quantityRow}>
+                  <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, -1)}>
+                    <Text style={styles.quantityButtonText}>-</Text>
+                  </Pressable>
+                  <Text style={styles.quantityValue}>{quantities[item.id] ?? 0}</Text>
+                  <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, 1)}>
+                    <Text style={styles.quantityButtonText}>+</Text>
+                  </Pressable>
+                </View>
               </View>
-            </View>
-          )}
-        />
+            ))}
+          </View>
+        ))}
 
         <View style={styles.actionCard}>
           <View>
@@ -278,7 +585,9 @@ export default function App() {
             <Text style={styles.statusText}>{status || 'Lista para enviar'}</Text>
           </View>
           <Pressable style={styles.primaryButton} onPress={submitOrder} disabled={submitting}>
-            <Text style={styles.primaryButtonText}>{submitting ? 'Enviando...' : 'Enviar comanda'}</Text>
+            <Text style={styles.primaryButtonText}>
+              {submitting ? 'Guardando...' : selectedOrderId ? 'Guardar cambios de comanda' : 'Enviar comanda'}
+            </Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -345,13 +654,208 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700'
   },
+  waiterBanner: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#cfe8df',
+    backgroundColor: '#eefaf5',
+    padding: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10
+  },
+  waiterBannerText: {
+    flex: 1,
+    color: '#145f4b',
+    fontWeight: '800'
+  },
+  waiterChangeButton: {
+    backgroundColor: '#2f2319',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  waiterChangeButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  waiterSettingsCard: {
+    marginTop: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e6d6c4',
+    backgroundColor: '#fffdf9',
+    padding: 12,
+    gap: 10
+  },
+  waiterSettingsTitle: {
+    color: '#2c221c',
+    fontWeight: '800',
+    fontSize: 14
+  },
+  waiterSettingsActions: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap'
+  },
+  secondaryButton: {
+    backgroundColor: '#f2e7db',
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    alignItems: 'center'
+  },
+  secondaryButtonText: {
+    color: '#2f2319',
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  waiterHint: {
+    color: '#6f5e4d',
+    fontWeight: '700',
+    paddingVertical: 2
+  },
+  editBanner: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#f3c89e',
+    backgroundColor: '#fff2e5',
+    padding: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10
+  },
+  editBannerText: {
+    color: '#8b4d1d',
+    fontWeight: '800',
+    flex: 1
+  },
+  cancelEditButton: {
+    backgroundColor: '#2f2319',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  cancelEditButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12
+  },
+  draftBanner: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#c9d8e6',
+    backgroundColor: '#eef3f9',
+    padding: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10
+  },
+  draftBannerTitle: {
+    color: '#0d4a8f',
+    fontWeight: '800',
+    fontSize: 14
+  },
+  draftBannerText: {
+    color: '#2c5aa0',
+    fontWeight: '600',
+    fontSize: 12,
+    marginTop: 2
+  },
+  discardDraftButton: {
+    backgroundColor: '#d32f2f',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  discardDraftButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12
+  },
+  openOrdersHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  refreshOrdersText: {
+    color: '#1f8f73',
+    fontWeight: '800'
+  },
+  openOrdersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  openOrderCard: {
+    borderWidth: 1,
+    borderColor: '#dcc8b3',
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: '#fff',
+    minWidth: '48%'
+  },
+  openOrderCardActive: {
+    borderColor: '#f08a24',
+    backgroundColor: '#fff3e6'
+  },
+  openOrderTitle: {
+    color: '#231a15',
+    fontWeight: '800'
+  },
+  openOrderMeta: {
+    marginTop: 2,
+    color: '#6f5e4d',
+    fontSize: 12,
+    fontWeight: '700'
+  },
   menuHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center'
   },
+  tableGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  tableChip: {
+    borderWidth: 1,
+    borderColor: '#dcc8b3',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#fff'
+  },
+  tableChipActive: {
+    backgroundColor: '#2f2319',
+    borderColor: '#2f2319'
+  },
+  tableChipText: {
+    color: '#2f2319',
+    fontWeight: '700',
+    fontSize: 12
+  },
+  tableChipTextActive: {
+    color: '#fff'
+  },
   counter: {
     color: '#1f8f73',
+    fontWeight: '800'
+  },
+  sectionCard: {
+    gap: 8,
+    marginBottom: 6
+  },
+  sectionCategory: {
+    color: '#8f6d45',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    fontSize: 12,
     fontWeight: '800'
   },
   menuCard: {
@@ -363,20 +867,22 @@ const styles = StyleSheet.create({
     borderColor: '#eadaca'
   },
   menuMeta: {
-    marginBottom: 10
-  },
-  category: {
-    color: '#8f6d45',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    fontSize: 11,
-    fontWeight: '700'
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    alignItems: 'flex-start'
   },
   dishName: {
+    flex: 1,
     fontSize: 16,
     fontWeight: '700',
-    color: '#231a15',
-    marginTop: 4
+    color: '#231a15'
+  },
+  price: {
+    color: '#1f8f73',
+    fontWeight: '800',
+    fontSize: 14
   },
   quantityRow: {
     flexDirection: 'row',

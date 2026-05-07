@@ -102,6 +102,14 @@ Ese boton de impresion automatica ya esta disponible en la tarjeta `Impresion au
 
 La app movil ya esta configurada para sacar APK instalable directo en Android.
 
+Inicializacion de una sola vez (obligatoria):
+
+```bash
+npm run apk:init
+```
+
+Eso vincula el proyecto con tu cuenta Expo/EAS.
+
 1. Ejecuta:
 
 ```bash

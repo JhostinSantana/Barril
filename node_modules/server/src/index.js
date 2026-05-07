@@ -1,20 +1,24 @@
-import express from 'express';
 import cors from 'cors';
+import express from 'express';
+import { nanoid } from 'nanoid';
 import { createServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { Server } from 'socket.io';
-import { nanoid } from 'nanoid';
 import {
-  createOrder,
-  getMenu,
-  getOrderById,
-  getRestaurantName,
-  getSetting,
-  initializeDatabase,
-  listOrders,
-  listOrdersByDate,
-  setSetting,
-  updateOrderPayment
+    addOrderPayment,
+    createOrder,
+    getMenu,
+    getOrderById,
+    getRestaurantName,
+    getSetting,
+    getWaiterByName,
+    initializeDatabase,
+    listOrders,
+    listOrdersByDate,
+    listWaiters,
+    setSetting,
+    setWaiterActive,
+    updateOrderWithItems
 } from './database.js';
 import { printKitchenTicket } from './printer.js';
 import { calculateOrderTotal, getCashClose, getStats, summarizeItems } from './utils.js';
@@ -111,12 +115,76 @@ app.get('/api/orders/history', async (req, res, next) => {
   }
 });
 
+app.get('/api/waiters', async (_, res, next) => {
+  try {
+    res.json(await listWaiters());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/waiters/validate', async (req, res, next) => {
+  try {
+    const name = req.query.name?.toString() ?? '';
+    const waiter = await getWaiterByName(name);
+    res.json({
+      authorized: Boolean(waiter && Number(waiter.active) === 1),
+      waiter
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/waiters', async (req, res, next) => {
+  try {
+    const name = req.body?.name?.toString() ?? '';
+    if (!name.trim()) {
+      res.status(400).json({ message: 'El nombre del mesero es requerido.' });
+      return;
+    }
+
+    const waiter = await setWaiterActive(name, true);
+    if (!waiter) {
+      res.status(400).json({ message: 'No se pudo registrar el mesero.' });
+      return;
+    }
+
+    res.status(201).json(waiter);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/waiters/:waiterName', async (req, res, next) => {
+  try {
+    const waiterName = req.params.waiterName?.toString() ?? '';
+    const active = Boolean(req.body?.active);
+    const waiter = await setWaiterActive(waiterName, active);
+
+    if (!waiter) {
+      res.status(404).json({ message: 'Mesero no encontrado.' });
+      return;
+    }
+
+    res.json(waiter);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/orders', async (req, res, next) => {
   try {
     const { clientName, tableNumber, waiterName, items } = req.body;
 
     if (!clientName || !tableNumber || !waiterName || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ message: 'Debe enviar nombre del cliente, mesa, mesero y al menos un producto.' });
+      return;
+    }
+
+    const waiter = await getWaiterByName(waiterName);
+    if (!waiter || Number(waiter.active) !== 1) {
+      res.status(403).json({ message: 'Mesero no autorizado. Solicite activacion en la laptop.' });
       return;
     }
 
@@ -148,6 +216,68 @@ app.post('/api/orders', async (req, res, next) => {
   }
 });
 
+app.patch('/api/orders/:orderId', async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const { clientName, tableNumber, waiterName, items } = req.body;
+
+    if (!clientName || !tableNumber || !waiterName || !Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ message: 'Debe enviar nombre del cliente, mesa, mesero y al menos un producto.' });
+      return;
+    }
+
+    const waiter = await getWaiterByName(waiterName);
+    if (!waiter || Number(waiter.active) !== 1) {
+      res.status(403).json({ message: 'Mesero no autorizado. Solicite activacion en la laptop.' });
+      return;
+    }
+
+    const currentOrder = await getOrderById(orderId);
+    if (!currentOrder) {
+      res.status(404).json({ message: 'Cuenta no encontrada.' });
+      return;
+    }
+
+    if (currentOrder.status === 'paid') {
+      res.status(409).json({ message: 'La cuenta ya esta pagada y no se puede modificar.' });
+      return;
+    }
+
+    const menu = await getMenu();
+    const normalizedItems = items.map((item) => ({
+      menuItemId: item.menuItemId,
+      quantity: Number(item.quantity) || 1
+    }));
+
+    const total = calculateOrderTotal(normalizedItems, menu);
+    const updatedOrder = await updateOrderWithItems(orderId, {
+      clientName,
+      tableNumber,
+      waiterName,
+      total,
+      items: summarizeItems(normalizedItems, menu)
+    });
+
+    io.emit('order:updated', updatedOrder);
+    if (updatedOrder.status === 'paid') {
+      io.emit('order:paid', updatedOrder);
+    }
+    res.json(updatedOrder);
+  } catch (error) {
+    if (error?.code === 'ORDER_LOCKED') {
+      res.status(409).json({ message: error.message });
+      return;
+    }
+
+    if (error?.code === 'PAID_AMOUNT_EXCEEDS_TOTAL') {
+      res.status(409).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
 app.post('/api/orders/:orderId/print', async (req, res, next) => {
   try {
     const { orderId } = req.params;
@@ -168,7 +298,7 @@ app.post('/api/orders/:orderId/print', async (req, res, next) => {
 app.patch('/api/orders/:orderId/pay', async (req, res, next) => {
   try {
     const { orderId } = req.params;
-    const { paymentMethod } = req.body;
+    const { paymentMethod, amount, tenderedAmount } = req.body;
 
     if (!['efectivo', 'transferencia'].includes(paymentMethod)) {
       res.status(400).json({ message: 'Metodo de pago invalido.' });
@@ -181,17 +311,53 @@ app.patch('/api/orders/:orderId/pay', async (req, res, next) => {
       return;
     }
 
+    if (order.balanceDue <= 0) {
+      res.status(400).json({ message: 'La cuenta ya esta completamente pagada.' });
+      return;
+    }
+
+    const requestedAmount = amount != null ? Number(amount) : order.balanceDue;
+    const normalizedAmount = Math.round((requestedAmount + Number.EPSILON) * 100) / 100;
+    const maxAmount = Math.round((order.balanceDue + Number.EPSILON) * 100) / 100;
+
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      res.status(400).json({ message: 'El monto del abono debe ser mayor a cero.' });
+      return;
+    }
+
+    if (normalizedAmount > maxAmount) {
+      res.status(400).json({ message: 'El abono no puede superar el saldo pendiente.' });
+      return;
+    }
+
+    const normalizedTendered = paymentMethod === 'efectivo'
+      ? Math.round(((Number(tenderedAmount ?? normalizedAmount)) + Number.EPSILON) * 100) / 100
+      : normalizedAmount;
+
+    if (!Number.isFinite(normalizedTendered) || normalizedTendered < normalizedAmount) {
+      res.status(400).json({ message: 'En efectivo, el valor recibido no puede ser menor al abono.' });
+      return;
+    }
+
+    const changeGiven = paymentMethod === 'efectivo'
+      ? Math.round((Math.max(normalizedTendered - normalizedAmount, 0) + Number.EPSILON) * 100) / 100
+      : 0;
+
     const paidAt = new Date().toISOString();
-    await updateOrderPayment(orderId, paymentMethod, paidAt);
-
-    const updatedOrder = {
-      ...order,
-      status: 'paid',
+    const updatedOrder = await addOrderPayment(
+      orderId,
       paymentMethod,
+      normalizedAmount,
+      normalizedTendered,
+      changeGiven,
       paidAt
-    };
+    );
 
-    io.emit('order:paid', updatedOrder);
+    io.emit('order:updated', updatedOrder);
+    if (updatedOrder.status === 'paid') {
+      io.emit('order:paid', updatedOrder);
+    }
+
     res.json(updatedOrder);
   } catch (error) {
     next(error);

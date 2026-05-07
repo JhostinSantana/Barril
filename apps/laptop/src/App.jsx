@@ -7,15 +7,24 @@ const navItems = [
   { id: 'stats', label: 'Estadistica' },
   { id: 'cash', label: 'Cierre de caja' },
   { id: 'history', label: 'Dias anteriores' },
+  { id: 'waiters', label: 'Meseros' },
   { id: 'network', label: 'Conectividad' }
 ];
 
 function formatCurrency(value) {
-  return new Intl.NumberFormat('es-CO', {
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
   }).format(value ?? 0);
+}
+
+function parseMoneyInput(rawValue) {
+  const cleaned = `${rawValue ?? ''}`.replace(',', '.').replace(/[^\d.]/g, '');
+  const value = Number(cleaned);
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function getTodayRange() {
@@ -31,13 +40,38 @@ function getApiBaseUrl() {
   return `${window.location.protocol}//${window.location.hostname}:4000`;
 }
 
+function getStatusLabel(status) {
+  if (status === 'paid') return 'Pagada';
+  if (status === 'partial') return 'Abonada';
+  return 'Pendiente';
+}
+
+function describePayment(order) {
+  const cash = Number(order?.paymentSummary?.efectivo ?? 0);
+  const transfer = Number(order?.paymentSummary?.transferencia ?? 0);
+
+  if (cash > 0 && transfer > 0) {
+    return `Mixto (${formatCurrency(cash)} efectivo + ${formatCurrency(transfer)} transferencia)`;
+  }
+  if (cash > 0) return `Efectivo (${formatCurrency(cash)})`;
+  if (transfer > 0) return `Transferencia (${formatCurrency(transfer)})`;
+  return 'Sin pago';
+}
+
 function App() {
   const [activeView, setActiveView] = useState('cash');
   const [restaurantName, setRestaurantName] = useState('Asados en el Barril');
   const [pendingOrders, setPendingOrders] = useState([]);
   const [paidOrders, setPaidOrders] = useState([]);
+  const [waiters, setWaiters] = useState([]);
+  const [waiterNameDraft, setWaiterNameDraft] = useState('');
   const [query, setQuery] = useState('');
   const [payingOrder, setPayingOrder] = useState(null);
+  const [paymentDraft, setPaymentDraft] = useState({
+    paymentMethod: 'efectivo',
+    amount: '',
+    tenderedAmount: ''
+  });
   const [stats, setStats] = useState({ totalOrders: 0, totalPaidOrders: 0, totalSales: 0, topDishes: [] });
   const [cashClose, setCashClose] = useState({ date: '', total: 0, efectivo: 0, transferencia: 0, orders: 0 });
   const [historyDate, setHistoryDate] = useState(new Date().toISOString().slice(0, 10));
@@ -47,6 +81,7 @@ function App() {
   const [networkInfo, setNetworkInfo] = useState({ localIp: '', localApiUrl: '', publicApiUrl: '' });
   const [publicApiDraft, setPublicApiDraft] = useState('');
   const [networkStatus, setNetworkStatus] = useState('');
+  const [waiterStatus, setWaiterStatus] = useState('');
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
 
   const filteredPending = useMemo(() => {
@@ -59,6 +94,76 @@ function App() {
         order.tableNumber.toLowerCase().includes(q)
     );
   }, [pendingOrders, query]);
+
+  const paymentPreview = useMemo(() => {
+    if (!payingOrder) {
+      return {
+        paidAmount: 0,
+        balanceDue: 0,
+        amount: 0,
+        tenderedAmount: 0,
+        changeDue: 0,
+        canSubmit: false,
+        submitMessage: ''
+      };
+    }
+
+    const paidAmount = Number(payingOrder.paidAmount ?? 0);
+    const balanceDue = Number(payingOrder.balanceDue ?? Math.max(payingOrder.total - paidAmount, 0));
+    const amount = parseMoneyInput(paymentDraft.amount || `${balanceDue}`);
+    const tenderedAmount = paymentDraft.paymentMethod === 'efectivo'
+      ? parseMoneyInput(paymentDraft.tenderedAmount || `${amount}`)
+      : amount;
+    const changeDue = paymentDraft.paymentMethod === 'efectivo'
+      ? Math.max(tenderedAmount - amount, 0)
+      : 0;
+
+    if (amount <= 0) {
+      return {
+        paidAmount,
+        balanceDue,
+        amount,
+        tenderedAmount,
+        changeDue,
+        canSubmit: false,
+        submitMessage: 'El abono debe ser mayor a 0.'
+      };
+    }
+
+    if (amount > balanceDue) {
+      return {
+        paidAmount,
+        balanceDue,
+        amount,
+        tenderedAmount,
+        changeDue,
+        canSubmit: false,
+        submitMessage: 'El abono no puede superar el saldo pendiente.'
+      };
+    }
+
+    if (paymentDraft.paymentMethod === 'efectivo' && tenderedAmount < amount) {
+      return {
+        paidAmount,
+        balanceDue,
+        amount,
+        tenderedAmount,
+        changeDue,
+        canSubmit: false,
+        submitMessage: 'En efectivo, recibido debe ser >= abono.'
+      };
+    }
+
+    return {
+      paidAmount,
+      balanceDue,
+      amount,
+      tenderedAmount,
+      changeDue,
+      canSubmit: true,
+      submitMessage: ''
+    };
+  }, [payingOrder, paymentDraft]);
 
   async function getJson(url, options) {
     const response = await fetch(url, options);
@@ -93,18 +198,87 @@ function App() {
     setStats(result);
   }
 
+  async function loadWaiters() {
+    const result = await getJson('/api/waiters');
+    setWaiters(Array.isArray(result) ? result : []);
+  }
+
+  async function saveWaiter() {
+    const name = waiterNameDraft.trim().replace(/\s+/g, ' ');
+    if (!name) {
+      setWaiterStatus('Escribe el nombre del mesero.');
+      return;
+    }
+
+    const result = await getJson('/api/waiters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+
+    setWaiterNameDraft('');
+    setWaiterStatus(`Mesero autorizado: ${result.displayName}`);
+    await loadWaiters();
+  }
+
+  async function toggleWaiterActive(waiter, active) {
+    await getJson(`/api/waiters/${encodeURIComponent(waiter.displayName)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active })
+    });
+
+    setWaiterStatus(active ? 'Mesero reactivado.' : 'Mesero desactivado.');
+    await loadWaiters();
+  }
+
   async function loadHistoryView(date) {
     const result = await getJson(`/api/orders/history?date=${date}`);
     setHistoryOrders(result);
   }
 
-  async function payOrder(orderId, paymentMethod) {
-    await getJson(`/api/orders/${orderId}/pay`, {
+  function openPayModal(order) {
+    const balanceDue = Number(order.balanceDue ?? Math.max(order.total - Number(order.paidAmount ?? 0), 0));
+    setPayingOrder(order);
+    setPaymentDraft({
+      paymentMethod: 'efectivo',
+      amount: `${balanceDue}`,
+      tenderedAmount: `${balanceDue}`
+    });
+  }
+
+  function closePayModal() {
+    setPayingOrder(null);
+    setPaymentDraft({ paymentMethod: 'efectivo', amount: '', tenderedAmount: '' });
+  }
+
+  async function registerPayment() {
+    if (!payingOrder || !paymentPreview.canSubmit) return;
+
+    const payload = {
+      paymentMethod: paymentDraft.paymentMethod,
+      amount: paymentPreview.amount,
+      tenderedAmount: paymentDraft.paymentMethod === 'efectivo' ? paymentPreview.tenderedAmount : undefined
+    };
+
+    const updatedOrder = await getJson(`/api/orders/${payingOrder.id}/pay`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentMethod })
+      body: JSON.stringify(payload)
     });
-    setPayingOrder(null);
+
+    if (updatedOrder.status === 'paid') {
+      closePayModal();
+    } else {
+      const nextBalance = Number(updatedOrder.balanceDue ?? 0);
+      setPayingOrder(updatedOrder);
+      setPaymentDraft((current) => ({
+        ...current,
+        amount: `${nextBalance}`,
+        tenderedAmount: `${nextBalance}`
+      }));
+    }
+
     await Promise.all([loadCashView(), loadStatsView(), loadHistoryView(historyDate)]);
   }
 
@@ -193,6 +367,11 @@ function App() {
       loadStatsView();
       loadHistoryView(historyDate);
     });
+    socket.on('order:updated', () => {
+      loadCashView();
+      loadStatsView();
+      loadHistoryView(historyDate);
+    });
     socket.on('order:paid', () => {
       loadCashView();
       loadStatsView();
@@ -202,10 +381,12 @@ function App() {
     loadCashView();
     loadStatsView();
     loadHistoryView(historyDate);
+  loadWaiters();
     loadNetworkInfo();
 
     return () => {
       socket.off('order:new');
+      socket.off('order:updated');
       socket.off('order:paid');
       socket.disconnect();
     };
@@ -282,6 +463,7 @@ function App() {
                   </div>
                   <h4>{order.clientName}</h4>
                   <p>Mesero: {order.waiterName}</p>
+                  <p>Estado: {getStatusLabel(order.status)}</p>
                   <ul>
                     {order.items.map((item) => (
                       <li key={`${order.id}-${item.menuItemId}`}>
@@ -289,10 +471,12 @@ function App() {
                       </li>
                     ))}
                   </ul>
-                  <p className="total">{formatCurrency(order.total)}</p>
+                  <p className="total">Total: {formatCurrency(order.total)}</p>
+                  <p>Abonado: {formatCurrency(order.paidAmount ?? 0)}</p>
+                  <p>Saldo: {formatCurrency(order.balanceDue ?? order.total)}</p>
                   <div className="actions">
-                    <button type="button" onClick={() => setPayingOrder(order)}>
-                      Cobrar
+                    <button type="button" onClick={() => openPayModal(order)}>
+                      Cobrar / Abonar
                     </button>
                     <button type="button" className="ghost" onClick={() => printKitchenTicket(order)}>
                       Ticket cocina
@@ -307,9 +491,7 @@ function App() {
               {paidOrders.slice(0, 12).map((order) => (
                 <article key={order.id} className="paid-card">
                   <p>{order.clientName}</p>
-                  <span>
-                    {order.paymentMethod} · {formatCurrency(order.total)}
-                  </span>
+                  <span>{describePayment(order)} · {formatCurrency(order.total)}</span>
                 </article>
               ))}
             </div>
@@ -370,15 +552,74 @@ function App() {
                   </div>
                   <h4>{order.clientName}</h4>
                   <p>Mesero: {order.waiterName}</p>
-                  <p>Estado: {order.status === 'paid' ? 'Pagada' : 'Pendiente'}</p>
-                  <p>Metodo: {order.paymentMethod ?? 'Sin pago'}</p>
-                  <p className="total">{formatCurrency(order.total)}</p>
+                  <p>Estado: {getStatusLabel(order.status)}</p>
+                  <p>Metodo: {describePayment(order)}</p>
+                  <p className="total">Total: {formatCurrency(order.total)}</p>
+                  <p>Abonado: {formatCurrency(order.paidAmount ?? 0)}</p>
                 </article>
               ))}
               {historyOrders.length === 0 ? (
                 <p className="empty">No hay comandas para la fecha seleccionada.</p>
               ) : null}
             </div>
+          </section>
+        ) : null}
+
+        {activeView === 'waiters' ? (
+          <section>
+            <header className="section-header">
+              <h2>Meseros autorizados</h2>
+            </header>
+
+            <div className="card-grid">
+              <article className="order-card">
+                <h4>Autorizar mesero</h4>
+                <p>Un mesero autorizado puede enviar y editar comandas desde un dispositivo movil.</p>
+                <input
+                  value={waiterNameDraft}
+                  onChange={(event) => setWaiterNameDraft(event.target.value)}
+                  placeholder="Nombre del mesero"
+                />
+                <div className="actions">
+                  <button type="button" onClick={saveWaiter}>
+                    Autorizar
+                  </button>
+                </div>
+              </article>
+
+              <article className="order-card">
+                <h4>Estado actual</h4>
+                <p>Activos: {waiters.filter((waiter) => waiter.active).length}</p>
+                <p>Inactivos: {waiters.filter((waiter) => !waiter.active).length}</p>
+              </article>
+            </div>
+
+            <div className="card-grid">
+              {waiters.map((waiter) => (
+                <article key={waiter.waiterKey} className="order-card">
+                  <div className="order-head">
+                    <span>{waiter.displayName}</span>
+                    <span>{waiter.active ? 'Activo' : 'Inactivo'}</span>
+                  </div>
+                  <p>Clave: {waiter.waiterKey}</p>
+                  <p>Actualizado: {new Date(waiter.updatedAt).toLocaleString()}</p>
+                  <div className="actions">
+                    {waiter.active ? (
+                      <button type="button" className="ghost" onClick={() => toggleWaiterActive(waiter, false)}>
+                        Revocar acceso
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => toggleWaiterActive(waiter, true)}>
+                        Reautorizar
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {waiters.length === 0 ? <p className="empty">Aun no hay meseros autorizados.</p> : null}
+            </div>
+
+            {waiterStatus ? <p className="loading">{waiterStatus}</p> : null}
           </section>
         ) : null}
 
@@ -441,19 +682,73 @@ function App() {
       </main>
 
       {payingOrder ? (
-        <div className="modal-backdrop" onClick={() => setPayingOrder(null)}>
+        <div className="modal-backdrop" onClick={closePayModal}>
           <article className="modal" onClick={(event) => event.stopPropagation()}>
-            <h3>Metodo de pago</h3>
+            <h3>Cobro por abonos</h3>
             <p>
               {payingOrder.clientName} · Mesa {payingOrder.tableNumber}
             </p>
-            <p className="total">{formatCurrency(payingOrder.total)}</p>
+
+            <div className="payment-summary">
+              <p>Total: <strong>{formatCurrency(payingOrder.total)}</strong></p>
+              <p>Abonado: <strong>{formatCurrency(paymentPreview.paidAmount)}</strong></p>
+              <p>Saldo pendiente: <strong>{formatCurrency(paymentPreview.balanceDue)}</strong></p>
+            </div>
+
             <div className="actions">
-              <button type="button" onClick={() => payOrder(payingOrder.id, 'efectivo')}>
-                Pagar en efectivo
+              <button
+                type="button"
+                className={paymentDraft.paymentMethod === 'efectivo' ? '' : 'ghost'}
+                onClick={() => setPaymentDraft((current) => ({ ...current, paymentMethod: 'efectivo' }))}
+              >
+                Efectivo
               </button>
-              <button type="button" onClick={() => payOrder(payingOrder.id, 'transferencia')}>
-                Pagar en transferencia
+              <button
+                type="button"
+                className={paymentDraft.paymentMethod === 'transferencia' ? '' : 'ghost'}
+                onClick={() => setPaymentDraft((current) => ({ ...current, paymentMethod: 'transferencia' }))}
+              >
+                Transferencia
+              </button>
+            </div>
+
+            <div className="field-row">
+              <label htmlFor="payment-amount">Monto a abonar</label>
+              <input
+                id="payment-amount"
+                value={paymentDraft.amount}
+                onChange={(event) => setPaymentDraft((current) => ({ ...current, amount: event.target.value }))}
+                placeholder="Ej: 5 o 5.25"
+              />
+            </div>
+
+            {paymentDraft.paymentMethod === 'efectivo' ? (
+              <div className="field-row">
+                <label htmlFor="payment-tendered">Recibido del cliente</label>
+                <input
+                  id="payment-tendered"
+                  value={paymentDraft.tenderedAmount}
+                  onChange={(event) => setPaymentDraft((current) => ({ ...current, tenderedAmount: event.target.value }))}
+                  placeholder="Ej: 10"
+                />
+              </div>
+            ) : null}
+
+            <div className="payment-summary">
+              <p>Abono a registrar: <strong>{formatCurrency(paymentPreview.amount)}</strong></p>
+              {paymentDraft.paymentMethod === 'efectivo' ? (
+                <p>Cambio a entregar: <strong>{formatCurrency(paymentPreview.changeDue)}</strong></p>
+              ) : null}
+            </div>
+
+            {paymentPreview.submitMessage ? <p className="inline-warning">{paymentPreview.submitMessage}</p> : null}
+
+            <div className="actions">
+              <button type="button" onClick={registerPayment} disabled={!paymentPreview.canSubmit}>
+                Registrar abono
+              </button>
+              <button type="button" className="ghost" onClick={closePayModal}>
+                Cerrar
               </button>
             </div>
           </article>
