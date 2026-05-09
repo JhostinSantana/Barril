@@ -359,6 +359,24 @@ export async function createOrder(order) {
       order.createdAt,
       order.paidAt
     ]
+  );
+
+  for (const item of order.items) {
+    await run(
+      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        order.id,
+        item.menuItemId,
+        item.name,
+        item.category,
+        item.quantity,
+        roundMoney(item.unitPrice),
+        roundMoney(item.subtotal)
+      ]
+    );
+  }
+}
 
 export async function updateOrderWithItems(orderId, order) {
   const currentOrder = await getOrderById(orderId);
@@ -425,24 +443,6 @@ export async function updateOrderWithItems(orderId, order) {
   }
 
   return getOrderById(orderId);
-}
-  );
-
-  for (const item of order.items) {
-    await run(
-      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        order.id,
-        item.menuItemId,
-        item.name,
-        item.category,
-        item.quantity,
-        roundMoney(item.unitPrice),
-        roundMoney(item.subtotal)
-      ]
-    );
-  }
 }
 
 export async function listOrders({ status, query } = {}) {
