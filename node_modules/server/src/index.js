@@ -17,6 +17,7 @@ import {
     listOrdersByDate,
     listWaiters,
     setSetting,
+    upsertWaiter,
     setWaiterActive,
     updateOrderWithItems
 } from './database.js';
@@ -144,7 +145,7 @@ app.post('/api/waiters', async (req, res, next) => {
       return;
     }
 
-    const waiter = await setWaiterActive(name, true);
+    const waiter = await upsertWaiter(name, 1);
     if (!waiter) {
       res.status(400).json({ message: 'No se pudo registrar el mesero.' });
       return;
