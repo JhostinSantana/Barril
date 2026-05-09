@@ -19,7 +19,7 @@ const STORAGE_DRAFT_ORDER_KEY = 'barril_draft_order';
 const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
 const TABLE_OPTIONS = Array.from({ length: 16 }, (_, index) => String(index + 1));
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 1200) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 2500) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -51,11 +51,11 @@ function buildCandidates(localIp, gatewayIp) {
 
   const prefix = getLanPrefix(localIp);
   if (prefix) {
-    [2, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240].forEach((suffix) => {
+    for (let suffix = 2; suffix <= 254; suffix++) {
       if (`${prefix}.${suffix}` !== localIp) {
         pushHost(`${prefix}.${suffix}`);
       }
-    });
+    }
   }
 
   return [...new Set(candidates)];
@@ -107,6 +107,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [apiUrl, setApiUrl] = useState('');
+  const [apiDraft, setApiDraft] = useState('');
   const [connecting, setConnecting] = useState(true);
   const [waiterName, setWaiterName] = useState('');
   const [waiterDraft, setWaiterDraft] = useState('');
@@ -166,6 +167,39 @@ export default function App() {
     } catch (error) {
       setStatus(error.message);
     }
+  }
+
+  async function connectToServer(nextApiUrl, options = {}) {
+    const normalizedApiUrl = nextApiUrl.trim().replace(/\/$/, '');
+    if (!normalizedApiUrl) {
+      throw new Error('Escribe la URL del servidor.');
+    }
+
+    let response;
+    try {
+      response = await fetchWithTimeout(`${normalizedApiUrl}/health`);
+    } catch (error) {
+      throw new Error(`No se pudo conectar con ese servidor: ${error.message}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`El servidor respondió con error HTTP ${response.status}.`);
+    }
+
+    const payload = await response.json().catch(() => null);
+    if (payload?.service !== 'asados-en-el-barril-server') {
+      throw new Error('La URL responde, pero no parece ser el servidor de Barril.');
+    }
+
+    if (options.persist) {
+      await AsyncStorage.setItem(STORAGE_API_KEY, normalizedApiUrl);
+    }
+
+    setApiUrl(normalizedApiUrl);
+    setApiDraft(normalizedApiUrl);
+    await syncWaiterProfile(normalizedApiUrl);
+    await loadDraftOrder();
+    return normalizedApiUrl;
   }
 
   async function saveDraftOrder() {
@@ -273,10 +307,12 @@ export default function App() {
       try {
         setConnecting(true);
         setStatus('Buscando laptop en la red WiFi...');
+        const storedApi = await AsyncStorage.getItem(STORAGE_API_KEY);
+        if (storedApi) {
+          setApiDraft(storedApi);
+        }
         const discoveredApi = await discoverServer();
-        setApiUrl(discoveredApi);
-        await syncWaiterProfile(discoveredApi);
-        await loadDraftOrder();
+        await connectToServer(discoveredApi);
         setStatus(`Conectado a ${discoveredApi}`);
       } catch (error) {
         setStatus(error.message);
@@ -287,6 +323,33 @@ export default function App() {
 
     bootstrap();
   }, []);
+
+  async function retryAutoConnection() {
+    setConnecting(true);
+    setStatus('Buscando laptop en la red WiFi...');
+    try {
+      const discoveredApi = await discoverServer();
+      await connectToServer(discoveredApi);
+      setStatus(`Conectado a ${discoveredApi}`);
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function saveManualServer() {
+    setConnecting(true);
+    setStatus('Probando servidor...');
+    try {
+      const normalizedApiUrl = await connectToServer(apiDraft, { persist: true });
+      setStatus(`Conectado a ${normalizedApiUrl}`);
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setConnecting(false);
+    }
+  }
 
   useEffect(() => {
     if (!apiUrl) return;
@@ -473,6 +536,25 @@ export default function App() {
         <View style={styles.formCard}>
           <Text style={styles.sectionTitle}>Datos de la comanda</Text>
           <Text style={styles.serverBadge}>Servidor: {apiUrl || 'Detectando laptop...'}</Text>
+          <View style={styles.connectionTools}>
+            <TextInput
+              value={apiDraft}
+              onChangeText={setApiDraft}
+              placeholder="http://192.168.100.15:4000"
+              placeholderTextColor="#8c7d6f"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+            <View style={styles.connectionActions}>
+              <Pressable style={styles.primaryButton} onPress={saveManualServer} disabled={connecting || submitting}>
+                <Text style={styles.primaryButtonText}>{connecting ? 'Probando...' : 'Usar URL manual'}</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryButton} onPress={retryAutoConnection} disabled={connecting || submitting}>
+                <Text style={styles.secondaryButtonText}>Reintentar búsqueda</Text>
+              </Pressable>
+            </View>
+          </View>
           {hasDraft && !editingOrder ? (
             <View style={styles.draftBanner}>
               <View>
@@ -653,6 +735,14 @@ const styles = StyleSheet.create({
     color: '#6f5e4d',
     fontSize: 12,
     fontWeight: '700'
+  },
+  connectionTools: {
+    gap: 10
+  },
+  connectionActions: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap'
   },
   waiterBanner: {
     borderRadius: 12,
