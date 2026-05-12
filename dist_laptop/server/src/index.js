@@ -169,7 +169,7 @@ app.post('/api/orders/:orderId/print', async (req, res, next) => {
 app.patch('/api/orders/:orderId/pay', async (req, res, next) => {
   try {
     const { orderId } = req.params;
-    const { paymentMethod, amount, tenderedAmount } = req.body;
+    const { paymentMethod, amount, tenderedAmount, transferenceNumber } = req.body;
 
     if (!['efectivo', 'transferencia'].includes(paymentMethod)) {
       res.status(400).json({ message: 'Metodo de pago invalido.' });
@@ -221,7 +221,8 @@ app.patch('/api/orders/:orderId/pay', async (req, res, next) => {
       normalizedAmount,
       normalizedTendered,
       changeGiven,
-      paidAt
+      paidAt,
+      transferenceNumber
     );
 
     io.emit('order:updated', updatedOrder);
