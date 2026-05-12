@@ -162,10 +162,18 @@ export async function initializeDatabase() {
       amount REAL NOT NULL,
       tendered_amount REAL NOT NULL DEFAULT 0,
       change_given REAL NOT NULL DEFAULT 0,
+      transfer_number TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
     )
   `);
+
+  // Add transfer_number column if it doesn't exist (migration for existing databases)
+  try {
+    await run(`ALTER TABLE order_payments ADD COLUMN transfer_number TEXT`);
+  } catch (error) {
+    // Column already exists, ignore error
+  }
 
   await run(`
     CREATE TABLE IF NOT EXISTS waiters (
@@ -495,7 +503,7 @@ export async function getOrderById(orderId) {
   return mapOrderRow(row, items, payments);
 }
 
-export async function addOrderPayment(orderId, paymentMethod, amount, tenderedAmount, changeGiven, paidAt) {
+export async function addOrderPayment(orderId, paymentMethod, amount, tenderedAmount, changeGiven, paidAt, transferenceNumber) {
   const order = await getOrderById(orderId);
   if (!order) return null;
 
@@ -504,9 +512,9 @@ export async function addOrderPayment(orderId, paymentMethod, amount, tenderedAm
   const normalizedChange = roundMoney(changeGiven);
 
   await run(
-    `INSERT INTO order_payments(order_id, payment_method, amount, tendered_amount, change_given, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [orderId, paymentMethod, normalizedAmount, normalizedTendered, normalizedChange, paidAt]
+    `INSERT INTO order_payments(order_id, payment_method, amount, tendered_amount, change_given, transfer_number, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [orderId, paymentMethod, normalizedAmount, normalizedTendered, normalizedChange, transferenceNumber || null, paidAt]
   );
 
   const nextPaidAmount = roundMoney(Math.min(order.total, order.paidAmount + normalizedAmount));
@@ -543,7 +551,7 @@ async function listOrderItems(orderId) {
 
 async function listOrderPayments(orderId) {
   return all(
-    'SELECT id, payment_method AS paymentMethod, amount, tendered_amount AS tenderedAmount, change_given AS changeGiven, created_at AS createdAt FROM order_payments WHERE order_id = ? ORDER BY id ASC',
+    'SELECT id, payment_method AS paymentMethod, amount, tendered_amount AS tenderedAmount, change_given AS changeGiven, transfer_number AS transferenceNumber, created_at AS createdAt FROM order_payments WHERE order_id = ? ORDER BY id ASC',
     [orderId]
   );
 }

@@ -120,6 +120,8 @@ export default function App() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [status, setStatus] = useState('');
   const [hasDraft, setHasDraft] = useState(false);
+  const [showOpenOrders, setShowOpenOrders] = useState(true);
+  const [showConnectionTools, setShowConnectionTools] = useState(true);
 
   const selectedCount = useMemo(
     () => Object.values(quantities).reduce((sum, quantity) => sum + Number(quantity || 0), 0),
@@ -139,6 +141,36 @@ export default function App() {
       items
     }));
   }, [menu]);
+
+  const [menuQuery, setMenuQuery] = useState('');
+  const [collapsedSections, setCollapsedSections] = useState({});
+
+  const filteredMenuSections = useMemo(() => {
+    const q = (menuQuery || '').trim().toLowerCase();
+    if (!q) return menuSections;
+    return menuSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((it) => (it.name || '').toLowerCase().includes(q))
+      }))
+      .filter((s) => (s.items || []).length > 0);
+  }, [menuSections, menuQuery]);
+
+  useEffect(() => {
+    // initialize collapsed state to true (closed) for each category
+    if (!menuSections || menuSections.length === 0) return;
+    setCollapsedSections((cur) => {
+      // if already initialized, keep existing state
+      if (Object.keys(cur).length > 0) return cur;
+      const next = {};
+      for (const s of menuSections) next[s.category] = true;
+      return next;
+    });
+  }, [menuSections]);
+
+  function toggleSection(category) {
+    setCollapsedSections((cur) => ({ ...cur, [category]: !cur[category] }));
+  }
 
   const editingOrder = useMemo(
     () => pendingOrders.find((order) => order.id === selectedOrderId) ?? null,
@@ -534,46 +566,61 @@ export default function App() {
         </View>
 
         <View style={styles.formCard}>
-          <Text style={styles.sectionTitle}>Datos de la comanda</Text>
-          <Text style={styles.serverBadge}>Servidor: {apiUrl || 'Detectando laptop...'}</Text>
-          <View style={styles.connectionTools}>
-            <TextInput
-              value={apiDraft}
-              onChangeText={setApiDraft}
-              placeholder="http://192.168.100.15:4000"
-              placeholderTextColor="#8c7d6f"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-            />
-            <View style={styles.connectionActions}>
-              <Pressable style={styles.primaryButton} onPress={saveManualServer} disabled={connecting || submitting}>
-                <Text style={styles.primaryButtonText}>{connecting ? 'Probando...' : 'Usar URL manual'}</Text>
+          <View style={styles.openOrdersHeader}>
+            <View style={styles.openOrdersActions}>
+              <Pressable onPress={() => setShowConnectionTools(!showConnectionTools)}>
+                <Text style={styles.toggleIcon}>{showConnectionTools ? '▼' : '▶'}</Text>
               </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={retryAutoConnection} disabled={connecting || submitting}>
-                <Text style={styles.secondaryButtonText}>Reintentar búsqueda</Text>
-              </Pressable>
+              <Text style={styles.sectionTitle}>Datos de la comanda</Text>
             </View>
           </View>
-          {hasDraft && !editingOrder ? (
-            <View style={styles.draftBanner}>
-              <View>
-                <Text style={styles.draftBannerTitle}>📝 Comanda en progreso</Text>
-                <Text style={styles.draftBannerText}>Tienes una comanda sin enviar.</Text>
+          {showConnectionTools && (
+            <>
+              <Text style={styles.serverBadge}>Servidor: {apiUrl || 'Detectando laptop...'}</Text>
+              <View style={styles.connectionTools}>
+                <TextInput
+                  value={apiDraft}
+                  onChangeText={setApiDraft}
+                  placeholder="http://192.168.100.15:4000"
+                  placeholderTextColor="#8c7d6f"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.input}
+                />
+                <View style={styles.connectionActions}>
+                  <Pressable style={styles.primaryButton} onPress={saveManualServer} disabled={connecting || submitting}>
+                    <Text style={styles.primaryButtonText}>{connecting ? 'Probando...' : 'Usar URL manual'}</Text>
+                  </Pressable>
+                  <Pressable style={styles.secondaryButton} onPress={retryAutoConnection} disabled={connecting || submitting}>
+                    <Text style={styles.secondaryButtonText}>Reintentar búsqueda</Text>
+                  </Pressable>
+                </View>
               </View>
-              <Pressable style={styles.discardDraftButton} onPress={resetDraft}>
-                <Text style={styles.discardDraftButtonText}>Descartar</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          {editingOrder ? (
-            <View style={styles.editBanner}>
-              <Text style={styles.editBannerText}>Editando {editingOrder.id}</Text>
-              <Pressable style={styles.cancelEditButton} onPress={resetDraft}>
-                <Text style={styles.cancelEditButtonText}>Cancelar</Text>
-              </Pressable>
-            </View>
-          ) : null}
+            </>
+          )}
+          {showConnectionTools && (
+            <>
+              {hasDraft && !editingOrder ? (
+                <View style={styles.draftBanner}>
+                  <View>
+                    <Text style={styles.draftBannerTitle}>📝 Comanda en progreso</Text>
+                    <Text style={styles.draftBannerText}>Tienes una comanda sin enviar.</Text>
+                  </View>
+                  <Pressable style={styles.discardDraftButton} onPress={resetDraft}>
+                    <Text style={styles.discardDraftButtonText}>Descartar</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              {editingOrder ? (
+                <View style={styles.editBanner}>
+                  <Text style={styles.editBannerText}>Editando {editingOrder.id}</Text>
+                  <Pressable style={styles.cancelEditButton} onPress={resetDraft}>
+                    <Text style={styles.cancelEditButtonText}>Cancelar</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </>
+          )}
           <Text style={styles.waiterHint}>Mesero activo: {waiterName || 'sin autorizar'}</Text>
           <TextInput
             value={clientName}
@@ -606,27 +653,36 @@ export default function App() {
 
         <View style={styles.formCard}>
           <View style={styles.openOrdersHeader}>
-            <Text style={styles.sectionTitle}>Comandas abiertas</Text>
+            <View style={styles.openOrdersActions}>
+              <Pressable onPress={() => setShowOpenOrders(!showOpenOrders)}>
+                <Text style={styles.toggleIcon}>{showOpenOrders ? '▼' : '▶'}</Text>
+              </Pressable>
+              <Text style={styles.sectionTitle}>Comandas abiertas</Text>
+            </View>
             <Pressable onPress={loadOpenOrders}>
               <Text style={styles.refreshOrdersText}>Actualizar</Text>
             </Pressable>
           </View>
-          {pendingOrders.length === 0 ? (
-            <Text style={styles.serverBadge}>No hay comandas pendientes para editar.</Text>
-          ) : (
-            <View style={styles.openOrdersGrid}>
-              {pendingOrders.map((order) => (
-                <Pressable
-                  key={order.id}
-                  style={[styles.openOrderCard, selectedOrderId === order.id ? styles.openOrderCardActive : null]}
-                  onPress={() => startOrderEdition(order)}
-                >
-                  <Text style={styles.openOrderTitle}>{order.clientName}</Text>
-                  <Text style={styles.openOrderMeta}>{order.id} · Mesa {order.tableNumber}</Text>
-                  <Text style={styles.openOrderMeta}>{order.items.length} items</Text>
-                </Pressable>
-              ))}
-            </View>
+          {showOpenOrders && (
+            <>
+              {pendingOrders.length === 0 ? (
+                <Text style={styles.serverBadge}>No hay comandas pendientes para editar.</Text>
+              ) : (
+                <View style={styles.openOrdersGrid}>
+                  {pendingOrders.map((order) => (
+                    <Pressable
+                      key={order.id}
+                      style={[styles.openOrderCard, selectedOrderId === order.id ? styles.openOrderCardActive : null]}
+                      onPress={() => startOrderEdition(order)}
+                    >
+                      <Text style={styles.openOrderTitle}>{order.clientName}</Text>
+                      <Text style={styles.openOrderMeta}>{order.id} · Mesa {order.tableNumber}</Text>
+                      <Text style={styles.openOrderMeta}>{order.items.length} items</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </>
           )}
         </View>
 
@@ -635,31 +691,47 @@ export default function App() {
           <Text style={styles.counter}>{selectedCount} items</Text>
         </View>
 
+        <TextInput
+          value={menuQuery}
+          onChangeText={setMenuQuery}
+          placeholder="Buscar plato..."
+          placeholderTextColor="#8c7d6f"
+          style={styles.searchInput}
+        />
+
         {loading || connecting ? <ActivityIndicator color="#1f8f73" /> : null}
 
-        {menuSections.map((section) => (
-          <View key={section.category} style={styles.sectionCard}>
-            <Text style={styles.sectionCategory}>{section.category}</Text>
-            {section.items.map((item) => (
-              <View key={item.id} style={styles.menuCard}>
-                <View style={styles.menuMeta}>
-                  <Text style={styles.dishName}>{item.name}</Text>
-                  <Text style={styles.price}>{formatCurrency(Number(item.price) || 0)}</Text>
-                </View>
+        {filteredMenuSections.map((section) => {
+          const isSearching = (menuQuery || '').trim().length > 0;
+          const isCollapsed = isSearching ? false : (collapsedSections[section.category] ?? true);
+          return (
+            <View key={section.category} style={styles.sectionCard}>
+              <Pressable style={styles.sectionHeaderRow} onPress={() => toggleSection(section.category)}>
+                <Text style={styles.sectionCategory}>{section.category}</Text>
+                <Text style={styles.sectionToggleText}>{isCollapsed ? '+' : '-'}</Text>
+              </Pressable>
 
-                <View style={styles.quantityRow}>
-                  <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, -1)}>
-                    <Text style={styles.quantityButtonText}>-</Text>
-                  </Pressable>
-                  <Text style={styles.quantityValue}>{quantities[item.id] ?? 0}</Text>
-                  <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, 1)}>
-                    <Text style={styles.quantityButtonText}>+</Text>
-                  </Pressable>
+              {!isCollapsed && section.items.map((item) => (
+                <View key={item.id} style={styles.menuCard}>
+                  <View style={styles.menuMeta}>
+                    <Text style={styles.dishName}>{item.name}</Text>
+                    <Text style={styles.price}>{formatCurrency(Number(item.price) || 0)}</Text>
+                  </View>
+
+                  <View style={styles.quantityRow}>
+                    <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, -1)}>
+                      <Text style={styles.quantityButtonText}>-</Text>
+                    </Pressable>
+                    <Text style={styles.quantityValue}>{quantities[item.id] ?? 0}</Text>
+                    <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, 1)}>
+                      <Text style={styles.quantityButtonText}>+</Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            ))}
-          </View>
-        ))}
+              ))}
+            </View>
+          );
+        })}
 
         <View style={styles.actionCard}>
           <View>
@@ -730,6 +802,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     color: '#241c16'
+  },
+  searchInput: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dcc8b3',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#241c16',
+    marginTop: 8,
+    marginBottom: 6
   },
   serverBadge: {
     color: '#6f5e4d',
@@ -872,6 +956,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between'
   },
+  openOrdersActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  toggleIcon: {
+    fontSize: 14,
+    color: '#2f2319',
+    fontWeight: '800',
+    paddingHorizontal: 4
+  },
   refreshOrdersText: {
     color: '#1f8f73',
     fontWeight: '800'
@@ -947,6 +1042,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     fontSize: 12,
     fontWeight: '800'
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  sectionToggleText: {
+    color: '#8f6d45',
+    fontWeight: '800',
+    fontSize: 18
   },
   menuCard: {
     backgroundColor: '#fffdf9',

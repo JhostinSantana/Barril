@@ -67,16 +67,21 @@ function App() {
   const [waiterNameDraft, setWaiterNameDraft] = useState('');
   const [query, setQuery] = useState('');
   const [payingOrder, setPayingOrder] = useState(null);
+  const [selectedPaidOrder, setSelectedPaidOrder] = useState(null);
   const [paymentDraft, setPaymentDraft] = useState({
     paymentMethod: 'efectivo',
     amount: '',
-    tenderedAmount: ''
+    tenderedAmount: '',
+    transferenceNumber: ''
   });
   const [stats, setStats] = useState({ totalOrders: 0, totalPaidOrders: 0, totalSales: 0, topDishes: [] });
   const [cashClose, setCashClose] = useState({ date: '', total: 0, efectivo: 0, transferencia: 0, orders: 0 });
   const [historyDate, setHistoryDate] = useState(new Date().toISOString().slice(0, 10));
   const [historyOrders, setHistoryOrders] = useState([]);
+  const [historyGrouped, setHistoryGrouped] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [expandedDays, setExpandedDays] = useState({});
   const [apiBaseUrl, setApiBaseUrl] = useState(getApiBaseUrl());
   const [networkInfo, setNetworkInfo] = useState({ localIp: '', localApiUrl: '', publicApiUrl: '' });
   const [publicApiDraft, setPublicApiDraft] = useState('');
@@ -237,19 +242,41 @@ function App() {
     setHistoryOrders(result);
   }
 
+  async function loadRecentHistory(days = 7) {
+    setLoadingHistory(true);
+    try {
+      const list = [];
+      for (let i = 0; i < days; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const iso = d.toISOString().slice(0, 10);
+        try {
+          const orders = await getJson(`/api/orders/history?date=${iso}`);
+          list.push({ date: iso, orders });
+        } catch (err) {
+          list.push({ date: iso, orders: [] });
+        }
+      }
+      setHistoryGrouped(list);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
   function openPayModal(order) {
     const balanceDue = Number(order.balanceDue ?? Math.max(order.total - Number(order.paidAmount ?? 0), 0));
     setPayingOrder(order);
     setPaymentDraft({
       paymentMethod: 'efectivo',
       amount: `${balanceDue}`,
-      tenderedAmount: `${balanceDue}`
+      tenderedAmount: `${balanceDue}`,
+      transferenceNumber: ''
     });
   }
 
   function closePayModal() {
     setPayingOrder(null);
-    setPaymentDraft({ paymentMethod: 'efectivo', amount: '', tenderedAmount: '' });
+    setPaymentDraft({ paymentMethod: 'efectivo', amount: '', tenderedAmount: '', transferenceNumber: '' });
   }
 
   async function registerPayment() {
@@ -258,7 +285,8 @@ function App() {
     const payload = {
       paymentMethod: paymentDraft.paymentMethod,
       amount: paymentPreview.amount,
-      tenderedAmount: paymentDraft.paymentMethod === 'efectivo' ? paymentPreview.tenderedAmount : undefined
+      tenderedAmount: paymentDraft.paymentMethod === 'efectivo' ? paymentPreview.tenderedAmount : undefined,
+      transferenceNumber: paymentDraft.paymentMethod === 'transferencia' ? paymentDraft.transferenceNumber : undefined
     };
 
     const updatedOrder = await getJson(`/api/orders/${payingOrder.id}/pay`, {
@@ -456,7 +484,10 @@ function App() {
             <div className="card-grid">
               {filteredPending.length === 0 ? <p className="empty">No hay cuentas pendientes.</p> : null}
               {filteredPending.map((order) => (
-                <article key={order.id} className="order-card">
+                <article
+                  key={order.id}
+                  className="order-card"
+                >
                   <div className="order-head">
                     <span>{order.id}</span>
                     <span>Mesa {order.tableNumber}</span>
@@ -489,7 +520,7 @@ function App() {
             <h3 className="group-title">Pagadas hoy</h3>
             <div className="card-grid compact">
               {paidOrders.slice(0, 12).map((order) => (
-                <article key={order.id} className="paid-card">
+                <article key={order.id} className="paid-card" onClick={() => setSelectedPaidOrder(order)} style={{ cursor: 'pointer' }}>
                   <p>{order.clientName}</p>
                   <span>{describePayment(order)} · {formatCurrency(order.total)}</span>
                 </article>
@@ -536,32 +567,121 @@ function App() {
           <section>
             <header className="section-header">
               <h2>Dias anteriores</h2>
-              <input
-                type="date"
-                value={historyDate}
-                onChange={(event) => setHistoryDate(event.target.value)}
-              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="date"
+                  value={historyDate}
+                  onChange={(event) => setHistoryDate(event.target.value)}
+                />
+                <button type="button" onClick={() => loadHistoryView(historyDate)}>Ver fecha</button>
+                <button type="button" onClick={() => loadRecentHistory(7)}>{loadingHistory ? 'Cargando...' : 'Últimos 7 días'}</button>
+                <button type="button" className="ghost" onClick={() => { setHistoryGrouped([]); setHistoryOrders([]); }}>Limpiar</button>
+              </div>
             </header>
 
-            <div className="card-grid">
-              {historyOrders.map((order) => (
-                <article key={order.id} className="order-card">
-                  <div className="order-head">
-                    <span>{order.id}</span>
-                    <span>Mesa {order.tableNumber}</span>
+            {/* Grouped by day if available */}
+            {historyGrouped && historyGrouped.length > 0 ? (
+              historyGrouped.map((group) => {
+                const isExpanded = Boolean(expandedDays[group.date]);
+                const totalRevenue = group.orders.reduce((s, o) => s + Number(o.total || 0), 0);
+                const ordersCount = group.orders.length;
+                const paidCount = group.orders.filter((o) => o.status === 'paid').length;
+                const pendingCount = ordersCount - paidCount;
+
+                return (
+                  <div key={group.date} style={{ marginBottom: 16 }}>
+                    <div
+                      className="day-summary-card"
+                      style={{ borderRadius: 12, padding: 12, background: '#fffaf1', border: '1px solid #e8d8c5', cursor: 'pointer' }}
+                      onClick={() => setExpandedDays((s) => ({ ...s, [group.date]: !s[group.date] }))}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ color: '#6f5e4d', fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>
+                            {new Date(group.date).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                          </div>
+                          <div style={{ color: '#8c7d6f', fontSize: 12 }}>Día {group.date}</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 12 }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#2f8f73', fontWeight: 800 }}>${formatCurrency(totalRevenue).replace('$','')}</div>
+                            <div style={{ fontSize: 12, color: '#6f5e4d' }}>Ganancias</div>
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontWeight: 800 }}>{ordersCount}</div>
+                            <div style={{ fontSize: 12, color: '#6f5e4d' }}>Pedidos</div>
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontWeight: 800 }}>{paidCount}</div>
+                            <div style={{ fontSize: 12, color: '#6f5e4d' }}>Pagados</div>
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontWeight: 800 }}>{pendingCount}</div>
+                            <div style={{ fontSize: 12, color: '#6f5e4d' }}>Pendientes</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 10, color: '#8c7d6f', fontSize: 12 }}>Toca para ver detalles</div>
+                    </div>
+
+                    {isExpanded ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="card-grid">
+                          {group.orders.length === 0 ? (
+                            <p className="empty">No hay comandas para este día.</p>
+                          ) : (
+                            group.orders.map((order) => (
+                              <article
+                                key={order.id}
+                                className="order-card"
+                                onClick={() => setSelectedPaidOrder(order)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                <div className="order-head">
+                                  <span>{order.id}</span>
+                                  <span>Mesa {order.tableNumber}</span>
+                                </div>
+                                <h4>{order.clientName}</h4>
+                                <p>Mesero: {order.waiterName}</p>
+                                <p>Estado: {getStatusLabel(order.status)}</p>
+                                <p>Metodo: {describePayment(order)}</p>
+                                <p className="total">Total: {formatCurrency(order.total)}</p>
+                                <p>Abonado: {formatCurrency(order.paidAmount ?? 0)}</p>
+                              </article>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                  <h4>{order.clientName}</h4>
-                  <p>Mesero: {order.waiterName}</p>
-                  <p>Estado: {getStatusLabel(order.status)}</p>
-                  <p>Metodo: {describePayment(order)}</p>
-                  <p className="total">Total: {formatCurrency(order.total)}</p>
-                  <p>Abonado: {formatCurrency(order.paidAmount ?? 0)}</p>
-                </article>
-              ))}
-              {historyOrders.length === 0 ? (
-                <p className="empty">No hay comandas para la fecha seleccionada.</p>
-              ) : null}
-            </div>
+                );
+              })
+            ) : (
+              <div className="card-grid">
+                {historyOrders.map((order) => (
+                  <article
+                    key={order.id}
+                    className="order-card"
+                    onClick={() => setSelectedPaidOrder(order)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="order-head">
+                      <span>{order.id}</span>
+                      <span>Mesa {order.tableNumber}</span>
+                    </div>
+                    <h4>{order.clientName}</h4>
+                    <p>Mesero: {order.waiterName}</p>
+                    <p>Estado: {getStatusLabel(order.status)}</p>
+                    <p>Metodo: {describePayment(order)}</p>
+                    <p className="total">Total: {formatCurrency(order.total)}</p>
+                    <p>Abonado: {formatCurrency(order.paidAmount ?? 0)}</p>
+                  </article>
+                ))}
+                {historyOrders.length === 0 ? (
+                  <p className="empty">No hay comandas para la fecha seleccionada.</p>
+                ) : null}
+              </div>
+            )}
           </section>
         ) : null}
 
@@ -734,6 +854,18 @@ function App() {
               </div>
             ) : null}
 
+            {paymentDraft.paymentMethod === 'transferencia' ? (
+              <div className="field-row">
+                <label htmlFor="payment-transfer-number">Número de transferencia</label>
+                <input
+                  id="payment-transfer-number"
+                  value={paymentDraft.transferenceNumber}
+                  onChange={(event) => setPaymentDraft((current) => ({ ...current, transferenceNumber: event.target.value }))}
+                  placeholder="Ej: TRF-1234567"
+                />
+              </div>
+            ) : null}
+
             <div className="payment-summary">
               <p>Abono a registrar: <strong>{formatCurrency(paymentPreview.amount)}</strong></p>
               {paymentDraft.paymentMethod === 'efectivo' ? (
@@ -748,6 +880,62 @@ function App() {
                 Registrar abono
               </button>
               <button type="button" className="ghost" onClick={closePayModal}>
+                Cerrar
+              </button>
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {selectedPaidOrder ? (
+        <div className="modal-backdrop" onClick={() => setSelectedPaidOrder(null)}>
+          <article className="modal" onClick={(event) => event.stopPropagation()}>
+            <h3>Detalles de la comanda pagada</h3>
+            <p>
+              {selectedPaidOrder.clientName} · Mesa {selectedPaidOrder.tableNumber}
+            </p>
+
+            <div className="payment-summary">
+              <p>Total: <strong>{formatCurrency(selectedPaidOrder.total)}</strong></p>
+              <p>Estado: <strong>{selectedPaidOrder.status === 'paid' ? 'Pagada' : 'Abonada'}</strong></p>
+            </div>
+
+            <h4 style={{ marginTop: '12px', marginBottom: '8px' }}>Items pedidos:</h4>
+            <div style={{ backgroundColor: '#fff', border: '1px solid #ecdcc9', borderRadius: '8px', padding: '8px' }}>
+              {selectedPaidOrder.items.map((item) => (
+                <div key={`${selectedPaidOrder.id}-${item.menuItemId}`} style={{ padding: '6px 0', borderBottom: '1px solid #f0e6d2', fontSize: '14px' }}>
+                  <p style={{ margin: '0 0 2px 0' }}>{item.quantity}x {item.name}</p>
+                  <p style={{ margin: '0', color: '#6f5e4d', fontSize: '12px' }}>{item.category}</p>
+                </div>
+              ))}
+            </div>
+
+            <h4 style={{ marginTop: '12px', marginBottom: '8px' }}>Pagos realizados:</h4>
+            <div style={{ backgroundColor: '#fff', border: '1px solid #ecdcc9', borderRadius: '8px', padding: '8px' }}>
+              {selectedPaidOrder.payments && selectedPaidOrder.payments.length > 0 ? (
+                selectedPaidOrder.payments.map((payment, index) => (
+                  <div key={index} style={{ padding: '8px 0', borderBottom: index < selectedPaidOrder.payments.length - 1 ? '1px solid #f0e6d2' : 'none' }}>
+                    <p style={{ margin: '0 0 4px 0', fontWeight: '700' }}>
+                      {payment.paymentMethod === 'efectivo' ? '💵 Efectivo' : '🏦 Transferencia'}
+                    </p>
+                    <p style={{ margin: '0 0 2px 0', color: '#2f2319' }}>Monto: {formatCurrency(payment.amount)}</p>
+                    {payment.paymentMethod === 'transferencia' && payment.transferenceNumber ? (
+                      <p style={{ margin: '0 0 2px 0', color: '#2f2319', fontSize: '12px' }}>
+                        Ref: <strong>{payment.transferenceNumber}</strong>
+                      </p>
+                    ) : null}
+                    <p style={{ margin: '0', color: '#6f5e4d', fontSize: '12px' }}>
+                      {new Date(payment.createdAt).toLocaleString('es-CO')}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p style={{ color: '#6f5e4d' }}>Sin pagos registrados</p>
+              )}
+            </div>
+
+            <div className="actions" style={{ marginTop: '12px' }}>
+              <button type="button" className="ghost" onClick={() => setSelectedPaidOrder(null)}>
                 Cerrar
               </button>
             </div>
