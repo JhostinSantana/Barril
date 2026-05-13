@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
+import './App.css';
 
 const socket = io('http://localhost:4000', { autoConnect: false });
 
@@ -27,12 +28,20 @@ function parseMoneyInput(rawValue) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function getTodayRange() {
-  const today = new Date().toISOString().slice(0, 10);
+function getCurrentMonthRange() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
   return {
-    from: `${today}T00:00:00.000Z`,
-    to: `${today}T23:59:59.999Z`
+    from: new Date(Date.UTC(year, month, 1, 0, 0, 0, 0)).toISOString(),
+    to: new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999)).toISOString()
   };
+}
+
+function getSalesIntensityStyle(value, maxValue) {
+  if (!maxValue) return { '--bar-fill': '0%' };
+  const normalized = Math.max((value / maxValue) * 100, value > 0 ? 8 : 0);
+  return { '--bar-fill': `${Math.min(normalized, 100)}%` };
 }
 
 function getApiBaseUrl() {
@@ -74,7 +83,20 @@ function App() {
     tenderedAmount: '',
     transferenceNumber: ''
   });
-  const [stats, setStats] = useState({ totalOrders: 0, totalPaidOrders: 0, totalSales: 0, topDishes: [] });
+  const [stats, setStats] = useState({
+    totalOrders: 0,
+    totalPaidOrders: 0,
+    totalSales: 0,
+    monthLabel: '',
+    rangeLabel: '',
+    monthStartWeekday: 0,
+    topDishes: [],
+    bottomDishes: [],
+    categories: [],
+    paymentSummary: [],
+    quincenas: [],
+    calendarDays: []
+  });
   const [cashClose, setCashClose] = useState({ date: '', total: 0, efectivo: 0, transferencia: 0, orders: 0 });
   const [historyDate, setHistoryDate] = useState(new Date().toISOString().slice(0, 10));
   const [historyOrders, setHistoryOrders] = useState([]);
@@ -88,6 +110,7 @@ function App() {
   const [networkStatus, setNetworkStatus] = useState('');
   const [waiterStatus, setWaiterStatus] = useState('');
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
+  const [confirmModal, setConfirmModal] = useState(null);
 
   const filteredPending = useMemo(() => {
     if (!query.trim()) return pendingOrders;
@@ -170,6 +193,26 @@ function App() {
     };
   }, [payingOrder, paymentDraft]);
 
+  const beverageCategories = useMemo(
+    () => stats.categories.filter((category) => category.label === 'BEBIDAS'),
+    [stats.categories]
+  );
+
+  const foodCategories = useMemo(
+    () => stats.categories.filter((category) => category.label !== 'BEBIDAS'),
+    [stats.categories]
+  );
+
+  const maxCalendarSales = useMemo(
+    () => Math.max(...stats.calendarDays.map((day) => day.totalSales), 0),
+    [stats.calendarDays]
+  );
+
+  const maxPaymentAmount = useMemo(
+    () => Math.max(...stats.paymentSummary.map((item) => item.amount), 0),
+    [stats.paymentSummary]
+  );
+
   async function getJson(url, options) {
     const response = await fetch(url, options);
     if (!response.ok) {
@@ -198,7 +241,7 @@ function App() {
   }
 
   async function loadStatsView() {
-    const range = getTodayRange();
+    const range = getCurrentMonthRange();
     const result = await getJson(`/api/stats?from=${range.from}&to=${range.to}`);
     setStats(result);
   }
@@ -240,6 +283,16 @@ function App() {
   async function loadHistoryView(date) {
     const result = await getJson(`/api/orders/history?date=${date}`);
     setHistoryOrders(result);
+  }
+
+  async function startNewDay() {
+    setConfirmModal(null);
+    setPendingOrders([]);
+    setPaidOrders([]);
+    setCashClose({ date: '', total: 0, efectivo: 0, transferencia: 0, orders: 0 });
+    setQuery('');
+    await loadCashView();
+    await loadStatsView();
   }
 
   async function loadRecentHistory(days = 7) {
@@ -456,13 +509,28 @@ function App() {
         {activeView === 'cash' ? (
           <section>
             <header className="section-header">
-              <h2>Cobro y caja</h2>
-              <input
-                type="search"
-                placeholder="Buscar por cliente, mesa o ID"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
+              <div style={{ flex: 1 }}>
+                <h2>Cobro y caja</h2>
+                <input
+                  type="search"
+                  placeholder="Buscar por cliente, mesa o ID"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmModal({
+                  title: '¿Iniciar nuevo día?',
+                  message: 'Se limpiarán los pedidos del día actual. Los datos se guardarán en el historial. Esta acción no tiene vuelta atrás.',
+                  action: startNewDay,
+                  confirmText: 'Iniciar nuevo día',
+                  cancelText: 'Cancelar'
+                })}
+                style={{ padding: '10px 16px', marginLeft: '8px' }}
+              >
+                Nuevo día
+              </button>
             </header>
 
             <div className="kpi-grid">
@@ -532,34 +600,277 @@ function App() {
         {activeView === 'stats' ? (
           <section>
             <header className="section-header">
-              <h2>Estadistica de platos vendidos</h2>
+              <div>
+                <h2>Estadistica mensual</h2>
+                <p style={{ margin: '6px 0 0', color: '#6f5e4d' }}>
+                  {stats.monthLabel || 'Resumen del mes'} · {stats.rangeLabel || 'Rango activo'}
+                </p>
+              </div>
             </header>
 
-            <div className="kpi-grid">
-              <article className="kpi-card">
-                <h3>Comandas del dia</h3>
-                <strong>{stats.totalOrders}</strong>
+            <div className="stats-hero">
+              <article className="stats-banner">
+                <p className="eyebrow">Ventas y operación</p>
+                <h3>Seguimiento de comida, bebidas, quincenas y caja</h3>
+                <p>
+                  Esta vista separa los platos y bebidas, muestra el ranking de vendidos y deja claro
+                  cómo se mueve la ganancia por método de pago.
+                </p>
               </article>
-              <article className="kpi-card">
-                <h3>Comandas pagadas</h3>
-                <strong>{stats.totalPaidOrders}</strong>
-              </article>
-              <article className="kpi-card">
-                <h3>Venta total</h3>
-                <strong>{formatCurrency(stats.totalSales)}</strong>
-              </article>
+
+              <div className="kpi-grid stats-kpi-grid">
+                <article className="kpi-card">
+                  <h3>Comandas del mes</h3>
+                  <strong>{stats.totalOrders}</strong>
+                </article>
+                <article className="kpi-card">
+                  <h3>Comandas pagadas</h3>
+                  <strong>{stats.totalPaidOrders}</strong>
+                </article>
+                <article className="kpi-card">
+                  <h3>Ganancia total</h3>
+                  <strong>{formatCurrency(stats.totalSales)}</strong>
+                </article>
+                <article className="kpi-card">
+                  <h3>Categorias activas</h3>
+                  <strong>{stats.categories.length}</strong>
+                </article>
+              </div>
             </div>
 
-            <h3 className="group-title">Top platos</h3>
-            <div className="card-grid">
-              {stats.topDishes.map((dish) => (
-                <article className="order-card" key={dish.name}>
-                  <h4>{dish.name}</h4>
-                  <p>Vendidos: {dish.quantity}</p>
-                  <p>Ingreso: {formatCurrency(dish.revenue)}</p>
-                </article>
-              ))}
+            <div className="stats-split-grid">
+              <section className="stats-panel">
+                <div className="section-header stats-panel-head">
+                  <h3>Comida y bebidas separadas</h3>
+                  <span className="stats-chip">Barras por categoria y producto</span>
+                </div>
+
+                <div className="stats-category-grid">
+                  <article className="stats-category-block stats-drink-block">
+                    <div className="stats-block-head">
+                      <div>
+                        <p className="stats-block-label">Bebidas</p>
+                        <h4>Bebidas vendidas</h4>
+                      </div>
+                      <span>{beverageCategories.length} categorias</span>
+                    </div>
+
+                    {beverageCategories.length > 0 ? beverageCategories.map((category) => {
+                      const topItems = category.items.slice(0, 6);
+                      return (
+                        <article className="stats-chart-card" key={category.label}>
+                          <div className="stats-chart-head">
+                            <div>
+                              <h5>{category.label}</h5>
+                              <p>{category.quantity} vendidos</p>
+                            </div>
+                            <strong>{formatCurrency(category.revenue)}</strong>
+                          </div>
+                          <div className="stats-bar-list">
+                            {topItems.map((item) => (
+                              <div className="stats-bar-row" key={`${category.label}-${item.name}`}>
+                                <div className="stats-bar-meta">
+                                  <span>{item.name}</span>
+                                  <small>{item.quantity} uds · {formatCurrency(item.revenue)}</small>
+                                </div>
+                                <div className="stats-bar-track">
+                                  <div
+                                    className="stats-bar-fill"
+                                    style={getSalesIntensityStyle(item.quantity, Math.max(...topItems.map((topItem) => topItem.quantity), 0))}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </article>
+                      );
+                    }) : <p className="empty">Aun no hay ventas de bebidas en este periodo.</p>}
+                  </article>
+
+                  <article className="stats-category-block stats-food-block">
+                    <div className="stats-block-head">
+                      <div>
+                        <p className="stats-block-label">Comida</p>
+                        <h4>Platos y complementos</h4>
+                      </div>
+                      <span>{foodCategories.length} categorias</span>
+                    </div>
+
+                    {foodCategories.length > 0 ? foodCategories.map((category) => {
+                      const topItems = category.items.slice(0, 6);
+                      const categoryMax = Math.max(...topItems.map((item) => item.quantity), 0);
+                      return (
+                        <article className="stats-chart-card" key={category.label}>
+                          <div className="stats-chart-head">
+                            <div>
+                              <h5>{category.label}</h5>
+                              <p>{category.quantity} vendidos</p>
+                            </div>
+                            <strong>{formatCurrency(category.revenue)}</strong>
+                          </div>
+                          <div className="stats-bar-list">
+                            {topItems.map((item) => (
+                              <div className="stats-bar-row" key={`${category.label}-${item.name}`}>
+                                <div className="stats-bar-meta">
+                                  <span>{item.name}</span>
+                                  <small>{item.quantity} uds · {formatCurrency(item.revenue)}</small>
+                                </div>
+                                <div className="stats-bar-track">
+                                  <div
+                                    className="stats-bar-fill"
+                                    style={getSalesIntensityStyle(item.quantity, categoryMax)}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </article>
+                      );
+                    }) : <p className="empty">Aun no hay ventas de comida en este periodo.</p>}
+                  </article>
+                </div>
+              </section>
+
+              <section className="stats-panel">
+                <div className="section-header stats-panel-head">
+                  <h3>Ranking general y quincenal</h3>
+                  <span className="stats-chip">Mas vendidos y menos vendidos</span>
+                </div>
+
+                <div className="ranking-grid">
+                  <article className="ranking-card">
+                    <h4>Ranking general</h4>
+                    <div className="rank-columns">
+                      <div>
+                        <p className="rank-column-label">Top vendidos</p>
+                        <ol className="rank-list">
+                          {stats.topDishes.map((dish, index) => (
+                            <li key={`${dish.name}-${index}`}>
+                              <span>{dish.name}</span>
+                              <strong>{dish.quantity}</strong>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                      <div>
+                        <p className="rank-column-label">Menos vendidos</p>
+                        <ol className="rank-list muted">
+                          {stats.bottomDishes.map((dish, index) => (
+                            <li key={`${dish.name}-${index}`}>
+                              <span>{dish.name}</span>
+                              <strong>{dish.quantity}</strong>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    </div>
+                  </article>
+
+                  {stats.quincenas.map((period) => (
+                    <article className="ranking-card" key={period.id}>
+                      <h4>{period.label}</h4>
+                      <div className="quincena-kpis">
+                        <div>
+                          <span>Pedidos</span>
+                          <strong>{period.orders}</strong>
+                        </div>
+                        <div>
+                          <span>Ganancia</span>
+                          <strong>{formatCurrency(period.totalSales)}</strong>
+                        </div>
+                      </div>
+                      <div className="rank-columns">
+                        <div>
+                          <p className="rank-column-label">Mas vendidos</p>
+                          <ol className="rank-list">
+                            {period.topDishes.map((dish, index) => (
+                              <li key={`${period.id}-${dish.name}-top-${index}`}>
+                                <span>{dish.name}</span>
+                                <strong>{dish.quantity}</strong>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                        <div>
+                          <p className="rank-column-label">Menos vendidos</p>
+                          <ol className="rank-list muted">
+                            {period.bottomDishes.map((dish, index) => (
+                              <li key={`${period.id}-${dish.name}-bottom-${index}`}>
+                                <span>{dish.name}</span>
+                                <strong>{dish.quantity}</strong>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
             </div>
+
+            <section className="stats-panel">
+              <div className="section-header stats-panel-head">
+                <h3>Ganancias por metodo de pago</h3>
+                <span className="stats-chip">Efectivo y transferencia</span>
+              </div>
+
+              <div className="payment-grid">
+                {stats.paymentSummary.map((method) => (
+                  <article className="payment-card" key={method.method}>
+                    <div className="payment-card-head">
+                      <div>
+                        <p>{method.label}</p>
+                        <span>{method.method === 'efectivo' ? 'Caja' : 'Bancos'}</span>
+                      </div>
+                      <strong>{formatCurrency(method.amount)}</strong>
+                    </div>
+                    <div className="stats-bar-track payment-track">
+                      <div
+                        className="stats-bar-fill"
+                        style={getSalesIntensityStyle(method.amount, maxPaymentAmount)}
+                      />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="stats-panel calendar-panel">
+              <div className="section-header stats-panel-head">
+                <h3>Calendario de ventas</h3>
+                <span className="stats-chip">Vista mensual completa</span>
+              </div>
+
+              <div className="calendar-grid-head">
+                {['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'].map((day) => (
+                  <div key={day} className="calendar-weekday">{day}</div>
+                ))}
+              </div>
+
+              <div className="calendar-grid">
+                {Array.from({ length: (stats.monthStartWeekday + 6) % 7 }).map((_, index) => (
+                  <div key={`blank-${index}`} className="calendar-day calendar-empty" />
+                ))}
+
+                {stats.calendarDays.map((day) => (
+                  <article
+                    key={day.date}
+                    className="calendar-day"
+                    style={getSalesIntensityStyle(day.totalSales, maxCalendarSales)}
+                  >
+                    <div className="calendar-day-top">
+                      <strong>{day.dayNumber}</strong>
+                      <span>{day.label}</span>
+                    </div>
+                    <div className="calendar-day-body">
+                      <p>{day.orders} pedidos</p>
+                      <strong>{formatCurrency(day.totalSales)}</strong>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
           </section>
         ) : null}
 
@@ -575,7 +886,23 @@ function App() {
                 />
                 <button type="button" onClick={() => loadHistoryView(historyDate)}>Ver fecha</button>
                 <button type="button" onClick={() => loadRecentHistory(7)}>{loadingHistory ? 'Cargando...' : 'Últimos 7 días'}</button>
-                <button type="button" className="ghost" onClick={() => { setHistoryGrouped([]); setHistoryOrders([]); }}>Limpiar</button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setConfirmModal({
+                    title: '¿Limpiar historial?',
+                    message: 'Se borrarán todos los datos del historial mostrado. Esta acción no tiene vuelta atrás.',
+                    action: () => {
+                      setConfirmModal(null);
+                      setHistoryGrouped([]);
+                      setHistoryOrders([]);
+                    },
+                    confirmText: 'Limpiar',
+                    cancelText: 'Cancelar'
+                  })}
+                >
+                  Limpiar
+                </button>
               </div>
             </header>
 
@@ -881,6 +1208,23 @@ function App() {
               </button>
               <button type="button" className="ghost" onClick={closePayModal}>
                 Cerrar
+              </button>
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {confirmModal ? (
+        <div className="modal-backdrop" onClick={() => setConfirmModal(null)}>
+          <article className="modal" onClick={(event) => event.stopPropagation()}>
+            <h3>{confirmModal.title}</h3>
+            <p>{confirmModal.message}</p>
+            <div className="actions">
+              <button type="button" onClick={confirmModal.action}>
+                {confirmModal.confirmText}
+              </button>
+              <button type="button" className="ghost" onClick={() => setConfirmModal(null)}>
+                {confirmModal.cancelText}
               </button>
             </div>
           </article>

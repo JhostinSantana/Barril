@@ -77,9 +77,63 @@ export function summarizeItems(items, menu) {
   });
 }
 
+function createItemBucket(name, category) {
+  return { name, category, quantity: 0, revenue: 0 };
+}
+
+function sortByQuantityDescAndNameAsc(left, right) {
+  if (right.quantity !== left.quantity) return right.quantity - left.quantity;
+  return left.name.localeCompare(right.name, 'es');
+}
+
+function sortByQuantityAscAndNameAsc(left, right) {
+  if (left.quantity !== right.quantity) return left.quantity - right.quantity;
+  return left.name.localeCompare(right.name, 'es');
+}
+
+function buildRanking(bucketMap, limit = 10) {
+  return [...bucketMap.values()].sort(sortByQuantityDescAndNameAsc).slice(0, limit);
+}
+
+function buildReverseRanking(bucketMap, limit = 10) {
+  return [...bucketMap.values()].sort(sortByQuantityAscAndNameAsc).slice(0, limit);
+}
+
+function getPaymentEntries(order) {
+  const payments = Array.isArray(order.payments) ? order.payments : [];
+  if (payments.length > 0) return payments;
+
+  if (order.status !== 'paid') return [];
+
+  return [{ paymentMethod: order.paymentMethod ?? 'efectivo', amount: order.total }];
+}
+
+function getMonthDateRange(dateValue) {
+  const sourceDate = new Date(dateValue);
+  const year = sourceDate.getUTCFullYear();
+  const month = sourceDate.getUTCMonth();
+  const monthStart = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+  const monthEnd = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+  return { monthStart, monthEnd };
+}
+
+function getMonthLabel(dateValue) {
+  const date = new Date(dateValue);
+  return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date);
+}
+
+function getDayLabel(dateValue) {
+  return new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: '2-digit', timeZone: 'UTC' }).format(new Date(dateValue));
+}
+
+function finalizeSectionBuckets(sectionMap) {
+  return [...sectionMap.values()].sort((left, right) => right.revenue - left.revenue || right.quantity - left.quantity || left.label.localeCompare(right.label, 'es'));
+}
+
 export function getStats(orders, menu, fromDate, toDate) {
   const from = new Date(fromDate);
   const to = new Date(toDate);
+  const { monthStart, monthEnd } = getMonthDateRange(fromDate);
 
   const filtered = orders.filter((order) => {
     const created = new Date(order.createdAt);
@@ -87,30 +141,129 @@ export function getStats(orders, menu, fromDate, toDate) {
   });
 
   const dishMap = new Map();
+  const categoryMap = new Map();
+  const dailyMap = new Map();
+  const quincenaMap = new Map([
+    ['first', { id: 'first', label: '1 al 15', orders: 0, totalSales: 0, dishMap: new Map() }],
+    ['second', { id: 'second', label: '16 al fin de mes', orders: 0, totalSales: 0, dishMap: new Map() }]
+  ]);
+  const paymentMap = new Map([
+    ['efectivo', { method: 'efectivo', label: 'Efectivo', amount: 0 }],
+    ['transferencia', { method: 'transferencia', label: 'Transferencia', amount: 0 }]
+  ]);
   let totalSales = 0;
   let totalPaidOrders = 0;
 
   filtered.forEach((order) => {
+    const createdAt = new Date(order.createdAt);
+    const dayKey = createdAt.toISOString().slice(0, 10);
+    const dayNumber = createdAt.getUTCDate();
+    const dailyEntry = dailyMap.get(dayKey) ?? {
+      date: dayKey,
+      dayNumber,
+      label: getDayLabel(dayKey),
+      orders: 0,
+      paidOrders: 0,
+      totalSales: 0
+    };
+    dailyEntry.orders += 1;
+
     if (order.status === 'paid') {
       totalSales = roundMoney(totalSales + order.total);
       totalPaidOrders += 1;
+      dailyEntry.paidOrders += 1;
+      dailyEntry.totalSales = roundMoney(dailyEntry.totalSales + order.total);
+
+      const quincenaKey = dayNumber <= 15 ? 'first' : 'second';
+      const quincenaEntry = quincenaMap.get(quincenaKey);
+      quincenaEntry.orders += 1;
+      quincenaEntry.totalSales = roundMoney(quincenaEntry.totalSales + order.total);
+
+      getPaymentEntries(order).forEach((payment) => {
+        const amount = roundMoney(payment?.amount ?? 0);
+        if (paymentMap.has(payment.paymentMethod)) {
+          const paymentEntry = paymentMap.get(payment.paymentMethod);
+          paymentEntry.amount = roundMoney(paymentEntry.amount + amount);
+        }
+      });
     }
 
     order.items.forEach((item) => {
       const menuItem = menu.find((m) => m.id === item.menuItemId);
       if (!menuItem) return;
-      const existing = dishMap.get(menuItem.id) ?? { name: menuItem.name, quantity: 0, revenue: 0 };
+      const existing = dishMap.get(menuItem.id) ?? createItemBucket(menuItem.name, menuItem.category);
       existing.quantity += item.quantity;
       existing.revenue = roundMoney(existing.revenue + item.quantity * menuItem.price);
       dishMap.set(menuItem.id, existing);
+
+      const categoryExisting = categoryMap.get(menuItem.category) ?? {
+        label: menuItem.category,
+        quantity: 0,
+        revenue: 0,
+        items: new Map()
+      };
+      categoryExisting.quantity += item.quantity;
+      categoryExisting.revenue = roundMoney(categoryExisting.revenue + item.quantity * menuItem.price);
+      const categoryItem = categoryExisting.items.get(menuItem.id) ?? createItemBucket(menuItem.name, menuItem.category);
+      categoryItem.quantity += item.quantity;
+      categoryItem.revenue = roundMoney(categoryItem.revenue + item.quantity * menuItem.price);
+      categoryExisting.items.set(menuItem.id, categoryItem);
+      categoryMap.set(menuItem.category, categoryExisting);
+
+      const quincenaKey = dayNumber <= 15 ? 'first' : 'second';
+      const quincenaEntry = quincenaMap.get(quincenaKey);
+      const quincenaItem = quincenaEntry.dishMap.get(menuItem.id) ?? createItemBucket(menuItem.name, menuItem.category);
+      quincenaItem.quantity += item.quantity;
+      quincenaItem.revenue = roundMoney(quincenaItem.revenue + item.quantity * menuItem.price);
+      quincenaEntry.dishMap.set(menuItem.id, quincenaItem);
     });
+
+    dailyMap.set(dayKey, dailyEntry);
   });
+
+  const calendarDays = [];
+  for (const cursor = new Date(monthStart); cursor <= monthEnd; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    const dateKey = cursor.toISOString().slice(0, 10);
+    const entry = dailyMap.get(dateKey) ?? {
+      date: dateKey,
+      dayNumber: cursor.getUTCDate(),
+      label: getDayLabel(dateKey),
+      orders: 0,
+      paidOrders: 0,
+      totalSales: 0
+    };
+    calendarDays.push(entry);
+  }
+
+  const quincenas = [...quincenaMap.values()].map((bucket) => ({
+    id: bucket.id,
+    label: bucket.label,
+    orders: bucket.orders,
+    totalSales: bucket.totalSales,
+    topDishes: buildRanking(bucket.dishMap, 5),
+    bottomDishes: buildReverseRanking(bucket.dishMap, 5)
+  }));
+
+  const categories = finalizeSectionBuckets(categoryMap).map((category) => ({
+    label: category.label,
+    quantity: category.quantity,
+    revenue: category.revenue,
+    items: [...category.items.values()].sort(sortByQuantityDescAndNameAsc)
+  }));
 
   return {
     totalOrders: filtered.length,
     totalPaidOrders,
     totalSales,
-    topDishes: [...dishMap.values()].sort((a, b) => b.quantity - a.quantity).slice(0, 10)
+    monthLabel: getMonthLabel(fromDate),
+    rangeLabel: `${from.toISOString().slice(0, 10)} al ${to.toISOString().slice(0, 10)}`,
+    monthStartWeekday: monthStart.getUTCDay(),
+    topDishes: buildRanking(dishMap, 10),
+    bottomDishes: buildReverseRanking(dishMap, 10),
+    categories,
+    paymentSummary: [...paymentMap.values()],
+    quincenas,
+    calendarDays
   };
 }
 
