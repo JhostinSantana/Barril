@@ -20,6 +20,15 @@ function buildTicketText(order, restaurantName) {
   order.items.forEach((item) => {
     lines.push(`${item.category} - ${item.quantity} x ${item.name}`);
   });
+
+  if (Array.isArray(order.comments) && order.comments.length > 0) {
+    lines.push('--------------------------------');
+    lines.push('COMENTARIOS');
+    order.comments.forEach((comment) => {
+      lines.push(`- ${comment.text}`);
+    });
+  }
+
   lines.push('--------------------------------');
   lines.push('ENTREGAR SIN PRECIOS');
   lines.push('');

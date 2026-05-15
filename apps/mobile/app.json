@@ -3,6 +3,8 @@
     "name": "Asados en el Barril",
     "slug": "asados-en-el-barril",
     "version": "1.0.3",
+    "jsEngine": "jsc",
+    "entryPoint": "./index.js",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
@@ -14,6 +16,15 @@
     },
     "assetBundlePatterns": [
       "**/*"
+    ],
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permite escanear el código QR para conectar con el servidor.",
+          "recordAudioAndroid": false
+        }
+      ]
     ],
     "extra": {
       "eas": {

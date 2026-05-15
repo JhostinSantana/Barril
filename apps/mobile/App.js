@@ -1,9 +1,10 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Network from 'expo-network';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -16,8 +17,43 @@ import {
 const STORAGE_API_KEY = 'barril_api_url';
 const STORAGE_WAITER_KEY = 'barril_waiter_name';
 const STORAGE_DRAFT_ORDER_KEY = 'barril_draft_order';
-const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
+const ENV_API_URL = typeof globalThis.process !== 'undefined'
+  ? globalThis.process.env?.EXPO_PUBLIC_API_URL ?? ''
+  : '';
 const TABLE_OPTIONS = Array.from({ length: 16 }, (_, index) => String(index + 1));
+
+const fallbackStorage = (() => {
+  const memory = new Map();
+  return {
+    async getItem(key) {
+      return memory.has(key) ? memory.get(key) : null;
+    },
+    async setItem(key, value) {
+      memory.set(key, String(value));
+    },
+    async removeItem(key) {
+      memory.delete(key);
+    }
+  };
+})();
+
+let storageModule = null;
+
+function getStorage() {
+  if (storageModule) return storageModule;
+
+  try {
+    // Lazy require keeps the app alive if the native module is unavailable in a broken build.
+    // In that case we fall back to in-memory storage instead of crashing on startup.
+    // eslint-disable-next-line global-require
+    storageModule = require('@react-native-async-storage/async-storage').default;
+  } catch (error) {
+    console.warn('AsyncStorage unavailable, using in-memory fallback.', error);
+    storageModule = fallbackStorage;
+  }
+
+  return storageModule;
+}
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 2500) {
   const controller = new AbortController();
@@ -73,7 +109,7 @@ async function isBarrilServer(apiUrl) {
 }
 
 async function discoverServer() {
-  const storedApi = await AsyncStorage.getItem(STORAGE_API_KEY);
+  const storedApi = await getStorage().getItem(STORAGE_API_KEY);
   if (storedApi && (await isBarrilServer(storedApi))) {
     return storedApi;
   }
@@ -84,7 +120,7 @@ async function discoverServer() {
 
   for (const candidate of candidates) {
     if (await isBarrilServer(candidate)) {
-      await AsyncStorage.setItem(STORAGE_API_KEY, candidate);
+      await getStorage().setItem(STORAGE_API_KEY, candidate);
       return candidate;
     }
   }
@@ -109,13 +145,17 @@ export default function App() {
   const [apiUrl, setApiUrl] = useState('');
   const [apiDraft, setApiDraft] = useState('');
   const [connecting, setConnecting] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [waiterName, setWaiterName] = useState('');
   const [waiterDraft, setWaiterDraft] = useState('');
   const [waiterConfigured, setWaiterConfigured] = useState(false);
   const [showWaiterSettings, setShowWaiterSettings] = useState(false);
   const [clientName, setClientName] = useState('');
   const [tableNumber, setTableNumber] = useState('');
+  const [commentDraft, setCommentDraft] = useState('');
   const [quantities, setQuantities] = useState({});
+  const [originalQuantities, setOriginalQuantities] = useState({});
   const [pendingOrders, setPendingOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [status, setStatus] = useState('');
@@ -184,6 +224,7 @@ export default function App() {
       setRestaurantName(data.restaurantName);
       setMenu(data.menu);
     } catch (error) {
+      console.error(error);
       setStatus('No se pudo conectar con el servidor.');
     }
   }
@@ -211,7 +252,7 @@ export default function App() {
     try {
       response = await fetchWithTimeout(`${normalizedApiUrl}/health`);
     } catch (error) {
-      throw new Error(`No se pudo conectar con ese servidor: ${error.message}`);
+      throw new Error(`No se pudo conectar con ese servidor: ${error.message}`, { cause: error });
     }
 
     if (!response.ok) {
@@ -224,7 +265,7 @@ export default function App() {
     }
 
     if (options.persist) {
-      await AsyncStorage.setItem(STORAGE_API_KEY, normalizedApiUrl);
+      await getStorage().setItem(STORAGE_API_KEY, normalizedApiUrl);
     }
 
     setApiUrl(normalizedApiUrl);
@@ -235,19 +276,20 @@ export default function App() {
   }
 
   async function saveDraftOrder() {
-    const draft = { clientName, tableNumber, quantities };
-    await AsyncStorage.setItem(STORAGE_DRAFT_ORDER_KEY, JSON.stringify(draft));
+    const draft = { clientName, tableNumber, commentDraft, quantities };
+    await getStorage().setItem(STORAGE_DRAFT_ORDER_KEY, JSON.stringify(draft));
     setHasDraft(true);
   }
 
   async function loadDraftOrder() {
     try {
-      const stored = await AsyncStorage.getItem(STORAGE_DRAFT_ORDER_KEY);
+      const stored = await getStorage().getItem(STORAGE_DRAFT_ORDER_KEY);
       if (stored) {
         const draft = JSON.parse(stored);
-        if (draft.clientName || draft.tableNumber || Object.keys(draft.quantities || {}).length > 0) {
+        if (draft.clientName || draft.tableNumber || draft.commentDraft || Object.keys(draft.quantities || {}).length > 0) {
           setClientName(draft.clientName || '');
           setTableNumber(draft.tableNumber || '');
+          setCommentDraft(draft.commentDraft || '');
           setQuantities(draft.quantities || {});
           setHasDraft(true);
         }
@@ -258,12 +300,12 @@ export default function App() {
   }
 
   async function clearDraftOrder() {
-    await AsyncStorage.removeItem(STORAGE_DRAFT_ORDER_KEY);
+    await getStorage().removeItem(STORAGE_DRAFT_ORDER_KEY);
     setHasDraft(false);
   }
 
   async function syncWaiterProfile(api) {
-    const storedWaiterName = (await AsyncStorage.getItem(STORAGE_WAITER_KEY)) ?? '';
+    const storedWaiterName = (await getStorage().getItem(STORAGE_WAITER_KEY)) ?? '';
     if (!storedWaiterName.trim()) {
       setWaiterName('');
       setWaiterDraft('');
@@ -276,7 +318,7 @@ export default function App() {
       const payload = await response.json();
 
       if (!response.ok || !payload.authorized) {
-        await AsyncStorage.removeItem(STORAGE_WAITER_KEY);
+        await getStorage().removeItem(STORAGE_WAITER_KEY);
         setWaiterName('');
         setWaiterDraft('');
         setWaiterConfigured(false);
@@ -321,7 +363,7 @@ export default function App() {
       }
 
       const displayName = payload.displayName ?? nextName;
-      await AsyncStorage.setItem(STORAGE_WAITER_KEY, displayName);
+      await getStorage().setItem(STORAGE_WAITER_KEY, displayName);
       setWaiterName(displayName);
       setWaiterDraft(displayName);
       setWaiterConfigured(true);
@@ -339,7 +381,7 @@ export default function App() {
       try {
         setConnecting(true);
         setStatus('Buscando laptop en la red WiFi...');
-        const storedApi = await AsyncStorage.getItem(STORAGE_API_KEY);
+        const storedApi = await getStorage().getItem(STORAGE_API_KEY);
         if (storedApi) {
           setApiDraft(storedApi);
         }
@@ -383,6 +425,40 @@ export default function App() {
     }
   }
 
+  async function requestScannerPermission() {
+    try {
+      const response = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
+      return Boolean(response?.granted);
+    } catch (error) {
+      console.error(error);
+      return false;
+    }
+  }
+
+  async function handleBarCodeScanned({ data }) {
+    setScanning(false);
+    if (!data || typeof data !== 'string') {
+      setStatus('QR no valido. Intenta de nuevo.');
+      return;
+    }
+
+    const scanned = data.trim();
+    if (!/^https?:\/\//i.test(scanned)) {
+      setStatus('El QR no contiene una URL valida.');
+      return;
+    }
+
+    try {
+      setConnecting(true);
+      await connectToServer(scanned, { persist: true });
+      setStatus(`Conectado a ${scanned}`);
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setConnecting(false);
+    }
+  }
+
   useEffect(() => {
     if (!apiUrl) return;
     setLoading(true);
@@ -390,10 +466,10 @@ export default function App() {
   }, [apiUrl]);
 
   useEffect(() => {
-    if (clientName || tableNumber || Object.keys(quantities).length > 0) {
+    if (clientName || tableNumber || commentDraft.trim() || Object.keys(quantities).length > 0) {
       saveDraftOrder();
     }
-  }, [clientName, tableNumber]);
+  }, [clientName, tableNumber, commentDraft]);
 
   function changeQuantity(id, delta) {
     setQuantities((current) => {
@@ -413,7 +489,9 @@ export default function App() {
     setSelectedOrderId(order.id);
     setClientName(order.clientName ?? '');
     setTableNumber(order.tableNumber ?? '');
+    setCommentDraft('');
     setQuantities(nextQuantities);
+    setOriginalQuantities(nextQuantities);
     setStatus(`Editando ${order.id}. Los cambios actualizaran la misma cuenta.`);
   }
 
@@ -421,7 +499,9 @@ export default function App() {
     setSelectedOrderId(null);
     setClientName('');
     setTableNumber('');
+    setCommentDraft('');
     setQuantities({});
+    setOriginalQuantities({});
     clearDraftOrder();
   }
 
@@ -439,6 +519,7 @@ export default function App() {
     const items = Object.entries(quantities)
       .filter(([, quantity]) => Number(quantity) > 0)
       .map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) }));
+    const comment = commentDraft.trim();
 
     if (!waiterConfigured || !waiterName.trim()) {
       setStatus('Primero registra y autoriza el mesero de este dispositivo.');
@@ -469,7 +550,7 @@ export default function App() {
         {
           method: selectedOrderId ? 'PATCH' : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ waiterName, clientName, tableNumber, items })
+          body: JSON.stringify({ waiterName, clientName, tableNumber, items, comment })
         }
       );
 
@@ -477,7 +558,7 @@ export default function App() {
 
       if (!response.ok) {
         if (response.status === 403) {
-          await AsyncStorage.removeItem(STORAGE_WAITER_KEY);
+          await getStorage().removeItem(STORAGE_WAITER_KEY);
           setWaiterName('');
           setWaiterDraft('');
           setWaiterConfigured(false);
@@ -594,6 +675,20 @@ export default function App() {
                   <Pressable style={styles.secondaryButton} onPress={retryAutoConnection} disabled={connecting || submitting}>
                     <Text style={styles.secondaryButtonText}>Reintentar búsqueda</Text>
                   </Pressable>
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={async () => {
+                      const ok = await requestScannerPermission();
+                      if (!ok) {
+                        setStatus('Permiso para cámara denegado. Abre Ajustes y actívalo manualmente.');
+                        return;
+                      }
+                      setScanning(true);
+                    }}
+                    disabled={connecting || submitting}
+                  >
+                    <Text style={styles.secondaryButtonText}>Escanear QR</Text>
+                  </Pressable>
                 </View>
               </View>
             </>
@@ -604,6 +699,33 @@ export default function App() {
                 <View style={styles.draftBanner}>
                   <View>
                     <Text style={styles.draftBannerTitle}>📝 Comanda en progreso</Text>
+                {cameraPermission && !cameraPermission.granted ? (
+                  <View style={styles.permissionCard}>
+                    <Text style={styles.sectionTitle}>Cámara desactivada</Text>
+                    <Text style={styles.serverBadge}>
+                      Android bloqueó el permiso de cámara. Actívalo en Ajustes para usar el escáner QR.
+                    </Text>
+                    <View style={styles.permissionActions}>
+                      <Pressable
+                        style={styles.primaryButton}
+                        onPress={async () => {
+                          const ok = await requestScannerPermission();
+                          if (ok) {
+                            setStatus('Permiso de cámara concedido. Ya puedes escanear QR.');
+                          }
+                        }}
+                      >
+                        <Text style={styles.primaryButtonText}>Volver a pedir permiso</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.secondaryButton}
+                        onPress={() => Linking.openSettings()}
+                      >
+                        <Text style={styles.secondaryButtonText}>Abrir ajustes</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : null}
                     <Text style={styles.draftBannerText}>Tienes una comanda sin enviar.</Text>
                   </View>
                   <Pressable style={styles.discardDraftButton} onPress={resetDraft}>
@@ -613,7 +735,12 @@ export default function App() {
               ) : null}
               {editingOrder ? (
                 <View style={styles.editBanner}>
-                  <Text style={styles.editBannerText}>Editando {editingOrder.id}</Text>
+                  <Text style={styles.editBannerText}>
+                    Editando {editingOrder.id}
+                    {Array.isArray(editingOrder.comments) && editingOrder.comments.length > 0
+                      ? ` · ${editingOrder.comments.length} comentario${editingOrder.comments.length === 1 ? '' : 's'}`
+                      : ''}
+                  </Text>
                   <Pressable style={styles.cancelEditButton} onPress={resetDraft}>
                     <Text style={styles.cancelEditButtonText}>Cancelar</Text>
                   </Pressable>
@@ -649,6 +776,41 @@ export default function App() {
               </Pressable>
             ))}
           </View>
+
+          <View style={styles.commentCard}>
+            <Text style={styles.sectionTitle}>
+              Comentarios de la comanda
+              {editingOrder && Array.isArray(editingOrder.comments) && editingOrder.comments.length > 0
+                ? ` (${editingOrder.comments.length})`
+                : ''}
+            </Text>
+            <Text style={styles.serverBadge}>
+              {editingOrder ? 'Se agregara como un comentario nuevo al guardar la edición.' : 'Opcional: se enviara con la comanda.'}
+            </Text>
+            <TextInput
+              value={commentDraft}
+              onChangeText={setCommentDraft}
+              placeholder="Ej: sin cebolla, salsa aparte, bien asado"
+              placeholderTextColor="#8c7d6f"
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+              style={styles.commentInput}
+            />
+            {editingOrder && Array.isArray(editingOrder.comments) && editingOrder.comments.length > 0 ? (
+              <View style={styles.commentHistory}>
+                <Text style={styles.commentHistoryTitle}>Comentarios previos</Text>
+                {editingOrder.comments.map((comment, index) => (
+                  <View key={`${editingOrder.id}-comment-${index}`} style={styles.commentHistoryItem}>
+                    <Text style={styles.commentHistoryText}>{comment.text}</Text>
+                    <Text style={styles.commentHistoryMeta}>
+                      {comment.author || 'Mesero'} · {new Date(comment.createdAt).toLocaleString('es-CO')}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.formCard}>
@@ -675,6 +837,11 @@ export default function App() {
                       style={[styles.openOrderCard, selectedOrderId === order.id ? styles.openOrderCardActive : null]}
                       onPress={() => startOrderEdition(order)}
                     >
+                      {Array.isArray(order.comments) && order.comments.length > 0 ? (
+                        <Text style={styles.openOrderCommentBadge}>
+                          {order.comments.length} comentario{order.comments.length === 1 ? '' : 's'}
+                        </Text>
+                      ) : null}
                       <Text style={styles.openOrderTitle}>{order.clientName}</Text>
                       <Text style={styles.openOrderMeta}>{order.id} · Mesa {order.tableNumber}</Text>
                       <Text style={styles.openOrderMeta}>{order.items.length} items</Text>
@@ -712,22 +879,31 @@ export default function App() {
               </Pressable>
 
               {!isCollapsed && section.items.map((item) => (
-                <View key={item.id} style={styles.menuCard}>
-                  <View style={styles.menuMeta}>
+                (() => {
+                  const currentQuantity = Number(quantities[item.id] ?? 0);
+                  const originalQuantity = Number(originalQuantities[item.id] ?? 0);
+                  const isEdited = Boolean(selectedOrderId) && currentQuantity !== originalQuantity;
+                  return (
+                <View key={item.id} style={[styles.menuCard, isEdited ? styles.menuCardEdited : null]}>
+                  <View style={[styles.menuMeta, isEdited ? styles.menuMetaEdited : null]}>
                     <Text style={styles.dishName}>{item.name}</Text>
                     <Text style={styles.price}>{formatCurrency(Number(item.price) || 0)}</Text>
                   </View>
+
+                  {isEdited ? <Text style={styles.changeTag}>Cambio pendiente</Text> : null}
 
                   <View style={styles.quantityRow}>
                     <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, -1)}>
                       <Text style={styles.quantityButtonText}>-</Text>
                     </Pressable>
-                    <Text style={styles.quantityValue}>{quantities[item.id] ?? 0}</Text>
+                    <Text style={[styles.quantityValue, isEdited ? styles.quantityValueEdited : null]}>{quantities[item.id] ?? 0}</Text>
                     <Pressable style={styles.quantityButton} onPress={() => changeQuantity(item.id, 1)}>
                       <Text style={styles.quantityButtonText}>+</Text>
                     </Pressable>
                   </View>
                 </View>
+                  );
+                })()
               ))}
             </View>
           );
@@ -745,6 +921,21 @@ export default function App() {
           </Pressable>
         </View>
       </ScrollView>
+      {scanning ? (
+        <View style={styles.scannerOverlay}>
+          <CameraView
+            facing="back"
+            style={StyleSheet.absoluteFillObject}
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={handleBarCodeScanned}
+          />
+          <View style={styles.scannerControls}>
+            <Pressable style={styles.secondaryButton} onPress={() => setScanning(false)}>
+              <Text style={styles.secondaryButtonText}>Cancelar</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -786,6 +977,17 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: '#e8d8c6',
+    gap: 10
+  },
+  permissionCard: {
+    backgroundColor: '#fff3e6',
+    borderRadius: 20,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#f0caa5',
+    gap: 10
+  },
+  permissionActions: {
     gap: 10
   },
   sectionTitle: {
@@ -984,6 +1186,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     minWidth: '48%'
   },
+  openOrderCommentBadge: {
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#fff0e0',
+    color: '#9a4f00',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6
+  },
   openOrderCardActive: {
     borderColor: '#f08a24',
     backgroundColor: '#fff3e6'
@@ -1007,6 +1222,50 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8
+  },
+  commentCard: {
+    backgroundColor: '#fff7ef',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ecd8c3',
+    padding: 12,
+    gap: 10
+  },
+  commentInput: {
+    minHeight: 96,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e4d2bf',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#2f2319'
+  },
+  commentHistory: {
+    gap: 8
+  },
+  commentHistoryTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#7a5f49',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8
+  },
+  commentHistoryItem: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#eddcca',
+    padding: 10,
+    gap: 4
+  },
+  commentHistoryText: {
+    color: '#2f2319',
+    lineHeight: 19
+  },
+  commentHistoryMeta: {
+    color: '#7b6857',
+    fontSize: 12
   },
   tableChip: {
     borderWidth: 1,
@@ -1061,12 +1320,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#eadaca'
   },
+  menuCardEdited: {
+    borderColor: '#d46a6a',
+    backgroundColor: '#fff5f5'
+  },
   menuMeta: {
     marginBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 10,
     alignItems: 'flex-start'
+  },
+  menuMetaEdited: {
+    marginBottom: 6
   },
   dishName: {
     flex: 1,
@@ -1078,6 +1344,14 @@ const styles = StyleSheet.create({
     color: '#1f8f73',
     fontWeight: '800',
     fontSize: 14
+  },
+  changeTag: {
+    color: '#b42318',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6
   },
   quantityRow: {
     flexDirection: 'row',
@@ -1104,6 +1378,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     color: '#231a15'
+  },
+  quantityValueEdited: {
+    color: '#b42318'
   },
   actionCard: {
     backgroundColor: '#fffaf4',
@@ -1136,5 +1413,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '800'
+  },
+  scannerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  scannerControls: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    justifyContent: 'center',
+    alignItems: 'center'
   }
 });

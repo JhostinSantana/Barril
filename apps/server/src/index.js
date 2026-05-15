@@ -177,6 +177,7 @@ app.patch('/api/waiters/:waiterName', async (req, res, next) => {
 app.post('/api/orders', async (req, res, next) => {
   try {
     const { clientName, tableNumber, waiterName, items } = req.body;
+    const comment = (req.body?.comment ?? '').toString().trim();
 
     if (!clientName || !tableNumber || !waiterName || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ message: 'Debe enviar nombre del cliente, mesa, mesero y al menos un producto.' });
@@ -206,7 +207,10 @@ app.post('/api/orders', async (req, res, next) => {
       total,
       createdAt: new Date().toISOString(),
       paidAt: null,
-      items: summarizeItems(normalizedItems, menu)
+      items: summarizeItems(normalizedItems, menu),
+      comments: comment
+        ? [{ text: comment, createdAt: new Date().toISOString(), author: waiterName, kind: 'initial' }]
+        : []
     };
 
     await createOrder(order);
@@ -221,6 +225,7 @@ app.patch('/api/orders/:orderId', async (req, res, next) => {
   try {
     const { orderId } = req.params;
     const { clientName, tableNumber, waiterName, items } = req.body;
+    const comment = (req.body?.comment ?? '').toString().trim();
 
     if (!clientName || !tableNumber || !waiterName || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ message: 'Debe enviar nombre del cliente, mesa, mesero y al menos un producto.' });
@@ -256,7 +261,8 @@ app.patch('/api/orders/:orderId', async (req, res, next) => {
       tableNumber,
       waiterName,
       total,
-      items: summarizeItems(normalizedItems, menu)
+      items: summarizeItems(normalizedItems, menu),
+      comment
     });
 
     io.emit('order:updated', updatedOrder);

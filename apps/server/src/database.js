@@ -84,6 +84,20 @@ function mapOrderRow(row, items, payments) {
   const paidAmount = roundMoney(row.paid_amount ?? 0);
   const balanceDue = roundMoney(Math.max(Number(row.total ?? 0) - paidAmount, 0));
   const paymentSummary = getPaymentSummary(payments);
+  let editSummary = [];
+  let comments = [];
+
+  try {
+    editSummary = row.edit_summary_json ? JSON.parse(row.edit_summary_json) : [];
+  } catch {
+    editSummary = [];
+  }
+
+  try {
+    comments = row.comments_json ? JSON.parse(row.comments_json) : [];
+  } catch {
+    comments = [];
+  }
 
   return {
     id: row.id,
@@ -98,9 +112,64 @@ function mapOrderRow(row, items, payments) {
     total: row.total,
     createdAt: row.created_at,
     paidAt: row.paid_at,
+    editSummary,
+    editedAt: row.edited_at,
+    comments,
     items,
     payments
   };
+}
+
+function buildEditSummary(currentItems, nextItems) {
+  const currentMap = new Map((currentItems ?? []).map((item) => [item.menuItemId, item]));
+  const nextMap = new Map((nextItems ?? []).map((item) => [item.menuItemId, item]));
+  const summary = [];
+
+  for (const [menuItemId, nextItem] of nextMap.entries()) {
+    const currentItem = currentMap.get(menuItemId);
+    if (!currentItem) {
+      summary.push({
+        menuItemId,
+        name: nextItem.name,
+        category: nextItem.category,
+        type: 'added',
+        previousQuantity: 0,
+        quantity: Number(nextItem.quantity) || 0,
+        delta: Number(nextItem.quantity) || 0
+      });
+      continue;
+    }
+
+    const previousQuantity = Number(currentItem.quantity) || 0;
+    const nextQuantity = Number(nextItem.quantity) || 0;
+    if (previousQuantity !== nextQuantity) {
+      summary.push({
+        menuItemId,
+        name: nextItem.name,
+        category: nextItem.category,
+        type: nextQuantity > previousQuantity ? 'quantity-up' : 'quantity-down',
+        previousQuantity,
+        quantity: nextQuantity,
+        delta: nextQuantity - previousQuantity
+      });
+    }
+  }
+
+  for (const [menuItemId, currentItem] of currentMap.entries()) {
+    if (nextMap.has(menuItemId)) continue;
+    const previousQuantity = Number(currentItem.quantity) || 0;
+    summary.push({
+      menuItemId,
+      name: currentItem.name,
+      category: currentItem.category,
+      type: 'removed',
+      previousQuantity,
+      quantity: 0,
+      delta: -previousQuantity
+    });
+  }
+
+  return summary;
 }
 
 export async function initializeDatabase() {
@@ -136,7 +205,10 @@ export async function initializeDatabase() {
       total REAL NOT NULL,
       paid_amount REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
-      paid_at TEXT
+      paid_at TEXT,
+      edit_summary_json TEXT NOT NULL DEFAULT '[]',
+      comments_json TEXT NOT NULL DEFAULT '[]',
+      edited_at TEXT
     )
   `);
 
@@ -191,6 +263,15 @@ export async function initializeDatabase() {
   }
   if (!orderColumns.some((column) => column.name === 'paid_amount')) {
     await run('ALTER TABLE orders ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0');
+  }
+  if (!orderColumns.some((column) => column.name === 'edit_summary_json')) {
+    await run("ALTER TABLE orders ADD COLUMN edit_summary_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!orderColumns.some((column) => column.name === 'comments_json')) {
+    await run("ALTER TABLE orders ADD COLUMN comments_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!orderColumns.some((column) => column.name === 'edited_at')) {
+    await run('ALTER TABLE orders ADD COLUMN edited_at TEXT');
   }
 
   const itemColumns = await all('PRAGMA table_info(order_items)');
@@ -353,8 +434,8 @@ export async function getMenu() {
 
 export async function createOrder(order) {
   await run(
-    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, edited_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
     [
       order.id,
       order.clientName,
@@ -365,7 +446,10 @@ export async function createOrder(order) {
       roundMoney(order.total),
       0,
       order.createdAt,
-      order.paidAt
+      order.paidAt,
+      JSON.stringify(order.editSummary ?? []),
+      JSON.stringify(order.comments ?? []),
+      order.editedAt ?? null
     ]
   );
 
@@ -408,13 +492,32 @@ export async function updateOrderWithItems(orderId, order) {
   const nextStatus = paidAmount > 0
     ? (paidAmount >= normalizedTotal ? 'paid' : 'partial')
     : 'pending';
+  const editSummary = buildEditSummary(currentOrder.items, order.items);
+  const commentText = typeof order.comment === 'string' ? order.comment.trim() : '';
+  const comments = Array.isArray(currentOrder.comments) ? [...currentOrder.comments] : [];
+  if (commentText) {
+    comments.push({
+      text: commentText,
+      createdAt: new Date().toISOString(),
+      author: order.waiterName,
+      kind: 'edit'
+    });
+  }
+
+  const metadataChanged =
+    order.clientName !== currentOrder.clientName ||
+    order.tableNumber !== currentOrder.tableNumber ||
+    order.waiterName !== currentOrder.waiterName;
+  const editedAt = editSummary.length > 0 || commentText || metadataChanged
+    ? new Date().toISOString()
+    : currentOrder.editedAt ?? null;
 
   await run('BEGIN TRANSACTION');
 
   try {
     await run(
       `UPDATE orders
-       SET client_name = ?, table_number = ?, waiter_name = ?, total = ?, status = ?
+       SET client_name = ?, table_number = ?, waiter_name = ?, total = ?, status = ?, edit_summary_json = ?, comments_json = ?, edited_at = ?
        WHERE id = ?`,
       [
         order.clientName,
@@ -422,6 +525,9 @@ export async function updateOrderWithItems(orderId, order) {
         order.waiterName,
         normalizedTotal,
         nextStatus,
+        JSON.stringify(editSummary),
+        JSON.stringify(comments),
+        editedAt,
         orderId
       ]
     );

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
+import { QRCode } from 'react-qr-code';
 import './App.css';
 
 const socket = io('http://localhost:4000', { autoConnect: false });
@@ -65,6 +66,25 @@ function describePayment(order) {
   if (cash > 0) return `Efectivo (${formatCurrency(cash)})`;
   if (transfer > 0) return `Transferencia (${formatCurrency(transfer)})`;
   return 'Sin pago';
+}
+
+function getEditSummary(order) {
+  const summary = Array.isArray(order?.editSummary) ? order.editSummary : [];
+  const editedIds = new Set(summary.filter((item) => item.type !== 'removed').map((item) => item.menuItemId));
+
+  return { summary, editedIds };
+}
+
+function getComments(order) {
+  return Array.isArray(order?.comments) ? order.comments : [];
+}
+
+function getEditChangeLabel(change) {
+  if (change.type === 'added') return `Agregado: ${change.quantity}`;
+  if (change.type === 'removed') return `Eliminado: ${change.previousQuantity}`;
+  if (change.type === 'quantity-up') return `Subio de ${change.previousQuantity} a ${change.quantity}`;
+  if (change.type === 'quantity-down') return `Bajo de ${change.previousQuantity} a ${change.quantity}`;
+  return 'Editado';
 }
 
 function App() {
@@ -406,6 +426,7 @@ function App() {
   }
 
   function printKitchenTicket(order) {
+    const { summary, editedIds } = getEditSummary(order);
     const ticket = window.open('', '_blank', 'width=360,height=640');
     if (!ticket) return;
     ticket.document.write(`
@@ -416,6 +437,8 @@ function App() {
           body { font-family: monospace; padding: 12px; }
           h1, h2, p { margin: 0 0 8px; }
           ul { margin: 0; padding-left: 18px; }
+          .edited { color: #b42318; font-weight: 700; }
+          .summary { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #b42318; }
         </style>
       </head>
       <body>
@@ -428,8 +451,16 @@ function App() {
         <hr />
         <p><strong>Pedido</strong></p>
         <ul>
-          ${order.items.map((item) => `<li>${item.category} - ${item.quantity} x ${item.name}</li>`).join('')}
+          ${order.items.map((item) => `<li class="${editedIds.has(item.menuItemId) ? 'edited' : ''}">${item.category} - ${item.quantity} x ${item.name}</li>`).join('')}
         </ul>
+        ${summary.length > 0 ? `
+          <div class="summary">
+            <p><strong>Cambios recientes</strong></p>
+            <ul>
+              ${summary.map((change) => `<li class="edited">${change.name}: ${getEditChangeLabel(change)}</li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
       </body>
       </html>
     `);
@@ -551,7 +582,9 @@ function App() {
             <h3 className="group-title">Cuentas pendientes</h3>
             <div className="card-grid">
               {filteredPending.length === 0 ? <p className="empty">No hay cuentas pendientes.</p> : null}
-              {filteredPending.map((order) => (
+              {filteredPending.map((order) => {
+                const { summary, editedIds } = getEditSummary(order);
+                return (
                 <article
                   key={order.id}
                   className="order-card"
@@ -565,11 +598,22 @@ function App() {
                   <p>Estado: {getStatusLabel(order.status)}</p>
                   <ul>
                     {order.items.map((item) => (
-                      <li key={`${order.id}-${item.menuItemId}`}>
+                      <li key={`${order.id}-${item.menuItemId}`} className={editedIds.has(item.menuItemId) ? 'order-item-edited' : ''}>
                         {item.category} - {item.quantity} x {item.name}
                       </li>
                     ))}
                   </ul>
+                  {summary.length > 0 ? (
+                    <div className="order-edit-summary">
+                      <p className="order-edit-summary-title">Cambios recientes</p>
+                      {summary.map((change) => (
+                        <div key={`${order.id}-${change.menuItemId}-${change.type}`} className="order-edit-summary-item">
+                          <strong>{change.name}</strong>
+                          <span>{getEditChangeLabel(change)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <p className="total">Total: {formatCurrency(order.total)}</p>
                   <p>Abonado: {formatCurrency(order.paidAmount ?? 0)}</p>
                   <p>Saldo: {formatCurrency(order.balanceDue ?? order.total)}</p>
@@ -582,7 +626,8 @@ function App() {
                     </button>
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
 
             <h3 className="group-title">Pagadas hoy</h3>
@@ -1088,6 +1133,20 @@ function App() {
               </article>
 
               <article className="order-card">
+                <h4>Código QR</h4>
+                {networkInfo.localApiUrl ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ background: '#fff', padding: 12, borderRadius: 8 }}>
+                      <QRCode value={networkInfo.localApiUrl} />
+                    </div>
+                    <p style={{ marginTop: 8 }}>Escanea este código con la app móvil para conectar</p>
+                  </div>
+                ) : (
+                  <p>Cargando...</p>
+                )}
+              </article>
+
+              <article className="order-card">
                 <h4>URL publica del tunel</h4>
                 <input
                   value={publicApiDraft}
@@ -1233,21 +1292,56 @@ function App() {
 
       {selectedPaidOrder ? (
         <div className="modal-backdrop" onClick={() => setSelectedPaidOrder(null)}>
-          <article className="modal" onClick={(event) => event.stopPropagation()}>
+          <article
+            className="modal"
+            onClick={(event) => event.stopPropagation()}
+            style={{ maxHeight: '90vh', overflowY: 'auto' }}
+          >
+            {(() => {
+              const { summary, editedIds } = getEditSummary(selectedPaidOrder);
+              const comments = getComments(selectedPaidOrder);
+              return (
+                <>
             <h3>Detalles de la comanda pagada</h3>
             <p>
               {selectedPaidOrder.clientName} · Mesa {selectedPaidOrder.tableNumber}
             </p>
+
+            {summary.length > 0 ? (
+              <div className="order-edit-summary" style={{ marginTop: '10px' }}>
+                <p className="order-edit-summary-title">Cambios recientes</p>
+                {summary.map((change) => (
+                  <div key={`${selectedPaidOrder.id}-${change.menuItemId}-${change.type}`} className="order-edit-summary-item">
+                    <strong>{change.name}</strong>
+                    <span>{getEditChangeLabel(change)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             <div className="payment-summary">
               <p>Total: <strong>{formatCurrency(selectedPaidOrder.total)}</strong></p>
               <p>Estado: <strong>{selectedPaidOrder.status === 'paid' ? 'Pagada' : 'Abonada'}</strong></p>
             </div>
 
+            {comments.length > 0 ? (
+              <div className="comment-card" style={{ marginTop: '10px' }}>
+                <h4 style={{ marginTop: '0', marginBottom: '8px' }}>Comentarios</h4>
+                {comments.map((comment, index) => (
+                  <div key={`${selectedPaidOrder.id}-comment-${index}`} style={{ padding: '8px 0', borderBottom: index < comments.length - 1 ? '1px solid #f0e6d2' : 'none' }}>
+                    <p style={{ margin: '0 0 4px 0', whiteSpace: 'pre-wrap' }}>{comment.text}</p>
+                    <p style={{ margin: '0', color: '#6f5e4d', fontSize: '12px' }}>
+                      {comment.author || 'Mesero'} · {new Date(comment.createdAt).toLocaleString('es-CO')}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             <h4 style={{ marginTop: '12px', marginBottom: '8px' }}>Items pedidos:</h4>
             <div style={{ backgroundColor: '#fff', border: '1px solid #ecdcc9', borderRadius: '8px', padding: '8px' }}>
               {selectedPaidOrder.items.map((item) => (
-                <div key={`${selectedPaidOrder.id}-${item.menuItemId}`} style={{ padding: '6px 0', borderBottom: '1px solid #f0e6d2', fontSize: '14px' }}>
+                <div key={`${selectedPaidOrder.id}-${item.menuItemId}`} className={editedIds.has(item.menuItemId) ? 'order-item-edited' : ''} style={{ padding: '6px 0', borderBottom: '1px solid #f0e6d2', fontSize: '14px' }}>
                   <p style={{ margin: '0 0 2px 0' }}>{item.quantity}x {item.name}</p>
                   <p style={{ margin: '0', color: '#6f5e4d', fontSize: '12px' }}>{item.category}</p>
                 </div>
@@ -1283,6 +1377,9 @@ function App() {
                 Cerrar
               </button>
             </div>
+                </>
+              );
+            })()}
           </article>
         </div>
       ) : null}

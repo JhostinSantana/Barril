@@ -420,6 +420,14 @@
   margin-bottom: 12px;
 }
 
+.comment-card {
+  margin-top: 10px;
+  background: #fff;
+  border: 1px solid #ecdcc9;
+  border-radius: 8px;
+  padding: 8px;
+}
+
 .quincena-kpis div {
   border-radius: 14px;
   background: #fff8ef;
@@ -601,4 +609,38 @@
   .calendar-empty {
     min-height: 92px;
   }
+}
+
+.order-item-edited {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.order-edit-summary {
+  margin: 12px 0 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff3f3;
+  border: 1px solid #f0b4b4;
+}
+
+.order-edit-summary-title {
+  margin: 0 0 8px;
+  color: #b42318;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+}
+
+.order-edit-summary-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  color: #7a1f1f;
+}
+
+.order-edit-summary-item strong {
+  color: #b42318;
 }
