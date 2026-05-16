@@ -1,51 +1,109 @@
 export const DEFAULT_RESTAURANT_NAME = 'Asados en el Barril';
-export const DEFAULT_MENU_VERSION = '2026-04-24-picaditas-cerdo';
+export const DEFAULT_MENU_VERSION = '2026-05-16-menu-peso-y-cortes';
+
+const WEIGHTED_CUT_RATE = 0.00666666666 * 2;
+const WEIGHTED_CUT_BASE_PRICE = 2.5;
 
 export const DEFAULT_MENU = [
-  { id: 'picaditas-probar', name: 'PARA PROBAR', category: 'PICADITAS CERDO', price: 2.5 },
-  { id: 'picaditas-picar', name: 'PARA PICAR', category: 'PICADITAS CERDO', price: 3.5 },
-  { id: 'picaditas-gozar', name: 'PARA GOZAR', category: 'PICADITAS CERDO', price: 5.0 },
-  { id: 'picaditas-familiar', name: 'FAMILIAR', category: 'PICADITAS CERDO', price: 10.0 },
-  { id: 'picaditas-cambio-papas', name: 'PAPAS CHAUCHAS POR PAPAS FRITAS', category: 'PICADITAS CERDO', price: 1.0 },
-  { id: 'picaditas-salchipapa', name: 'SALCHIPAPA', category: 'PICADITAS CERDO', price: 3.0 },
+  { id: 'picaditas-probar', name: 'PARA PROBAR', category: 'PICADITAS CERDO', price: 2.5, pricingMode: 'fixed' },
+  { id: 'picaditas-picar', name: 'PARA PICAR', category: 'PICADITAS CERDO', price: 3.5, pricingMode: 'fixed' },
+  { id: 'picaditas-gozar', name: 'PARA GOZAR', category: 'PICADITAS CERDO', price: 5.0, pricingMode: 'fixed' },
+  { id: 'picaditas-familiar', name: 'FAMILIAR', category: 'PICADITAS CERDO', price: 10.0, pricingMode: 'fixed' },
+  { id: 'picaditas-fritas', name: 'FRITAS', category: 'PICADITAS CERDO', price: 1.0, pricingMode: 'fixed' },
+  { id: 'picaditas-patacones', name: 'PATACONES', category: 'PICADITAS CERDO', price: 1.0, pricingMode: 'fixed' },
 
-  { id: 'bebida-agua', name: 'AGUA NATURAL', category: 'BEBIDAS', price: 0.5 },
-  { id: 'bebida-jugo-frozen', name: 'JUGO FROZEN', category: 'BEBIDAS', price: 1.0 },
-  { id: 'bebida-cola-personal', name: 'COLA PERSONAL', category: 'BEBIDAS', price: 0.75 },
-  { id: 'bebida-fuze-te', name: 'FUZE TE', category: 'BEBIDAS', price: 0.75 },
-  { id: 'bebida-del-valle', name: 'DEL VALLE', category: 'BEBIDAS', price: 0.5 },
-  { id: 'bebida-coca-1l', name: 'COCA COLA DE 1L', category: 'BEBIDAS', price: 1.75 },
-  { id: 'bebida-cerveza-sol', name: 'CERVEZA SOL', category: 'BEBIDAS', price: 2.25 },
-  { id: 'bebida-cerveza-club', name: 'CERVEZA CLUB', category: 'BEBIDAS', price: 2.25 },
-  { id: 'bebida-solveza', name: 'SOLVEZA', category: 'BEBIDAS', price: 2.5 },
-  { id: 'bebida-jarra-sangria', name: 'JARRA DE SANGRIA', category: 'BEBIDAS', price: 10.0 },
+  { id: 'bebida-agua', name: 'AGUA NATURAL', category: 'BEBIDAS', price: 0.5, pricingMode: 'fixed' },
+  { id: 'bebida-jugo-frozen', name: 'JUGO FROZEN', category: 'BEBIDAS', price: 1.0, pricingMode: 'fixed' },
+  { id: 'bebida-gaseosa-personal', name: 'GASEOSA PERSONAL', category: 'BEBIDAS', price: 0.75, pricingMode: 'fixed' },
+  { id: 'bebida-fuze-te', name: 'FUZE TE', category: 'BEBIDAS', price: 0.75, pricingMode: 'fixed' },
+  { id: 'bebida-del-valle', name: 'DEL VALLE', category: 'BEBIDAS', price: 0.5, pricingMode: 'fixed' },
+  { id: 'bebida-gaseosa-1l', name: 'GASEOSA DE 1L', category: 'BEBIDAS', price: 1.75, pricingMode: 'fixed' },
+  { id: 'bebida-cerveza-sol', name: 'CERVEZA SOL', category: 'BEBIDAS', price: 2.25, pricingMode: 'fixed' },
+  { id: 'bebida-cerveza-club', name: 'CERVEZA CLUB', category: 'BEBIDAS', price: 2.25, pricingMode: 'fixed' },
+  { id: 'bebida-solveza', name: 'SOLVEZA', category: 'BEBIDAS', price: 2.5, pricingMode: 'fixed' },
+  { id: 'bebida-jarra-sangria', name: 'JARRA DE SANGRIA', category: 'BEBIDAS', price: 10.0, pricingMode: 'fixed' },
 
-  { id: 'fuerte-taco-taco', name: 'TACO TACO', category: 'PLATOS FUERTES', price: 2.75 },
-  { id: 'fuerte-costillitas', name: 'COSTILLITAS', category: 'PLATOS FUERTES', price: 5.0 },
-  { id: 'fuerte-come-solo', name: 'COME SOLO', category: 'PLATOS FUERTES', price: 4.5 },
-  { id: 'fuerte-come-bien', name: 'COME BIEN', category: 'PLATOS FUERTES', price: 5.5 },
-  { id: 'fuerte-bestia', name: 'PICADITA ESPECIAL LA BESTIA', category: 'PLATOS FUERTES', price: 24.0 },
+  { id: 'fuerte-taco-taco', name: 'TACO TACO', category: 'PLATOS FUERTES', price: 2.75, pricingMode: 'fixed' },
+  { id: 'fuerte-costillitas', name: 'COSTILLITAS', category: 'PLATOS FUERTES', price: 5.0, pricingMode: 'fixed' },
+  { id: 'fuerte-come-solo', name: 'COME SOLO', category: 'PLATOS FUERTES', price: 4.5, pricingMode: 'fixed' },
+  { id: 'fuerte-come-bien', name: 'COME BIEN', category: 'PLATOS FUERTES', price: 5.5, pricingMode: 'fixed' },
+  { id: 'fuerte-bestia', name: 'PICADITA ESPECIAL LA BESTIA', category: 'PLATOS FUERTES', price: 24.0, pricingMode: 'fixed' },
 
-  { id: 'extra-chicloso', name: 'PORCION DE CHICLOSO', category: 'PORCIONES EXTRA', price: 2.5 },
-  { id: 'extra-moro', name: 'PORCION DE MORO', category: 'PORCIONES EXTRA', price: 2.0 },
-  { id: 'extra-choclo', name: 'PORCION DE CHOCLO', category: 'PORCIONES EXTRA', price: 2.0 },
-  { id: 'extra-pan', name: 'PORCION DE PAN', category: 'PORCIONES EXTRA', price: 0.5 },
-  { id: 'extra-ensalada', name: 'PORCION DE ENSALADA', category: 'PORCIONES EXTRA', price: 0.5 },
-  { id: 'extra-papa', name: 'PORCION DE PAPA', category: 'PORCIONES EXTRA', price: 0.5 },
-  { id: 'extra-pina', name: 'PORCION DE PINA', category: 'PORCIONES EXTRA', price: 0.5 },
-  { id: 'extra-c-parri', name: 'PORCION DE C. PARRI', category: 'PORCIONES EXTRA', price: 1.0 },
-  { id: 'extra-c-f-hierb', name: 'PORCION DE C. F. HIERB', category: 'PORCIONES EXTRA', price: 1.5 },
-  { id: 'extra-cerdo', name: 'PORCION DE CERDO', category: 'PORCIONES EXTRA', price: 2.0 },
-  { id: 'extra-costilla', name: 'PORCION DE COSTILLA', category: 'PORCIONES EXTRA', price: 2.5 },
-  { id: 'extra-longaniza', name: 'PORCION DE LONGANIZA', category: 'PORCIONES EXTRA', price: 1.25 },
-  { id: 'extra-panceta', name: 'PORCION DE PANCETA', category: 'PORCIONES EXTRA', price: 2.5 },
-  { id: 'extra-papas-fritas', name: 'PORCION DE PAPAS FRITAS', category: 'PORCIONES EXTRA', price: 2.0 },
-  { id: 'extra-patacones', name: 'PORCION DE PATACONES', category: 'PORCIONES EXTRA', price: 1.5 },
-  { id: 'extra-contenedor', name: 'CONTENEDOR', category: 'PORCIONES EXTRA', price: 0.25 }
+  { id: 'extra-chicloso', name: 'PORCION DE CHICLOSO', category: 'PORCIONES EXTRA', price: 2.5, pricingMode: 'fixed' },
+  { id: 'extra-moro', name: 'PORCION DE MORO', category: 'PORCIONES EXTRA', price: 2.0, pricingMode: 'fixed' },
+  { id: 'extra-choclo', name: 'PORCION DE CHOCLO', category: 'PORCIONES EXTRA', price: 2.0, pricingMode: 'fixed' },
+  { id: 'extra-pan', name: 'PORCION DE PAN', category: 'PORCIONES EXTRA', price: 0.5, pricingMode: 'fixed' },
+  { id: 'extra-ensalada', name: 'PORCION DE ENSALADA', category: 'PORCIONES EXTRA', price: 0.5, pricingMode: 'fixed' },
+  { id: 'extra-papa', name: 'PORCION DE PAPA', category: 'PORCIONES EXTRA', price: 1.0, pricingMode: 'fixed' },
+  { id: 'extra-pina', name: 'PORCION DE PINA', category: 'PORCIONES EXTRA', price: 1.0, pricingMode: 'fixed' },
+  { id: 'extra-c-parri', name: 'PORCION DE C. PARRI', category: 'PORCIONES EXTRA', price: 1.0, pricingMode: 'fixed' },
+  { id: 'extra-c-f-hierb', name: 'PORCION DE C. F. HIERB', category: 'PORCIONES EXTRA', price: 1.5, pricingMode: 'fixed' },
+  { id: 'extra-cerdo', name: 'PORCION DE CERDO', category: 'PORCIONES EXTRA', price: 2.0, pricingMode: 'fixed' },
+  { id: 'extra-costilla', name: 'PORCION DE COSTILLA', category: 'PORCIONES EXTRA', price: 2.5, pricingMode: 'fixed' },
+  { id: 'extra-longaniza', name: 'PORCION DE LONGANIZA', category: 'PORCIONES EXTRA', price: 1.25, pricingMode: 'fixed' },
+  { id: 'extra-panceta', name: 'PORCION DE PANCETA', category: 'PORCIONES EXTRA', price: 3.0, pricingMode: 'fixed' },
+  { id: 'extra-papas-fritas', name: 'PORCION DE PAPAS FRITAS', category: 'PORCIONES EXTRA', price: 2.0, pricingMode: 'fixed' },
+  { id: 'extra-patacones', name: 'PORCION DE PATACONES', category: 'PORCIONES EXTRA', price: 2.0, pricingMode: 'fixed' },
+
+  { id: 'entrada-salchipapa', name: 'SALCHIPAPA', category: 'ENTRADAS Y ACOMPAÑANTES', price: 3.0, pricingMode: 'fixed' },
+  { id: 'entrada-patacones-chicle', name: 'PATACONES CON CHICLE', category: 'ENTRADAS Y ACOMPAÑANTES', price: 3.0, pricingMode: 'fixed' },
+  { id: 'entrada-papas-cheddar', name: 'PAPAS CON CHEDDAR', category: 'ENTRADAS Y ACOMPAÑANTES', price: 3.0, pricingMode: 'fixed' },
+  { id: 'entrada-maduro-chicle', name: 'MADURO CON CHICLE', category: 'ENTRADAS Y ACOMPAÑANTES', price: 3.0, pricingMode: 'fixed' },
+
+  { id: 'corte-lomo-fino', name: 'LOMO FINO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
+  { id: 'corte-piernitas-pollo', name: 'PIERNITAS DE POLLO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
+  { id: 'corte-costillas-san-luis', name: 'COSTILLAS SAN LUIS', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
+  { id: 'corte-costillas-baby-back', name: 'COSTILLAS BABY BACK', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
+  { id: 'corte-matambre-cerdo', name: 'MATAMBRE DE CERDO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
+  { id: 'corte-t-bone-steak', name: 'T BONE STEAK', category: 'CORTES - RES ASADA', price: 0, pricingMode: 'weight' }
 ];
 
 function roundMoney(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+export function calculateWeightedCutPrice(weightGrams) {
+  return roundMoney(WEIGHTED_CUT_BASE_PRICE + (Number(weightGrams || 0) * WEIGHTED_CUT_RATE));
+}
+
+function isWeightedMenuItem(menuItem) {
+  return menuItem?.pricingMode === 'weight';
+}
+
+function resolveOrderItemDetails(item, menuItem) {
+  const quantity = Math.max(1, Number(item.quantity) || 1);
+  const pricingMode = menuItem?.pricingMode ?? 'fixed';
+
+  if (isWeightedMenuItem(menuItem)) {
+    const weightGrams = Number(item.weightGrams ?? item.grams ?? item.weight ?? 0);
+    const unitPrice = weightGrams > 0 ? calculateWeightedCutPrice(weightGrams) : 0;
+    const subtotal = weightGrams > 0
+      ? roundMoney(unitPrice * quantity)
+      : (Number.isFinite(Number(item.subtotal)) ? roundMoney(item.subtotal) : 0);
+
+    return {
+      pricingMode,
+      weightGrams: weightGrams > 0 ? roundMoney(weightGrams) : null,
+      unitPrice: weightGrams > 0
+        ? unitPrice
+        : (Number.isFinite(Number(item.unitPrice)) ? roundMoney(item.unitPrice) : 0),
+      subtotal
+    };
+  }
+
+  const unitPrice = Number.isFinite(Number(item.unitPrice))
+    ? roundMoney(item.unitPrice)
+    : roundMoney(menuItem?.price ?? 0);
+  const subtotal = Number.isFinite(Number(item.subtotal))
+    ? roundMoney(item.subtotal)
+    : roundMoney(unitPrice * quantity);
+
+  return {
+    pricingMode,
+    weightGrams: null,
+    unitPrice,
+    subtotal
+  };
 }
 
 export function getDateKey(isoDate) {
@@ -58,27 +116,44 @@ export function getDateKey(isoDate) {
 export function calculateOrderTotal(items, menu) {
   return roundMoney(items.reduce((acc, item) => {
     const menuItem = menu.find((m) => m.id === item.menuItemId);
-    if (!menuItem) return acc;
-    return acc + menuItem.price * item.quantity;
+    const resolvedSubtotal = Number.isFinite(Number(item.subtotal))
+      ? Number(item.subtotal)
+      : resolveOrderItemDetails(item, menuItem).subtotal;
+    return acc + resolvedSubtotal;
   }, 0));
 }
 
 export function summarizeItems(items, menu) {
   return items.map((item) => {
     const menuItem = menu.find((m) => m.id === item.menuItemId);
+    const details = resolveOrderItemDetails(item, menuItem);
     return {
       menuItemId: item.menuItemId,
       name: menuItem?.name ?? 'Desconocido',
       category: menuItem?.category ?? 'Sin categoria',
-      quantity: item.quantity,
-      unitPrice: roundMoney(menuItem?.price ?? 0),
-      subtotal: roundMoney((menuItem?.price ?? 0) * item.quantity)
+      quantity: Math.max(1, Number(item.quantity) || 1),
+      pricingMode: details.pricingMode,
+      weightGrams: details.weightGrams,
+      unitPrice: details.unitPrice,
+      subtotal: details.subtotal
     };
   });
 }
 
 function createItemBucket(name, category) {
   return { name, category, quantity: 0, revenue: 0 };
+}
+
+function resolveOrderItemRevenue(item) {
+  if (Number.isFinite(Number(item.subtotal))) {
+    return roundMoney(item.subtotal);
+  }
+
+  if (Number.isFinite(Number(item.unitPrice))) {
+    return roundMoney(Number(item.unitPrice) * Math.max(1, Number(item.quantity) || 1));
+  }
+
+  return 0;
 }
 
 function sortByQuantityDescAndNameAsc(left, right) {
@@ -164,7 +239,12 @@ export function getStats(orders, menu, fromDate, toDate) {
       label: getDayLabel(dayKey),
       orders: 0,
       paidOrders: 0,
-      totalSales: 0
+      totalSales: 0,
+      dishMap: new Map(),
+      paymentsByMethod: new Map([
+        ['efectivo', { method: 'efectivo', total: 0 }],
+        ['transferencia', { method: 'transferencia', total: 0 }]
+      ])
     };
     dailyEntry.orders += 1;
 
@@ -185,16 +265,26 @@ export function getStats(orders, menu, fromDate, toDate) {
           const paymentEntry = paymentMap.get(payment.paymentMethod);
           paymentEntry.amount = roundMoney(paymentEntry.amount + amount);
         }
+        if (dailyEntry.paymentsByMethod.has(payment.paymentMethod)) {
+          const dailyPayment = dailyEntry.paymentsByMethod.get(payment.paymentMethod);
+          dailyPayment.total = roundMoney(dailyPayment.total + amount);
+        }
       });
     }
 
     order.items.forEach((item) => {
       const menuItem = menu.find((m) => m.id === item.menuItemId);
       if (!menuItem) return;
+      const revenue = resolveOrderItemRevenue(item);
       const existing = dishMap.get(menuItem.id) ?? createItemBucket(menuItem.name, menuItem.category);
       existing.quantity += item.quantity;
-      existing.revenue = roundMoney(existing.revenue + item.quantity * menuItem.price);
+      existing.revenue = roundMoney(existing.revenue + revenue);
       dishMap.set(menuItem.id, existing);
+
+      const dailyDish = dailyEntry.dishMap.get(menuItem.id) ?? createItemBucket(menuItem.name, menuItem.category);
+      dailyDish.quantity += item.quantity;
+      dailyDish.revenue = roundMoney(dailyDish.revenue + revenue);
+      dailyEntry.dishMap.set(menuItem.id, dailyDish);
 
       const categoryExisting = categoryMap.get(menuItem.category) ?? {
         label: menuItem.category,
@@ -203,10 +293,10 @@ export function getStats(orders, menu, fromDate, toDate) {
         items: new Map()
       };
       categoryExisting.quantity += item.quantity;
-      categoryExisting.revenue = roundMoney(categoryExisting.revenue + item.quantity * menuItem.price);
+      categoryExisting.revenue = roundMoney(categoryExisting.revenue + revenue);
       const categoryItem = categoryExisting.items.get(menuItem.id) ?? createItemBucket(menuItem.name, menuItem.category);
       categoryItem.quantity += item.quantity;
-      categoryItem.revenue = roundMoney(categoryItem.revenue + item.quantity * menuItem.price);
+      categoryItem.revenue = roundMoney(categoryItem.revenue + revenue);
       categoryExisting.items.set(menuItem.id, categoryItem);
       categoryMap.set(menuItem.category, categoryExisting);
 
@@ -214,7 +304,7 @@ export function getStats(orders, menu, fromDate, toDate) {
       const quincenaEntry = quincenaMap.get(quincenaKey);
       const quincenaItem = quincenaEntry.dishMap.get(menuItem.id) ?? createItemBucket(menuItem.name, menuItem.category);
       quincenaItem.quantity += item.quantity;
-      quincenaItem.revenue = roundMoney(quincenaItem.revenue + item.quantity * menuItem.price);
+      quincenaItem.revenue = roundMoney(quincenaItem.revenue + revenue);
       quincenaEntry.dishMap.set(menuItem.id, quincenaItem);
     });
 
@@ -230,9 +320,25 @@ export function getStats(orders, menu, fromDate, toDate) {
       label: getDayLabel(dateKey),
       orders: 0,
       paidOrders: 0,
-      totalSales: 0
+      totalSales: 0,
+      dishMap: new Map(),
+      paymentsByMethod: new Map([
+        ['efectivo', { method: 'efectivo', total: 0 }],
+        ['transferencia', { method: 'transferencia', total: 0 }]
+      ])
     };
-    calendarDays.push(entry);
+    const topDishes = buildRanking(entry.dishMap, 5);
+    const paymentMethods = [...entry.paymentsByMethod.values()].filter((pm) => pm.total > 0);
+    calendarDays.push({
+      date: entry.date,
+      dayNumber: entry.dayNumber,
+      label: entry.label,
+      orders: entry.orders,
+      paidOrders: entry.paidOrders,
+      totalSales: entry.totalSales,
+      topDishes,
+      paymentMethods
+    });
   }
 
   const quincenas = [...quincenaMap.values()].map((bucket) => ({

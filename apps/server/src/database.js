@@ -193,6 +193,7 @@ export async function initializeDatabase() {
       name TEXT NOT NULL,
       category TEXT NOT NULL,
       price REAL NOT NULL,
+      pricing_mode TEXT NOT NULL DEFAULT 'fixed',
       sort_order INTEGER NOT NULL
     )
   `);
@@ -228,6 +229,8 @@ export async function initializeDatabase() {
       quantity INTEGER NOT NULL,
       unit_price REAL NOT NULL,
       subtotal REAL NOT NULL,
+      weight_grams REAL,
+      pricing_mode TEXT NOT NULL DEFAULT 'fixed',
       FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
     )
   `);
@@ -293,6 +296,17 @@ export async function initializeDatabase() {
   if (!itemColumns.some((column) => column.name === 'category')) {
     await run("ALTER TABLE order_items ADD COLUMN category TEXT NOT NULL DEFAULT 'Sin categoria'");
   }
+  if (!itemColumns.some((column) => column.name === 'weight_grams')) {
+    await run('ALTER TABLE order_items ADD COLUMN weight_grams REAL');
+  }
+  if (!itemColumns.some((column) => column.name === 'pricing_mode')) {
+    await run("ALTER TABLE order_items ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'fixed'");
+  }
+
+  const menuColumns = await all('PRAGMA table_info(menu_items)');
+  if (!menuColumns.some((column) => column.name === 'pricing_mode')) {
+    await run("ALTER TABLE menu_items ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'fixed'");
+  }
 
   await run(`
     UPDATE order_items
@@ -355,8 +369,8 @@ export async function initializeDatabase() {
     await run('DELETE FROM menu_items');
     for (const [index, item] of DEFAULT_MENU.entries()) {
       await run(
-        'INSERT INTO menu_items(id, name, category, price, sort_order) VALUES (?, ?, ?, ?, ?)',
-        [item.id, item.name, item.category, item.price, index]
+        'INSERT INTO menu_items(id, name, category, price, pricing_mode, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+        [item.id, item.name, item.category, item.price, item.pricingMode ?? 'fixed', index]
       );
     }
 
@@ -450,7 +464,7 @@ export async function setWaiterActive(name, active) {
 }
 
 export async function getMenu() {
-  return all('SELECT id, name, category, price FROM menu_items ORDER BY sort_order ASC');
+  return all('SELECT id, name, category, price, pricing_mode AS pricingMode FROM menu_items ORDER BY sort_order ASC');
 }
 
 export async function createOrder(order) {
@@ -479,8 +493,8 @@ export async function createOrder(order) {
 
   for (const item of order.items) {
     await run(
-      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         order.id,
         item.menuItemId,
@@ -488,7 +502,9 @@ export async function createOrder(order) {
         item.category,
         item.quantity,
         roundMoney(item.unitPrice),
-        roundMoney(item.subtotal)
+        roundMoney(item.subtotal),
+        item.weightGrams ?? null,
+        item.pricingMode ?? 'fixed'
       ]
     );
   }
@@ -560,8 +576,8 @@ export async function updateOrderWithItems(orderId, order) {
 
     for (const item of order.items) {
       await run(
-        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId,
           item.menuItemId,
@@ -569,7 +585,9 @@ export async function updateOrderWithItems(orderId, order) {
           item.category,
           item.quantity,
           roundMoney(item.unitPrice),
-          roundMoney(item.subtotal)
+          roundMoney(item.subtotal),
+          item.weightGrams ?? null,
+          item.pricingMode ?? 'fixed'
         ]
       );
     }
@@ -703,7 +721,7 @@ export async function updateOrderPayment(orderId, paymentMethod, paidAt) {
 
 async function listOrderItems(orderId) {
   return all(
-    'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal FROM order_items WHERE order_id = ? ORDER BY id ASC',
+    'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, pricing_mode AS pricingMode FROM order_items WHERE order_id = ? ORDER BY id ASC',
     [orderId]
   );
 }
@@ -713,4 +731,128 @@ async function listOrderPayments(orderId) {
     'SELECT id, payment_method AS paymentMethod, amount, tendered_amount AS tenderedAmount, change_given AS changeGiven, transfer_number AS transferenceNumber, created_at AS createdAt FROM order_payments WHERE order_id = ? ORDER BY id ASC',
     [orderId]
   );
+}
+
+export async function exportAllData() {
+  const orders = await all('SELECT * FROM orders ORDER BY created_at ASC');
+  const orderItems = await all('SELECT * FROM order_items ORDER BY id ASC');
+  const payments = await all('SELECT * FROM order_payments ORDER BY id ASC');
+  const menu = await all('SELECT * FROM menu_items ORDER BY sort_order ASC');
+  const settings = await all('SELECT key, value FROM settings');
+  const waiters = await all('SELECT * FROM waiters ORDER BY created_at ASC');
+
+  return { orders, orderItems, payments, menu, settings, waiters };
+}
+
+export async function restoreData(payload) {
+  // payload should be { orders, orderItems, payments, menu, settings, waiters }
+  await run('BEGIN TRANSACTION');
+  try {
+    // Clear existing tables (keep schema)
+    await run('DELETE FROM order_payments');
+    await run('DELETE FROM order_items');
+    await run('DELETE FROM orders');
+    await run('DELETE FROM menu_items');
+    await run('DELETE FROM settings');
+    await run('DELETE FROM waiters');
+
+    if (Array.isArray(payload.menu)) {
+      for (const item of payload.menu) {
+        await run(
+          'INSERT INTO menu_items(id, name, category, price, pricing_mode, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+          [item.id, item.name, item.category, item.price, item.pricing_mode ?? item.pricingMode ?? 'fixed', item.sort_order ?? 0]
+        );
+      }
+    }
+
+    if (Array.isArray(payload.settings)) {
+      for (const s of payload.settings) {
+        await run('INSERT INTO settings(key, value) VALUES (?, ?)', [s.key, s.value]);
+      }
+    }
+
+    if (Array.isArray(payload.waiters)) {
+      for (const w of payload.waiters) {
+        await run('INSERT INTO waiters(waiter_key, display_name, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+          [w.waiter_key, w.display_name, w.active ?? 1, w.created_at ?? new Date().toISOString(), w.updated_at ?? new Date().toISOString()]);
+      }
+    }
+
+    if (Array.isArray(payload.orders)) {
+      for (const o of payload.orders) {
+        await run(
+          `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [o.id, o.client_name ?? o.clientName, o.table_number ?? o.tableNumber, o.waiter_name ?? o.waiterName ?? '', o.status ?? 'pending', o.payment_method ?? o.paymentMethod ?? null, o.total ?? 0, o.paid_amount ?? o.paidAmount ?? 0, o.created_at ?? o.createdAt ?? new Date().toISOString(), o.paid_at ?? o.paidAt ?? null]
+        );
+      }
+    }
+
+    if (Array.isArray(payload.orderItems)) {
+      for (const it of payload.orderItems) {
+        await run(
+          `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [it.order_id, it.menu_item_id, it.name, it.category ?? 'Sin categoria', it.quantity ?? 1, it.unit_price ?? it.unitPrice ?? 0, it.subtotal ?? 0, it.weight_grams ?? it.weightGrams ?? null, it.pricing_mode ?? it.pricingMode ?? 'fixed']
+        );
+      }
+    }
+
+    if (Array.isArray(payload.payments)) {
+      for (const p of payload.payments) {
+        await run(
+          `INSERT INTO order_payments(order_id, payment_method, amount, tendered_amount, change_given, transfer_number, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [p.order_id, p.payment_method ?? p.paymentMethod, p.amount ?? 0, p.tendered_amount ?? p.tenderedAmount ?? 0, p.change_given ?? p.changeGiven ?? 0, p.transfer_number ?? p.transferenceNumber ?? null, p.created_at ?? p.createdAt ?? new Date().toISOString()]
+        );
+      }
+    }
+
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK');
+    throw err;
+  }
+}
+
+export async function deleteOrdersOlderThan(dateISO) {
+  await run('BEGIN TRANSACTION');
+  try {
+    await run(
+      `DELETE FROM order_payments WHERE order_id IN (SELECT id FROM orders WHERE created_at < ?)`,
+      [dateISO]
+    );
+
+    await run(
+      `DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE created_at < ?)`,
+      [dateISO]
+    );
+
+    await run(
+      `DELETE FROM orders WHERE created_at < ?`,
+      [dateISO]
+    );
+
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK');
+    throw err;
+  }
+}
+
+export async function deleteAllOrders() {
+  await run('BEGIN TRANSACTION');
+  try {
+    await run('DELETE FROM order_payments');
+    await run('DELETE FROM order_items');
+    await run('DELETE FROM orders');
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK');
+    throw err;
+  }
+}
+
+export async function vacuumDatabase() {
+  await run('VACUUM');
 }

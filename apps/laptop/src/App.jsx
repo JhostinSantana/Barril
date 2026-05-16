@@ -93,6 +93,14 @@ function getEditChangeLabel(change) {
   return 'Editado';
 }
 
+function isWeightedItem(item) {
+  return item?.pricingMode === 'weight';
+}
+
+function calculateWeightedCutPrice(weightGrams) {
+  return Math.round(((0.00666666666 * Number(weightGrams || 0) * 2) + 2.5 + Number.EPSILON) * 100) / 100;
+}
+
 function App() {
   const [activeView, setActiveView] = useState('cash');
   const [restaurantName, setRestaurantName] = useState('Asados en el Barril');
@@ -137,6 +145,11 @@ function App() {
   const [waiterStatus, setWaiterStatus] = useState('');
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
   const [confirmModal, setConfirmModal] = useState(null);
+  const [weightModalOrder, setWeightModalOrder] = useState(null);
+  const [weightDrafts, setWeightDrafts] = useState({});
+  const [restoreFileInputKey, setRestoreFileInputKey] = useState(Date.now());
+  const [dayDetailModal, setDayDetailModal] = useState(null);
+  const [cleanupDateInput, setCleanupDateInput] = useState('2026-01-01');
 
   const filteredPending = useMemo(() => {
     if (!query.trim()) return pendingOrders;
@@ -238,6 +251,13 @@ function App() {
     () => Math.max(...stats.paymentSummary.map((item) => item.amount), 0),
     [stats.paymentSummary]
   );
+
+  const hasPendingWeightValues = useMemo(() => {
+    if (!weightModalOrder) return false;
+    return weightModalOrder.items.some(
+      (item) => isWeightedItem(item) && parseMoneyInput(weightDrafts[item.menuItemId]) <= 0
+    );
+  }, [weightDrafts, weightModalOrder]);
 
   async function getJson(url, options) {
     const response = await fetch(url, options);
@@ -358,6 +378,55 @@ function App() {
     setPaymentDraft({ paymentMethod: 'efectivo', amount: '', tenderedAmount: '', transferenceNumber: '' });
   }
 
+  function openWeightModal(order) {
+    const drafts = order.items.reduce((acc, item) => {
+      if (isWeightedItem(item)) {
+        acc[item.menuItemId] = item.weightGrams != null ? `${item.weightGrams}` : '';
+      }
+      return acc;
+    }, {});
+
+    setWeightModalOrder(order);
+    setWeightDrafts(drafts);
+  }
+
+  function closeWeightModal() {
+    setWeightModalOrder(null);
+    setWeightDrafts({});
+  }
+
+  async function saveWeightModal() {
+    if (!weightModalOrder) return;
+
+    const nextItems = weightModalOrder.items.map((item) => {
+      if (!isWeightedItem(item)) return item;
+
+      const grams = parseMoneyInput(weightDrafts[item.menuItemId]);
+      const unitPrice = grams > 0 ? calculateWeightedCutPrice(grams) : 0;
+      return {
+        ...item,
+        weightGrams: grams > 0 ? grams : null,
+        unitPrice,
+        subtotal: Math.round((unitPrice * Number(item.quantity || 1) + Number.EPSILON) * 100) / 100
+      };
+    });
+
+    const updatedOrder = await getJson(`/api/orders/${weightModalOrder.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientName: weightModalOrder.clientName,
+        tableNumber: weightModalOrder.tableNumber,
+        waiterName: weightModalOrder.waiterName,
+        items: nextItems
+      })
+    });
+
+    setWeightModalOrder(updatedOrder);
+    closeWeightModal();
+    await Promise.all([loadCashView(), loadStatsView(), loadHistoryView(historyDate)]);
+  }
+
   async function registerPayment() {
     if (!payingOrder || !paymentPreview.canSubmit) return;
 
@@ -393,6 +462,142 @@ function App() {
     const info = await getJson('/api/network-info');
     setNetworkInfo(info);
     setPublicApiDraft(info.publicApiUrl ?? '');
+  }
+
+  async function downloadJsonBackup() {
+    setLoading(true);
+    try {
+      const data = await getJson('/api/backup/json');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `barril-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setNetworkStatus('Backup JSON generado.');
+    } catch (err) {
+      setNetworkStatus(`Error generando backup: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function restoreFromJsonFile(file) {
+    if (!file) return;
+    const text = await file.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (err) {
+      setNetworkStatus('Archivo JSON inválido.');
+      return;
+    }
+
+    setConfirmModal({
+      title: 'Restaurar datos desde archivo',
+      message: 'Esto reemplazará los datos actuales con los contenidos del archivo. ¿Deseas continuar?',
+      action: async () => {
+        try {
+          await getJson('/api/restore/json', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          setNetworkStatus('Restauración completada. Recargando...');
+          await loadCashView();
+          await loadStatsView();
+          setRestoreFileInputKey(Date.now());
+        } catch (err) {
+          setNetworkStatus(`Error restaurando: ${err.message}`);
+        }
+      },
+      confirmText: 'Restaurar ahora',
+      cancelText: 'Cancelar'
+    });
+  }
+
+  async function triggerVacuum() {
+    setConfirmModal({
+      title: 'Compactar base de datos',
+      message: 'Ejecutar VACUUM compactará el archivo SQLite y puede tardar algunos segundos. ¿Continuar?',
+      action: async () => {
+        try {
+          await getJson('/api/db/vacuum', { method: 'POST' });
+          setNetworkStatus('VACUUM ejecutado.');
+        } catch (err) {
+          setNetworkStatus(`Error en VACUUM: ${err.message}`);
+        }
+      },
+      confirmText: 'Compactar',
+      cancelText: 'Cancelar'
+    });
+  }
+
+  function openCleanupModal() {
+    setConfirmModal({
+      title: '⚠️ Limpiar base de datos',
+      message: `Se borrarán TODOS los pedidos anteriores a: ${cleanupDateInput}. Esta acción es irreversible.`,
+      hasDateInput: true,
+      action: async () => {
+        if (!cleanupDateInput) {
+          setNetworkStatus('Debes seleccionar una fecha.');
+          return;
+        }
+        try {
+          setLoading(true);
+          await getJson('/api/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ before: cleanupDateInput })
+          });
+          setNetworkStatus('✓ Limpieza completada.');
+          setConfirmModal(null);
+          await loadCashView();
+          await loadStatsView();
+        } catch (err) {
+          setNetworkStatus(`✗ Error limpiando: ${err.message}`);
+        } finally {
+          setLoading(false);
+        }
+      },
+      confirmText: 'Eliminar irreversiblemente',
+      cancelText: 'Cancelar'
+    });
+  }
+
+  function openCleanupAllModal() {
+    setConfirmModal({
+      title: '🗑️ LIMPIAR TODO - PUNTO CERO',
+      message: '⚠️ ADVERTENCIA: Se eliminará TODA la base de datos (pedidos, pagos, todo). La aplicación quedará como nueva. ¿Estás seguro?',
+      action: async () => {
+        try {
+          setLoading(true);
+          await getJson('/api/cleanup/all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          setNetworkStatus('✓ Base de datos limpiada completamente.');
+          setConfirmModal(null);
+          setDayDetailModal(null);
+          await loadCashView();
+          await loadStatsView();
+        } catch (err) {
+          setNetworkStatus(`✗ Error limpiando todo: ${err.message}`);
+        } finally {
+          setLoading(false);
+        }
+      },
+      confirmText: 'SÍ, LIMPIAR TODO',
+      cancelText: 'Cancelar',
+      isDanger: true
+    });
+  }
+
+  function openDayDetail(day) {
+    setDayDetailModal(day);
   }
 
   async function savePublicUrl() {
@@ -457,7 +662,11 @@ function App() {
         <hr />
         <p><strong>Pedido</strong></p>
         <ul>
-          ${order.items.map((item) => `<li class="${editedIds.has(item.menuItemId) ? 'edited' : ''}">${item.category} - ${item.quantity} x ${item.name}</li>`).join('')}
+          ${order.items.map((item) => {
+            const weightLabel = item.weightGrams != null ? ` - ${item.weightGrams} g` : '';
+            const editedClass = editedIds.has(item.menuItemId) ? 'edited' : '';
+            return `<li class="${editedClass}">${item.category} - ${item.quantity} x ${item.name}${weightLabel}</li>`;
+          }).join('')}
         </ul>
         ${summary.length > 0 ? `
           <div class="summary">
@@ -537,6 +746,25 @@ function App() {
           <span>{paidOrders.length} pagadas</span>
           <span>API: {apiBaseUrl}</span>
           <span>IP local: {networkInfo.localIp || 'cargando...'}</span>
+          <div className="sidebar-actions" style={{ marginTop: 8 }}>
+            <button type="button" onClick={downloadJsonBackup} title="Exportar backup JSON">Exportar</button>
+            <button type="button" onClick={triggerVacuum} title="Compactar base de datos">Compactar</button>
+            <button type="button" onClick={openCleanupModal} title="Eliminar pedidos antiguos">Limpieza</button>
+            <button type="button" className="danger" onClick={openCleanupAllModal} title="⚠️ Limpiar TODO - punto cero" style={{ fontSize: '0.75rem' }}>🗑️ Limpiar todo</button>
+            <label className="file-restore-label">
+              <input
+                key={restoreFileInputKey}
+                type="file"
+                accept="application/json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) restoreFromJsonFile(f);
+                }}
+              />
+              <button type="button">Restaurar</button>
+            </label>
+          </div>
         </div>
       </aside>
 
@@ -590,6 +818,9 @@ function App() {
               {filteredPending.length === 0 ? <p className="empty">No hay cuentas pendientes.</p> : null}
               {filteredPending.map((order) => {
                 const { summary, editedIds } = getEditSummary(order);
+                const hasWeightedItems = order.items.some((item) => isWeightedItem(item));
+                const needsWeightEntry = order.items.some((item) => isWeightedItem(item) && item.weightGrams == null);
+
                 return (
                 <article
                   key={order.id}
@@ -607,6 +838,7 @@ function App() {
                     {order.items.map((item) => (
                       <li key={`${order.id}-${item.menuItemId}`} className={editedIds.has(item.menuItemId) ? 'order-item-edited' : ''}>
                         {item.category} - {item.quantity} x {item.name}
+                        {item.weightGrams != null ? ` (${item.weightGrams} g)` : ''}
                       </li>
                     ))}
                   </ul>
@@ -637,8 +869,18 @@ function App() {
                   <p className="total">Total: {formatCurrency(order.total)}</p>
                   <p>Abonado: {formatCurrency(order.paidAmount ?? 0)}</p>
                   <p>Saldo: {formatCurrency(order.balanceDue ?? order.total)}</p>
+                  {needsWeightEntry ? (
+                    <p style={{ color: '#8b4d1d', margin: '8px 0 0' }}>
+                      Falta completar el gramaje antes de cobrar.
+                    </p>
+                  ) : null}
                   <div className="actions">
-                    <button type="button" onClick={() => openPayModal(order)}>
+                    {hasWeightedItems ? (
+                      <button type="button" onClick={() => openWeightModal(order)}>
+                        Completar gramaje
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={() => openPayModal(order)} disabled={needsWeightEntry}>
                       Cobrar / Abonar
                     </button>
                     <button type="button" className="ghost" onClick={() => printKitchenTicket(order)}>
@@ -922,7 +1164,9 @@ function App() {
                   <article
                     key={day.date}
                     className="calendar-day"
-                    style={getSalesIntensityStyle(day.totalSales, maxCalendarSales)}
+                    style={{...getSalesIntensityStyle(day.totalSales, maxCalendarSales), cursor: 'pointer' }}
+                    onClick={() => openDayDetail(day)}
+                    title="Haz clic para ver detalles del día"
                   >
                     <div className="calendar-day-top">
                       <strong>{day.dayNumber}</strong>
@@ -1307,16 +1551,101 @@ function App() {
         </div>
       ) : null}
 
+      {weightModalOrder ? (
+        <div className="modal-backdrop" onClick={closeWeightModal}>
+          <article className="modal" onClick={(event) => event.stopPropagation()}>
+            <h3>Completar gramaje</h3>
+            <p>
+              {weightModalOrder.clientName} · Mesa {weightModalOrder.tableNumber}
+            </p>
+            <p style={{ color: '#6f5e4d', marginTop: 6 }}>
+              El mesero solo selecciona el corte. Aqui el cajero define los gramos antes de cobrar.
+            </p>
+
+            <div style={{ backgroundColor: '#fff', border: '1px solid #ecdcc9', borderRadius: '8px', padding: '8px', marginTop: '12px' }}>
+              {(weightModalOrder.items.filter(isWeightedItem)).map((item) => {
+                const grams = parseMoneyInput(weightDrafts[item.menuItemId]);
+                const unitPrice = grams > 0 ? calculateWeightedCutPrice(grams) : 0;
+                const subtotal = Math.round((unitPrice * Number(item.quantity || 1) + Number.EPSILON) * 100) / 100;
+
+                return (
+                  <div key={item.menuItemId} style={{ padding: '10px 0', borderBottom: '1px solid #f0e6d2' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                      <div>
+                        <p style={{ margin: '0 0 3px 0', fontWeight: '700' }}>{item.name}</p>
+                        <p style={{ margin: 0, color: '#6f5e4d', fontSize: '12px' }}>{item.category}</p>
+                      </div>
+                      <div style={{ textAlign: 'right', color: '#2f2319', fontSize: '12px', fontWeight: '700' }}>
+                        {item.quantity} unidad{item.quantity === 1 ? '' : 'es'}
+                      </div>
+                    </div>
+
+                    <div className="field-row">
+                      <label htmlFor={`grams-${item.menuItemId}`}>Gramos por unidad</label>
+                      <input
+                        id={`grams-${item.menuItemId}`}
+                        value={weightDrafts[item.menuItemId] ?? ''}
+                        onChange={(event) => setWeightDrafts((current) => ({ ...current, [item.menuItemId]: event.target.value }))}
+                        placeholder="Ej: 500"
+                      />
+                    </div>
+
+                    <div className="payment-summary" style={{ marginTop: 8 }}>
+                      <p>Precio calculado: <strong>{formatCurrency(unitPrice)}</strong></p>
+                      <p>Subtotal linea: <strong>{formatCurrency(subtotal)}</strong></p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="actions" style={{ marginTop: '12px' }}>
+              <button type="button" onClick={saveWeightModal} disabled={hasPendingWeightValues}>
+                Guardar gramaje
+              </button>
+              <button type="button" className="ghost" onClick={closeWeightModal}>
+                Cerrar
+              </button>
+            </div>
+            {hasPendingWeightValues ? (
+              <p style={{ marginTop: 8, color: '#8b4d1d', fontSize: 12, fontWeight: 700 }}>
+                Completa los gramos de todos los cortes antes de guardar.
+              </p>
+            ) : null}
+          </article>
+        </div>
+      ) : null}
+
       {confirmModal ? (
         <div className="modal-backdrop" onClick={() => setConfirmModal(null)}>
           <article className="modal" onClick={(event) => event.stopPropagation()}>
             <h3>{confirmModal.title}</h3>
             <p>{confirmModal.message}</p>
+            {confirmModal.hasDateInput ? (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: 6, fontWeight: 700 }}>
+                  Selecciona la fecha límite:
+                </label>
+                <input
+                  type="date"
+                  value={cleanupDateInput}
+                  onChange={(e) => setCleanupDateInput(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: '1px solid #e2d4c2',
+                    borderRadius: '8px',
+                    fontSize: '0.95rem',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            ) : null}
             <div className="actions">
-              <button type="button" onClick={confirmModal.action}>
-                {confirmModal.confirmText}
+              <button type="button" className={confirmModal.isDanger ? 'danger' : ''} onClick={() => { confirmModal.action(); }} disabled={loading}>
+                {loading ? 'Procesando...' : confirmModal.confirmText}
               </button>
-              <button type="button" className="ghost" onClick={() => setConfirmModal(null)}>
+              <button type="button" className="ghost" onClick={() => setConfirmModal(null)} disabled={loading}>
                 {confirmModal.cancelText}
               </button>
             </div>
@@ -1376,7 +1705,7 @@ function App() {
             <div style={{ backgroundColor: '#fff', border: '1px solid #ecdcc9', borderRadius: '8px', padding: '8px' }}>
               {selectedPaidOrder.items.map((item) => (
                 <div key={`${selectedPaidOrder.id}-${item.menuItemId}`} className={editedIds.has(item.menuItemId) ? 'order-item-edited' : ''} style={{ padding: '6px 0', borderBottom: '1px solid #f0e6d2', fontSize: '14px' }}>
-                  <p style={{ margin: '0 0 2px 0' }}>{item.quantity}x {item.name}</p>
+                  <p style={{ margin: '0 0 2px 0' }}>{item.quantity}x {item.name}{item.weightGrams != null ? ` (${item.weightGrams} g)` : ''}</p>
                   <p style={{ margin: '0', color: '#6f5e4d', fontSize: '12px' }}>{item.category}</p>
                 </div>
               ))}
@@ -1414,6 +1743,72 @@ function App() {
                 </>
               );
             })()}
+          </article>
+        </div>
+      ) : null}
+
+      {dayDetailModal ? (
+        <div className="modal-backdrop" onClick={() => setDayDetailModal(null)}>
+          <article className="modal" style={{ maxHeight: '80vh', overflowY: 'auto' }} onClick={(event) => event.stopPropagation()}>
+            <h3>
+              {new Date(dayDetailModal.date).toLocaleDateString('es-CO', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+              })}
+            </h3>
+            <p style={{ color: '#6f5e4d', marginTop: 0 }}>{dayDetailModal.date}</p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <div style={{ padding: 12, background: '#fff9f2', borderRadius: 8, border: '1px solid #e8d8c5' }}>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#8a6f55' }}>Total ventas</p>
+                <strong style={{ fontSize: '1.4rem', color: '#2f8f73' }}>{formatCurrency(dayDetailModal.totalSales)}</strong>
+              </div>
+              <div style={{ padding: 12, background: '#fff9f2', borderRadius: 8, border: '1px solid #e8d8c5' }}>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#8a6f55' }}>Pedidos</p>
+                <strong style={{ fontSize: '1.4rem' }}>{dayDetailModal.orders}</strong>
+              </div>
+            </div>
+
+            {dayDetailModal.paymentMethods && dayDetailModal.paymentMethods.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <h4 style={{ margin: '0 0 10px' }}>Métodos de pago</h4>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {dayDetailModal.paymentMethods.map((pm) => (
+                    <div key={pm.method} style={{ padding: 10, background: '#fffaf1', borderRadius: 8, display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontWeight: 700, textTransform: 'capitalize' }}>
+                        {pm.method === 'efectivo' ? '💵 Efectivo' : '🏦 Transferencia'}
+                      </span>
+                      <strong>{formatCurrency(pm.total)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {dayDetailModal.topDishes && dayDetailModal.topDishes.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <h4 style={{ margin: '0 0 10px' }}>Platos más vendidos</h4>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {dayDetailModal.topDishes.map((dish, idx) => (
+                    <div key={`${dish.name}-${idx}`} style={{ padding: 10, background: '#fffaf1', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong style={{ display: 'block' }}>{dish.name}</strong>
+                        <small style={{ color: '#8a6f55' }}>{dish.quantity} vendidos</small>
+                      </div>
+                      <strong style={{ color: '#2f8f73' }}>{formatCurrency(dish.revenue)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="actions">
+              <button type="button" className="ghost" onClick={() => setDayDetailModal(null)}>
+                Cerrar
+              </button>
+            </div>
           </article>
         </div>
       ) : null}

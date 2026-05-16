@@ -87,6 +87,24 @@ body {
   opacity: 0.9;
 }
 
+.sidebar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.sidebar-actions button,
+.file-restore-label button {
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  border-radius: 8px;
+}
+
+.file-restore-label {
+  display: inline-block;
+}
+
 .hub-note {
   margin: 10px 0 0;
   font-size: 0.92rem;
@@ -230,6 +248,15 @@ button.ghost {
   color: #3d2f1f;
 }
 
+button.danger {
+  background: #d32f2f;
+  color: white;
+}
+
+button.danger:hover {
+  background: #b71c1c;
+}
+
 .paid-card p {
   margin: 0;
   font-weight: 700;
@@ -253,7 +280,7 @@ button.ghost {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(24, 16, 11, 0.35);
+  background: rgba(0, 0, 0, 0.95);
   display: grid;
   place-items: center;
   padding: 18px;

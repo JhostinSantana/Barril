@@ -137,6 +137,10 @@ function formatCurrency(value) {
   }).format(value ?? 0);
 }
 
+function isWeightedMenuItem(item) {
+  return item?.pricingMode === 'weight';
+}
+
 export default function App() {
   const [restaurantName, setRestaurantName] = useState('Asados en el Barril');
   const [menu, setMenu] = useState([]);
@@ -887,7 +891,11 @@ export default function App() {
                 <View key={item.id} style={[styles.menuCard, isEdited ? styles.menuCardEdited : null]}>
                   <View style={[styles.menuMeta, isEdited ? styles.menuMetaEdited : null]}>
                     <Text style={styles.dishName}>{item.name}</Text>
-                    <Text style={styles.price}>{formatCurrency(Number(item.price) || 0)}</Text>
+                    {isWeightedMenuItem(item) ? (
+                      <Text style={styles.weightedPrice}>Se cobra en caja</Text>
+                    ) : (
+                      <Text style={styles.price}>{formatCurrency(Number(item.price) || 0)}</Text>
+                    )}
                   </View>
 
                   {isEdited ? <Text style={styles.changeTag}>Cambio pendiente</Text> : null}
@@ -1352,6 +1360,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.6
+  },
+  weightedPrice: {
+    color: '#8b5a2b',
+    fontWeight: '800',
+    fontSize: 12,
+    textAlign: 'right'
   },
   quantityRow: {
     flexDirection: 'row',

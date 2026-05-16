@@ -7,6 +7,9 @@ import { Server } from 'socket.io';
 import {
     addOrderPayment,
     createOrder,
+    deleteAllOrders,
+    deleteOrdersOlderThan,
+    exportAllData,
     getMenu,
     getOrderById,
     getRestaurantName,
@@ -16,11 +19,13 @@ import {
     listOrders,
     listOrdersByDate,
     listWaiters,
+    restoreData,
     setSetting,
-    upsertWaiter,
     setWaiterActive,
     updateOrderWithItems,
-    updateOrderKitchenStatus
+    updateOrderKitchenStatus,
+    upsertWaiter,
+    vacuumDatabase
 } from './database.js';
 import { printKitchenTicket } from './printer.js';
 import { calculateOrderTotal, getCashClose, getStats, summarizeItems } from './utils.js';
@@ -194,10 +199,15 @@ app.post('/api/orders', async (req, res, next) => {
     const menu = await getMenu();
     const normalizedItems = items.map((item) => ({
       menuItemId: item.menuItemId,
-      quantity: Number(item.quantity) || 1
+      quantity: Number(item.quantity) || 1,
+      weightGrams: item.weightGrams != null ? Number(item.weightGrams) : null,
+      unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
+      subtotal: item.subtotal != null ? Number(item.subtotal) : null,
+      pricingMode: item.pricingMode ?? null
     }));
 
-    const total = calculateOrderTotal(normalizedItems, menu);
+    const summarizedItems = summarizeItems(normalizedItems, menu);
+    const total = calculateOrderTotal(summarizedItems, menu);
     const order = {
       id: `COM-${nanoid(6).toUpperCase()}`,
       clientName,
@@ -209,7 +219,7 @@ app.post('/api/orders', async (req, res, next) => {
       total,
       createdAt: new Date().toISOString(),
       paidAt: null,
-      items: summarizeItems(normalizedItems, menu),
+      items: summarizedItems,
       comments: comment
         ? [{ text: comment, createdAt: new Date().toISOString(), author: waiterName, kind: 'initial' }]
         : []
@@ -254,16 +264,21 @@ app.patch('/api/orders/:orderId', async (req, res, next) => {
     const menu = await getMenu();
     const normalizedItems = items.map((item) => ({
       menuItemId: item.menuItemId,
-      quantity: Number(item.quantity) || 1
+      quantity: Number(item.quantity) || 1,
+      weightGrams: item.weightGrams != null ? Number(item.weightGrams) : null,
+      unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
+      subtotal: item.subtotal != null ? Number(item.subtotal) : null,
+      pricingMode: item.pricingMode ?? null
     }));
 
-    const total = calculateOrderTotal(normalizedItems, menu);
+    const summarizedItems = summarizeItems(normalizedItems, menu);
+    const total = calculateOrderTotal(summarizedItems, menu);
     const updatedOrder = await updateOrderWithItems(orderId, {
       clientName,
       tableNumber,
       waiterName,
       total,
-      items: summarizeItems(normalizedItems, menu),
+      items: summarizedItems,
       comment
     });
 
@@ -431,6 +446,64 @@ app.get('/api/cash-close', async (req, res, next) => {
   }
 });
 
+app.get('/api/backup/json', async (_, res, next) => {
+  try {
+    const data = await exportAllData();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/restore/json', async (req, res, next) => {
+  try {
+    const payload = req.body;
+    if (!payload) {
+      res.status(400).json({ message: 'Payload JSON requerido.' });
+      return;
+    }
+
+    await restoreData(payload);
+    io.emit('data:restored');
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/db/vacuum', async (_, res, next) => {
+  try {
+    await vacuumDatabase();
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/cleanup', async (req, res, next) => {
+  try {
+    const before = req.body?.before;
+    if (!before) {
+      res.status(400).json({ message: 'Debe indicar fecha antes de YYYY-MM-DD.' });
+      return;
+    }
+
+    await deleteOrdersOlderThan(`${before}T00:00:00.000Z`);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/cleanup/all', async (req, res, next) => {
+  try {
+    await deleteAllOrders();
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use((error, _, res, __) => {
   // eslint-disable-next-line no-console
   console.error(error);
@@ -444,6 +517,35 @@ io.on('connection', () => {
 const PORT = process.env.PORT || 4000;
 
 await initializeDatabase();
+
+// Ensure backups directory exists and schedule periodic copies of the DB file.
+const DATA_DIR = new URL('../data', import.meta.url).pathname.replace(/^\/?([A-Za-z]:)?/, '');
+const BACKUPS_DIR = `${DATA_DIR.replace(/\\/g, '/')}/backups`;
+try {
+  // Create backups dir if missing
+  // eslint-disable-next-line no-console
+  if (!require('fs').existsSync(BACKUPS_DIR)) require('fs').mkdirSync(BACKUPS_DIR, { recursive: true });
+} catch (e) {
+  // ignore
+}
+
+function performPeriodicBackup() {
+  try {
+    const src = `${DATA_DIR.replace(/\\/g, '/')}/barril.sqlite`;
+    const dest = `${BACKUPS_DIR.replace(/\\/g, '/')}/barril-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`;
+    require('fs').copyFileSync(src, dest);
+    // eslint-disable-next-line no-console
+    console.log('Backup saved to', dest);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('Backup failed', err);
+  }
+}
+
+// Schedule backup every 15 minutes
+setInterval(performPeriodicBackup, 15 * 60 * 1000);
+// Also run one at startup
+performPeriodicBackup();
 
 httpServer.listen(PORT, () => {
   // eslint-disable-next-line no-console

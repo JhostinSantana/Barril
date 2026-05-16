@@ -1,228 +1,52 @@
 {
   "restaurantName": "Asados en el Barril",
   "menu": [
-    {
-      "id": "picaditas-probar",
-      "name": "PARA PROBAR",
-      "category": "PICADITAS CERDO",
-      "price": 2.5
-    },
-    {
-      "id": "picaditas-picar",
-      "name": "PARA PICAR",
-      "category": "PICADITAS CERDO",
-      "price": 3.5
-    },
-    {
-      "id": "picaditas-gozar",
-      "name": "PARA GOZAR",
-      "category": "PICADITAS CERDO",
-      "price": 5
-    },
-    {
-      "id": "picaditas-familiar",
-      "name": "FAMILIAR",
-      "category": "PICADITAS CERDO",
-      "price": 10
-    },
-    {
-      "id": "picaditas-cambio-papas",
-      "name": "PAPAS CHAUCHAS POR PAPAS FRITAS",
-      "category": "PICADITAS CERDO",
-      "price": 1
-    },
-    {
-      "id": "picaditas-salchipapa",
-      "name": "SALCHIPAPA",
-      "category": "PICADITAS CERDO",
-      "price": 3
-    },
-    {
-      "id": "bebida-agua",
-      "name": "AGUA NATURAL",
-      "category": "BEBIDAS",
-      "price": 0.5
-    },
-    {
-      "id": "bebida-jugo-frozen",
-      "name": "JUGO FROZEN",
-      "category": "BEBIDAS",
-      "price": 1
-    },
-    {
-      "id": "bebida-cola-personal",
-      "name": "COLA PERSONAL",
-      "category": "BEBIDAS",
-      "price": 0.75
-    },
-    {
-      "id": "bebida-fuze-te",
-      "name": "FUZE TE",
-      "category": "BEBIDAS",
-      "price": 0.75
-    },
-    {
-      "id": "bebida-del-valle",
-      "name": "DEL VALLE",
-      "category": "BEBIDAS",
-      "price": 0.5
-    },
-    {
-      "id": "bebida-coca-1l",
-      "name": "COCA COLA DE 1L",
-      "category": "BEBIDAS",
-      "price": 1.75
-    },
-    {
-      "id": "bebida-cerveza-sol",
-      "name": "CERVEZA SOL",
-      "category": "BEBIDAS",
-      "price": 2.25
-    },
-    {
-      "id": "bebida-cerveza-club",
-      "name": "CERVEZA CLUB",
-      "category": "BEBIDAS",
-      "price": 2.25
-    },
-    {
-      "id": "bebida-solveza",
-      "name": "SOLVEZA",
-      "category": "BEBIDAS",
-      "price": 2.5
-    },
-    {
-      "id": "bebida-jarra-sangria",
-      "name": "JARRA DE SANGRIA",
-      "category": "BEBIDAS",
-      "price": 10
-    },
-    {
-      "id": "fuerte-taco-taco",
-      "name": "TACO TACO",
-      "category": "PLATOS FUERTES",
-      "price": 2.75
-    },
-    {
-      "id": "fuerte-costillitas",
-      "name": "COSTILLITAS",
-      "category": "PLATOS FUERTES",
-      "price": 5
-    },
-    {
-      "id": "fuerte-come-solo",
-      "name": "COME SOLO",
-      "category": "PLATOS FUERTES",
-      "price": 4.5
-    },
-    {
-      "id": "fuerte-come-bien",
-      "name": "COME BIEN",
-      "category": "PLATOS FUERTES",
-      "price": 5.5
-    },
-    {
-      "id": "fuerte-bestia",
-      "name": "PICADITA ESPECIAL LA BESTIA",
-      "category": "PLATOS FUERTES",
-      "price": 24
-    },
-    {
-      "id": "extra-chicloso",
-      "name": "PORCION DE CHICLOSO",
-      "category": "PORCIONES EXTRA",
-      "price": 2.5
-    },
-    {
-      "id": "extra-moro",
-      "name": "PORCION DE MORO",
-      "category": "PORCIONES EXTRA",
-      "price": 2
-    },
-    {
-      "id": "extra-choclo",
-      "name": "PORCION DE CHOCLO",
-      "category": "PORCIONES EXTRA",
-      "price": 2
-    },
-    {
-      "id": "extra-pan",
-      "name": "PORCION DE PAN",
-      "category": "PORCIONES EXTRA",
-      "price": 0.5
-    },
-    {
-      "id": "extra-ensalada",
-      "name": "PORCION DE ENSALADA",
-      "category": "PORCIONES EXTRA",
-      "price": 0.5
-    },
-    {
-      "id": "extra-papa",
-      "name": "PORCION DE PAPA",
-      "category": "PORCIONES EXTRA",
-      "price": 0.5
-    },
-    {
-      "id": "extra-pina",
-      "name": "PORCION DE PINA",
-      "category": "PORCIONES EXTRA",
-      "price": 0.5
-    },
-    {
-      "id": "extra-c-parri",
-      "name": "PORCION DE C. PARRI",
-      "category": "PORCIONES EXTRA",
-      "price": 1
-    },
-    {
-      "id": "extra-c-f-hierb",
-      "name": "PORCION DE C. F. HIERB",
-      "category": "PORCIONES EXTRA",
-      "price": 1.5
-    },
-    {
-      "id": "extra-cerdo",
-      "name": "PORCION DE CERDO",
-      "category": "PORCIONES EXTRA",
-      "price": 2
-    },
-    {
-      "id": "extra-costilla",
-      "name": "PORCION DE COSTILLA",
-      "category": "PORCIONES EXTRA",
-      "price": 2.5
-    },
-    {
-      "id": "extra-longaniza",
-      "name": "PORCION DE LONGANIZA",
-      "category": "PORCIONES EXTRA",
-      "price": 1.25
-    },
-    {
-      "id": "extra-panceta",
-      "name": "PORCION DE PANCETA",
-      "category": "PORCIONES EXTRA",
-      "price": 2.5
-    },
-    {
-      "id": "extra-papas-fritas",
-      "name": "PORCION DE PAPAS FRITAS",
-      "category": "PORCIONES EXTRA",
-      "price": 2
-    },
-    {
-      "id": "extra-patacones",
-      "name": "PORCION DE PATACONES",
-      "category": "PORCIONES EXTRA",
-      "price": 1.5
-    },
-    {
-      "id": "extra-contenedor",
-      "name": "CONTENEDOR",
-      "category": "PORCIONES EXTRA",
-      "price": 0.25
-    }
+    { "id": "picaditas-probar", "name": "PARA PROBAR", "category": "PICADITAS CERDO", "price": 2.5, "pricingMode": "fixed" },
+    { "id": "picaditas-picar", "name": "PARA PICAR", "category": "PICADITAS CERDO", "price": 3.5, "pricingMode": "fixed" },
+    { "id": "picaditas-gozar", "name": "PARA GOZAR", "category": "PICADITAS CERDO", "price": 5, "pricingMode": "fixed" },
+    { "id": "picaditas-familiar", "name": "FAMILIAR", "category": "PICADITAS CERDO", "price": 10, "pricingMode": "fixed" },
+    { "id": "picaditas-fritas", "name": "FRITAS", "category": "PICADITAS CERDO", "price": 1, "pricingMode": "fixed" },
+    { "id": "picaditas-patacones", "name": "PATACONES", "category": "PICADITAS CERDO", "price": 1, "pricingMode": "fixed" },
+    { "id": "bebida-agua", "name": "AGUA NATURAL", "category": "BEBIDAS", "price": 0.5, "pricingMode": "fixed" },
+    { "id": "bebida-jugo-frozen", "name": "JUGO FROZEN", "category": "BEBIDAS", "price": 1, "pricingMode": "fixed" },
+    { "id": "bebida-gaseosa-personal", "name": "GASEOSA PERSONAL", "category": "BEBIDAS", "price": 0.75, "pricingMode": "fixed" },
+    { "id": "bebida-fuze-te", "name": "FUZE TE", "category": "BEBIDAS", "price": 0.75, "pricingMode": "fixed" },
+    { "id": "bebida-del-valle", "name": "DEL VALLE", "category": "BEBIDAS", "price": 0.5, "pricingMode": "fixed" },
+    { "id": "bebida-gaseosa-1l", "name": "GASEOSA DE 1L", "category": "BEBIDAS", "price": 1.75, "pricingMode": "fixed" },
+    { "id": "bebida-cerveza-sol", "name": "CERVEZA SOL", "category": "BEBIDAS", "price": 2.25, "pricingMode": "fixed" },
+    { "id": "bebida-cerveza-club", "name": "CERVEZA CLUB", "category": "BEBIDAS", "price": 2.25, "pricingMode": "fixed" },
+    { "id": "bebida-solveza", "name": "SOLVEZA", "category": "BEBIDAS", "price": 2.5, "pricingMode": "fixed" },
+    { "id": "bebida-jarra-sangria", "name": "JARRA DE SANGRIA", "category": "BEBIDAS", "price": 10, "pricingMode": "fixed" },
+    { "id": "fuerte-taco-taco", "name": "TACO TACO", "category": "PLATOS FUERTES", "price": 2.75, "pricingMode": "fixed" },
+    { "id": "fuerte-costillitas", "name": "COSTILLITAS", "category": "PLATOS FUERTES", "price": 5, "pricingMode": "fixed" },
+    { "id": "fuerte-come-solo", "name": "COME SOLO", "category": "PLATOS FUERTES", "price": 4.5, "pricingMode": "fixed" },
+    { "id": "fuerte-come-bien", "name": "COME BIEN", "category": "PLATOS FUERTES", "price": 5.5, "pricingMode": "fixed" },
+    { "id": "fuerte-bestia", "name": "PICADITA ESPECIAL LA BESTIA", "category": "PLATOS FUERTES", "price": 24, "pricingMode": "fixed" },
+    { "id": "extra-chicloso", "name": "PORCION DE CHICLOSO", "category": "PORCIONES EXTRA", "price": 2.5, "pricingMode": "fixed" },
+    { "id": "extra-moro", "name": "PORCION DE MORO", "category": "PORCIONES EXTRA", "price": 2, "pricingMode": "fixed" },
+    { "id": "extra-choclo", "name": "PORCION DE CHOCLO", "category": "PORCIONES EXTRA", "price": 2, "pricingMode": "fixed" },
+    { "id": "extra-pan", "name": "PORCION DE PAN", "category": "PORCIONES EXTRA", "price": 0.5, "pricingMode": "fixed" },
+    { "id": "extra-ensalada", "name": "PORCION DE ENSALADA", "category": "PORCIONES EXTRA", "price": 0.5, "pricingMode": "fixed" },
+    { "id": "extra-papa", "name": "PORCION DE PAPA", "category": "PORCIONES EXTRA", "price": 1, "pricingMode": "fixed" },
+    { "id": "extra-pina", "name": "PORCION DE PINA", "category": "PORCIONES EXTRA", "price": 1, "pricingMode": "fixed" },
+    { "id": "extra-c-parri", "name": "PORCION DE C. PARRI", "category": "PORCIONES EXTRA", "price": 1, "pricingMode": "fixed" },
+    { "id": "extra-c-f-hierb", "name": "PORCION DE C. F. HIERB", "category": "PORCIONES EXTRA", "price": 1.5, "pricingMode": "fixed" },
+    { "id": "extra-cerdo", "name": "PORCION DE CERDO", "category": "PORCIONES EXTRA", "price": 2, "pricingMode": "fixed" },
+    { "id": "extra-costilla", "name": "PORCION DE COSTILLA", "category": "PORCIONES EXTRA", "price": 2.5, "pricingMode": "fixed" },
+    { "id": "extra-longaniza", "name": "PORCION DE LONGANIZA", "category": "PORCIONES EXTRA", "price": 1.25, "pricingMode": "fixed" },
+    { "id": "extra-panceta", "name": "PORCION DE PANCETA", "category": "PORCIONES EXTRA", "price": 3, "pricingMode": "fixed" },
+    { "id": "extra-papas-fritas", "name": "PORCION DE PAPAS FRITAS", "category": "PORCIONES EXTRA", "price": 2, "pricingMode": "fixed" },
+    { "id": "extra-patacones", "name": "PORCION DE PATACONES", "category": "PORCIONES EXTRA", "price": 2, "pricingMode": "fixed" },
+    { "id": "entrada-salchipapa", "name": "SALCHIPAPA", "category": "ENTRADAS Y ACOMPAÑANTES", "price": 3, "pricingMode": "fixed" },
+    { "id": "entrada-patacones-chicle", "name": "PATACONES CON CHICLE", "category": "ENTRADAS Y ACOMPAÑANTES", "price": 3, "pricingMode": "fixed" },
+    { "id": "entrada-papas-cheddar", "name": "PAPAS CON CHEDDAR", "category": "ENTRADAS Y ACOMPAÑANTES", "price": 3, "pricingMode": "fixed" },
+    { "id": "entrada-maduro-chicle", "name": "MADURO CON CHICLE", "category": "ENTRADAS Y ACOMPAÑANTES", "price": 3, "pricingMode": "fixed" },
+    { "id": "corte-lomo-fino", "name": "LOMO FINO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
+    { "id": "corte-piernitas-pollo", "name": "PIERNITAS DE POLLO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
+    { "id": "corte-costillas-san-luis", "name": "COSTILLAS SAN LUIS", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
+    { "id": "corte-costillas-baby-back", "name": "COSTILLAS BABY BACK", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
+    { "id": "corte-matambre-cerdo", "name": "MATAMBRE DE CERDO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
+    { "id": "corte-t-bone-steak", "name": "T BONE STEAK", "category": "CORTES - RES ASADA", "price": 0, "pricingMode": "weight" }
   ],
   "orders": []
 }
