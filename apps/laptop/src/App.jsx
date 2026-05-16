@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { io } from 'socket.io-client';
 import { QRCode } from 'react-qr-code';
+import { io } from 'socket.io-client';
 import './App.css';
 
 const socket = io('http://localhost:4000', { autoConnect: false });

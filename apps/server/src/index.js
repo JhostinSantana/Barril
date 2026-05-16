@@ -22,8 +22,8 @@ import {
     restoreData,
     setSetting,
     setWaiterActive,
-    updateOrderWithItems,
     updateOrderKitchenStatus,
+    updateOrderWithItems,
     upsertWaiter,
     vacuumDatabase
 } from './database.js';
