@@ -19,7 +19,8 @@ import {
     setSetting,
     upsertWaiter,
     setWaiterActive,
-    updateOrderWithItems
+    updateOrderWithItems,
+    updateOrderKitchenStatus
 } from './database.js';
 import { printKitchenTicket } from './printer.js';
 import { calculateOrderTotal, getCashClose, getStats, summarizeItems } from './utils.js';
@@ -203,6 +204,7 @@ app.post('/api/orders', async (req, res, next) => {
       tableNumber,
       waiterName,
       status: 'pending',
+      kitchenStatus: 'pendiente',
       paymentMethod: null,
       total,
       createdAt: new Date().toISOString(),
@@ -278,6 +280,41 @@ app.patch('/api/orders/:orderId', async (req, res, next) => {
 
     if (error?.code === 'PAID_AMOUNT_EXCEEDS_TOTAL') {
       res.status(409).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.patch('/api/orders/:orderId/kitchen-status', async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const kitchenStatus = req.body?.kitchenStatus?.toString() ?? '';
+
+    if (!['pendiente', 'en_preparacion', 'completado'].includes(kitchenStatus)) {
+      res.status(400).json({ message: 'Estado de cocina invalido.' });
+      return;
+    }
+
+    const currentOrder = await getOrderById(orderId);
+    if (!currentOrder) {
+      res.status(404).json({ message: 'Cuenta no encontrada.' });
+      return;
+    }
+
+    if (currentOrder.status === 'paid') {
+      res.status(409).json({ message: 'La cuenta ya esta pagada y no se puede mover en cocina.' });
+      return;
+    }
+
+    const updatedOrder = await updateOrderKitchenStatus(orderId, kitchenStatus);
+    io.emit('order:kitchen-updated', updatedOrder);
+    io.emit('order:updated', updatedOrder);
+    res.json(updatedOrder);
+  } catch (error) {
+    if (error?.code === 'INVALID_KITCHEN_STATUS') {
+      res.status(400).json({ message: error.message });
       return;
     }
 

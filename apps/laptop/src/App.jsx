@@ -56,6 +56,12 @@ function getStatusLabel(status) {
   return 'Pendiente';
 }
 
+function getKitchenStatusLabel(status) {
+  if (status === 'completado') return 'Lista';
+  if (status === 'en_preparacion') return 'En preparación';
+  return 'Pendiente';
+}
+
 function describePayment(order) {
   const cash = Number(order?.paymentSummary?.efectivo ?? 0);
   const transfer = Number(order?.paymentSummary?.transferencia ?? 0);
@@ -596,6 +602,7 @@ function App() {
                   <h4>{order.clientName}</h4>
                   <p>Mesero: {order.waiterName}</p>
                   <p>Estado: {getStatusLabel(order.status)}</p>
+                  <p>Cocina: {getKitchenStatusLabel(order.kitchenStatus)}</p>
                   <ul>
                     {order.items.map((item) => (
                       <li key={`${order.id}-${item.menuItemId}`} className={editedIds.has(item.menuItemId) ? 'order-item-edited' : ''}>
@@ -610,6 +617,19 @@ function App() {
                         <div key={`${order.id}-${change.menuItemId}-${change.type}`} className="order-edit-summary-item">
                           <strong>{change.name}</strong>
                           <span>{getEditChangeLabel(change)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {getComments(order).length > 0 ? (
+                    <div className="comment-card">
+                      <p className="order-edit-summary-title">Comentarios</p>
+                      {getComments(order).map((comment, index, comments) => (
+                        <div key={`${order.id}-comment-${index}`} style={{ padding: '8px 0', borderBottom: index < comments.length - 1 ? '1px solid #f0e6d2' : 'none' }}>
+                          <p style={{ margin: '0 0 4px 0', whiteSpace: 'pre-wrap' }}>{comment.text}</p>
+                          <p style={{ margin: '0', color: '#6f5e4d', fontSize: '12px' }}>
+                            {comment.author || 'Mesero'} · {new Date(comment.createdAt).toLocaleString('es-CO')}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -1194,6 +1214,20 @@ function App() {
             <p>
               {payingOrder.clientName} · Mesa {payingOrder.tableNumber}
             </p>
+
+            {getComments(payingOrder).length > 0 ? (
+              <div className="comment-card" style={{ marginTop: '10px' }}>
+                <h4 style={{ marginTop: '0', marginBottom: '8px' }}>Comentarios</h4>
+                {getComments(payingOrder).map((comment, index, comments) => (
+                  <div key={`${payingOrder.id}-comment-${index}`} style={{ padding: '8px 0', borderBottom: index < comments.length - 1 ? '1px solid #f0e6d2' : 'none' }}>
+                    <p style={{ margin: '0 0 4px 0', whiteSpace: 'pre-wrap' }}>{comment.text}</p>
+                    <p style={{ margin: '0', color: '#6f5e4d', fontSize: '12px' }}>
+                      {comment.author || 'Mesero'} · {new Date(comment.createdAt).toLocaleString('es-CO')}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             <div className="payment-summary">
               <p>Total: <strong>{formatCurrency(payingOrder.total)}</strong></p>

@@ -105,6 +105,9 @@ function mapOrderRow(row, items, payments) {
     tableNumber: row.table_number,
     waiterName: row.waiter_name,
     status: row.status,
+    kitchenStatus: row.kitchen_status ?? 'pendiente',
+    kitchenStartedAt: row.kitchen_started_at ?? null,
+    kitchenFinishedAt: row.kitchen_finished_at ?? null,
     paymentMethod: resolvePaymentMethod(paymentSummary, row.payment_method),
     paymentSummary,
     paidAmount,
@@ -201,6 +204,9 @@ export async function initializeDatabase() {
       table_number TEXT NOT NULL,
       waiter_name TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL,
+      kitchen_status TEXT NOT NULL DEFAULT 'pendiente',
+      kitchen_started_at TEXT,
+      kitchen_finished_at TEXT,
       payment_method TEXT,
       total REAL NOT NULL,
       paid_amount REAL NOT NULL DEFAULT 0,
@@ -264,6 +270,15 @@ export async function initializeDatabase() {
   if (!orderColumns.some((column) => column.name === 'paid_amount')) {
     await run('ALTER TABLE orders ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0');
   }
+  if (!orderColumns.some((column) => column.name === 'kitchen_status')) {
+    await run("ALTER TABLE orders ADD COLUMN kitchen_status TEXT NOT NULL DEFAULT 'pendiente'");
+  }
+  if (!orderColumns.some((column) => column.name === 'kitchen_started_at')) {
+    await run('ALTER TABLE orders ADD COLUMN kitchen_started_at TEXT');
+  }
+  if (!orderColumns.some((column) => column.name === 'kitchen_finished_at')) {
+    await run('ALTER TABLE orders ADD COLUMN kitchen_finished_at TEXT');
+  }
   if (!orderColumns.some((column) => column.name === 'edit_summary_json')) {
     await run("ALTER TABLE orders ADD COLUMN edit_summary_json TEXT NOT NULL DEFAULT '[]'");
   }
@@ -293,6 +308,12 @@ export async function initializeDatabase() {
     UPDATE orders
     SET paid_amount = total
     WHERE status = 'paid' AND (paid_amount IS NULL OR paid_amount = 0)
+  `);
+
+  await run(`
+    UPDATE orders
+    SET kitchen_status = 'pendiente'
+    WHERE kitchen_status IS NULL OR kitchen_status = ''
   `);
 
   const legacyPaidOrders = await all(`
@@ -434,14 +455,17 @@ export async function getMenu() {
 
 export async function createOrder(order) {
   await run(
-    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, edited_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, kitchen_status, kitchen_started_at, kitchen_finished_at, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, edited_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
     [
       order.id,
       order.clientName,
       order.tableNumber,
       order.waiterName,
       order.status,
+      order.kitchenStatus ?? 'pendiente',
+      order.kitchenStartedAt ?? null,
+      order.kitchenFinishedAt ?? null,
       order.paymentMethod,
       roundMoney(order.total),
       0,
@@ -555,6 +579,35 @@ export async function updateOrderWithItems(orderId, order) {
     await run('ROLLBACK');
     throw error;
   }
+
+  return getOrderById(orderId);
+}
+
+export async function updateOrderKitchenStatus(orderId, kitchenStatus) {
+  const currentOrder = await getOrderById(orderId);
+  if (!currentOrder) return null;
+
+  const allowedStatuses = new Set(['pendiente', 'en_preparacion', 'completado']);
+  if (!allowedStatuses.has(kitchenStatus)) {
+    const error = new Error('Estado de cocina invalido.');
+    error.code = 'INVALID_KITCHEN_STATUS';
+    throw error;
+  }
+
+  const now = new Date().toISOString();
+  const nextStartedAt = kitchenStatus === 'en_preparacion'
+    ? (currentOrder.kitchenStartedAt ?? now)
+    : currentOrder.kitchenStartedAt ?? null;
+  const nextFinishedAt = kitchenStatus === 'completado'
+    ? now
+    : (kitchenStatus === 'pendiente' ? null : currentOrder.kitchenFinishedAt ?? null);
+
+  await run(
+    `UPDATE orders
+     SET kitchen_status = ?, kitchen_started_at = ?, kitchen_finished_at = ?
+     WHERE id = ?`,
+    [kitchenStatus, nextStartedAt, nextFinishedAt, orderId]
+  );
 
   return getOrderById(orderId);
 }

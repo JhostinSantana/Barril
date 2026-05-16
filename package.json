@@ -2,6 +2,7 @@
   "name": "barril",
   "version": "1.0.0",
   "private": true,
+  "main": "apps/index.js",
   "workspaces": [
     "apps/*"
   ],
@@ -13,7 +14,9 @@
     "apk:init": "npm --workspace apps/mobile run apk:init",
     "apk:release": "npm --workspace apps/mobile run apk:release",
     "tunnel:server": "cloudflared tunnel --url http://localhost:4000",
-    "build": "npm run build -ws"
+    "build": "npm run build -ws",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "keywords": [
     "restaurante",
@@ -21,5 +24,10 @@
   ],
   "author": "",
   "license": "MIT",
-  "description": "Asados en el Barril - sistema de comandas, caja y estadisticas"
+  "description": "Asados en el Barril - sistema de comandas, caja y estadisticas",
+  "dependencies": {
+    "expo": "~53.0.27",
+    "react": "19.0.0",
+    "react-native": "0.79.6"
+  }
 }
