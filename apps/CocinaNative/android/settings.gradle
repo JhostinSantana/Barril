@@ -14,7 +14,7 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   ex.autolinkLibrariesFromCommand()
 }
 
-rootProject.name = 'CocinaNative'
+rootProject.name = 'Ahumados Al Barril - Cocina'
 include ':app'
 includeBuild(new File(
   providers.exec {

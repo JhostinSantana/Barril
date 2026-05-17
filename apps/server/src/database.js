@@ -402,7 +402,33 @@ export async function initializeDatabase() {
     );
   }
 
+  await syncMissingMenuItems();
   await repairMispricedOpenOrders();
+}
+
+async function syncMissingMenuItems() {
+  const existing = await all('SELECT id FROM menu_items');
+  const existingIds = new Set(existing.map((row) => row.id));
+  const maxSortRow = await get('SELECT COALESCE(MAX(sort_order), -1) AS maxSort FROM menu_items');
+  let sortOrder = Number(maxSortRow?.maxSort ?? -1) + 1;
+
+  for (const item of DEFAULT_MENU) {
+    if (existingIds.has(item.id)) continue;
+
+    await run(
+      'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [
+        item.id,
+        item.name,
+        item.category,
+        item.price,
+        item.pricingMode ?? 'fixed',
+        item.weightFormula ?? null,
+        sortOrder
+      ]
+    );
+    sortOrder += 1;
+  }
 }
 
 export async function getRestaurantName() {

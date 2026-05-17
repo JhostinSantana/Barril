@@ -125,7 +125,7 @@ function getOrderExpensesTotal(order) {
 
 function App() {
   const [activeView, setActiveView] = useState('cash');
-  const [restaurantName, setRestaurantName] = useState('Ahumados en el Barril');
+  const [restaurantName, setRestaurantName] = useState('Ahumados Al Barril');
   const [pendingOrders, setPendingOrders] = useState([]);
   const [paidOrders, setPaidOrders] = useState([]);
   const [waiters, setWaiters] = useState([]);
@@ -1584,7 +1584,7 @@ function App() {
                 <input
                   value={restaurantNameDraft}
                   onChange={(event) => setRestaurantNameDraft(event.target.value)}
-                  placeholder="Ej: Ahumados en el Barril"
+                  placeholder="Ej: Ahumados Al Barril"
                 />
                 <div className="actions" style={{ marginTop: 10 }}>
                   <button type="button" onClick={saveRestaurantName}>

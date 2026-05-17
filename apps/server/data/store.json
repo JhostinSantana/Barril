@@ -1,5 +1,5 @@
 {
-  "restaurantName": "Ahumados en el Barril",
+  "restaurantName": "Ahumados Al Barril",
   "menu": [
     { "id": "picaditas-probar", "name": "PARA PROBAR", "category": "PICADITAS CERDO", "price": 2.5, "pricingMode": "fixed" },
     { "id": "picaditas-picar", "name": "PARA PICAR", "category": "PICADITAS CERDO", "price": 3.5, "pricingMode": "fixed" },
@@ -21,6 +21,7 @@
     { "id": "fuerte-costillitas", "name": "COSTILLITAS", "category": "PLATOS FUERTES", "price": 5, "pricingMode": "fixed" },
     { "id": "fuerte-come-solo", "name": "COME SOLO", "category": "PLATOS FUERTES", "price": 4.5, "pricingMode": "fixed" },
     { "id": "fuerte-come-bien", "name": "COME BIEN", "category": "PLATOS FUERTES", "price": 5.5, "pricingMode": "fixed" },
+    { "id": "fuerte-piernitas-pollo", "name": "PIERNITAS DE POLLO", "category": "PLATOS FUERTES", "price": 6, "pricingMode": "fixed" },
     { "id": "fuerte-bestia", "name": "PICADITA ESPECIAL LA BESTIA", "category": "PLATOS FUERTES", "price": 24, "pricingMode": "fixed" },
     { "id": "extra-chicloso", "name": "PORCION DE CHICLOSO", "category": "PORCIONES EXTRA", "price": 2.5, "pricingMode": "fixed" },
     { "id": "extra-moro", "name": "PORCION DE MORO", "category": "PORCIONES EXTRA", "price": 2, "pricingMode": "fixed" },

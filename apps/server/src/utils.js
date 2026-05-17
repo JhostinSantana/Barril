@@ -9,8 +9,8 @@ export {
     WEIGHT_FORMULAS
 } from './pricing.js';
 
-export const DEFAULT_RESTAURANT_NAME = 'Ahumados en el Barril';
-export const DEFAULT_MENU_VERSION = '2026-05-17-formulas-cortes-completas';
+export const DEFAULT_RESTAURANT_NAME = 'Ahumados Al Barril';
+export const DEFAULT_MENU_VERSION = '2026-05-18-menu-piernitas-fuerte-v2';
 
 export const DEFAULT_MENU = [
   { id: 'picaditas-probar', name: 'PARA PROBAR', category: 'PICADITAS CERDO', price: 2.5, pricingMode: 'fixed' },
@@ -35,6 +35,7 @@ export const DEFAULT_MENU = [
   { id: 'fuerte-costillitas', name: 'COSTILLITAS', category: 'PLATOS FUERTES', price: 5.0, pricingMode: 'fixed' },
   { id: 'fuerte-come-solo', name: 'COME SOLO', category: 'PLATOS FUERTES', price: 4.5, pricingMode: 'fixed' },
   { id: 'fuerte-come-bien', name: 'COME BIEN', category: 'PLATOS FUERTES', price: 5.5, pricingMode: 'fixed' },
+  { id: 'fuerte-piernitas-pollo', name: 'PIERNITAS DE POLLO', category: 'PLATOS FUERTES', price: 6.0, pricingMode: 'fixed' },
   { id: 'fuerte-bestia', name: 'PICADITA ESPECIAL LA BESTIA', category: 'PLATOS FUERTES', price: 24.0, pricingMode: 'fixed' },
 
   { id: 'extra-chicloso', name: 'PORCION DE CHICLOSO', category: 'PORCIONES EXTRA', price: 2.5, pricingMode: 'fixed' },
