@@ -2,12 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sqlite3 from 'sqlite3';
 import {
-  DEFAULT_MENU,
-  DEFAULT_MENU_VERSION,
-  DEFAULT_RESTAURANT_NAME,
-  calculateExpensesTotal,
-  normalizeOrderExpenses,
-  summarizeItems
+    DEFAULT_MENU,
+    DEFAULT_MENU_VERSION,
+    DEFAULT_RESTAURANT_NAME,
+    calculateExpensesTotal,
+    normalizeOrderExpenses,
+    summarizeItems
 } from './utils.js';
 
 sqlite3.verbose();
