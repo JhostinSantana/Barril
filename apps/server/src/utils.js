@@ -1,12 +1,12 @@
 import { calculateWeightedCutPrice, resolveWeightFormula } from './pricing.js';
 
 export {
-  calculateWeightedCutPrice,
-  getWeightFormulaLabel,
-  resolveWeightFormula,
-  WEIGHT_FORMULA_CORTE_AHUMADO,
-  WEIGHT_FORMULA_LABELS,
-  WEIGHT_FORMULAS
+    calculateWeightedCutPrice,
+    getWeightFormulaLabel,
+    resolveWeightFormula,
+    WEIGHT_FORMULA_CORTE_AHUMADO,
+    WEIGHT_FORMULA_LABELS,
+    WEIGHT_FORMULAS
 } from './pricing.js';
 
 export const DEFAULT_RESTAURANT_NAME = 'Asados en el Barril';
@@ -83,18 +83,19 @@ function isWeightedMenuItem(menuItem) {
 
 function resolveOrderItemDetails(item, menuItem) {
   const quantity = Math.max(1, Number(item.quantity) || 1);
-  const pricingMode = menuItem?.pricingMode ?? 'fixed';
+  const pricingMode = item?.pricingMode ?? menuItem?.pricingMode ?? 'fixed';
+  const weightGrams = Number(item.weightGrams ?? item.grams ?? item.weight ?? 0);
+  const isWeighted = pricingMode === 'weight' || isWeightedMenuItem(menuItem) || weightGrams > 0;
 
-  if (isWeightedMenuItem(menuItem)) {
-    const weightGrams = Number(item.weightGrams ?? item.grams ?? item.weight ?? 0);
-    const weightFormula = resolveWeightFormula(menuItem);
+  if (isWeighted) {
+    const weightFormula = item?.weightFormula ?? resolveWeightFormula(menuItem);
     const unitPrice = weightGrams > 0 ? calculateWeightedCutPrice(weightGrams, weightFormula) : 0;
     const subtotal = weightGrams > 0
       ? roundMoney(unitPrice * quantity)
       : (hasProvidedMoney(item.subtotal) ? roundMoney(item.subtotal) : 0);
 
     return {
-      pricingMode,
+      pricingMode: 'weight',
       weightFormula,
       weightGrams: weightGrams > 0 ? roundMoney(weightGrams) : null,
       unitPrice: weightGrams > 0
@@ -419,4 +420,104 @@ export function getCashClose(orders, dateKey) {
     },
     { date: dateKey, total: 0, efectivo: 0, transferencia: 0, orders: 0 }
   );
+}
+
+export function getStatsSummary(orders, menu) {
+  const today = new Date().toISOString().slice(0, 10);
+  
+  // Inicializar estructura
+  const summary = {
+    today: {
+      dishes: { quantity: 0, efectivo: 0, transferencia: 0 },
+      beverages: { quantity: 0, efectivo: 0, transferencia: 0 }
+    },
+    historical: {
+      dishes: { quantity: 0, efectivo: 0, transferencia: 0 },
+      beverages: { quantity: 0, efectivo: 0, transferencia: 0 }
+    }
+  };
+
+  // Solo procesar órdenes pagadas
+  const paidOrders = orders.filter((order) => order.status === 'paid');
+
+  paidOrders.forEach((order) => {
+    const orderDate = getDateKey(order.paidAt);
+    const isPaidToday = orderDate === today;
+    const timeRange = isPaidToday ? 'today' : 'historical';
+
+    // Obtener pagos de la orden
+    const payments = getPaymentEntries(order);
+    const paymentsByMethod = new Map([
+      ['efectivo', 0],
+      ['transferencia', 0]
+    ]);
+
+    payments.forEach((payment) => {
+      const amount = roundMoney(payment?.amount ?? 0);
+      if (paymentsByMethod.has(payment.paymentMethod)) {
+        paymentsByMethod.set(
+          payment.paymentMethod,
+          roundMoney(paymentsByMethod.get(payment.paymentMethod) + amount)
+        );
+      }
+    });
+
+    // Procesar items de la orden
+    order.items.forEach((item) => {
+      const menuItem = menu.find((m) => m.id === item.menuItemId);
+      if (!menuItem) return;
+
+      const isBeverage = menuItem.category === 'BEBIDAS';
+      const productType = isBeverage ? 'beverages' : 'dishes';
+      const revenue = resolveOrderItemRevenue(item);
+      const itemQuantity = Math.max(1, Number(item.quantity) || 1);
+      
+      // Distribuir ingresos proporcionalmente según método de pago
+      const totalRevenue = roundMoney(revenue);
+      const totalPaid = roundMoney(paymentsByMethod.get('efectivo') + paymentsByMethod.get('transferencia'));
+      
+      if (totalPaid > 0) {
+        const cashRatio = roundMoney(paymentsByMethod.get('efectivo') / totalPaid);
+        const transferRatio = roundMoney(paymentsByMethod.get('transferencia') / totalPaid);
+        
+        summary[timeRange][productType].quantity += itemQuantity;
+        summary[timeRange][productType].efectivo = roundMoney(
+          summary[timeRange][productType].efectivo + (totalRevenue * cashRatio)
+        );
+        summary[timeRange][productType].transferencia = roundMoney(
+          summary[timeRange][productType].transferencia + (totalRevenue * transferRatio)
+        );
+      }
+    });
+  });
+
+  return summary;
+}
+
+export function detectDuplicateOrders(orders) {
+  const duplicates = [];
+  const ordersByContent = new Map();
+
+  orders.forEach((order) => {
+    // Crear una firma del pedido basada en: cliente, mesa, items, total
+    const itemsHash = order.items
+      .map((item) => `${item.menuItemId}:${item.quantity}`)
+      .sort()
+      .join('|');
+    const signature = `${order.clientName}|${order.tableNumber}|${itemsHash}|${order.total}`;
+
+    if (ordersByContent.has(signature)) {
+      const existing = ordersByContent.get(signature);
+      duplicates.push({
+        original: existing.id,
+        duplicate: order.id,
+        signature,
+        timeDiff: Math.abs(new Date(existing.createdAt) - new Date(order.createdAt))
+      });
+    } else {
+      ordersByContent.set(signature, order);
+    }
+  });
+
+  return duplicates;
 }

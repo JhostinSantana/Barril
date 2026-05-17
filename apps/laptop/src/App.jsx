@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { QRCode } from 'react-qr-code';
 import { io } from 'socket.io-client';
 import {
-  calculateWeightedCutPrice,
-  getWeightFormulaLabel,
-  resolveWeightFormulaForOrderItem
+    calculateWeightedCutPrice,
+    getWeightFormulaLabel,
+    resolveWeightFormulaForOrderItem
 } from '../../server/src/pricing.js';
 import './App.css';
 
@@ -137,6 +137,16 @@ function App() {
   const [historyOrders, setHistoryOrders] = useState([]);
   const [historyGrouped, setHistoryGrouped] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [statsSummary, setStatsSummary] = useState({
+    today: {
+      dishes: { quantity: 0, efectivo: 0, transferencia: 0 },
+      beverages: { quantity: 0, efectivo: 0, transferencia: 0 }
+    },
+    historical: {
+      dishes: { quantity: 0, efectivo: 0, transferencia: 0 },
+      beverages: { quantity: 0, efectivo: 0, transferencia: 0 }
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [expandedDays, setExpandedDays] = useState({});
   const [apiBaseUrl, setApiBaseUrl] = useState(getApiBaseUrl());
@@ -289,8 +299,12 @@ function App() {
 
   async function loadStatsView() {
     const range = getCurrentMonthRange();
-    const result = await getJson(`/api/stats?from=${range.from}&to=${range.to}`);
-    setStats(result);
+    const [statsResult, summaryResult] = await Promise.all([
+      getJson(`/api/stats?from=${range.from}&to=${range.to}`),
+      getJson('/api/stats-summary')
+    ]);
+    setStats(statsResult);
+    setStatsSummary(summaryResult);
   }
 
   async function loadWaiters() {
@@ -842,6 +856,9 @@ function App() {
                       <li key={`${order.id}-${item.menuItemId}`} className={editedIds.has(item.menuItemId) ? 'order-item-edited' : ''}>
                         {item.category} - {item.quantity} x {item.name}
                         {item.weightGrams != null ? ` (${item.weightGrams} g)` : ''}
+                        <div style={{ color: '#6f5e4d', fontSize: '12px', marginTop: '2px' }}>
+                          Subtotal: {formatCurrency(item.subtotal ?? 0)}
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -945,6 +962,41 @@ function App() {
                   <h3>Categorias activas</h3>
                   <strong>{stats.categories.length}</strong>
                 </article>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 32 }}>
+              <div className="section-header" style={{ marginBottom: 16 }}>
+                <h3>Resumen de Ganancias por Método de Pago</h3>
+              </div>
+              <div style={{ overflowX: 'auto', background: '#fff', borderRadius: 8, border: '1px solid #e8d8c5' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#f5ede3', borderBottom: '2px solid #e8d8c5' }}>
+                      <th style={{ padding: 12, textAlign: 'left', fontWeight: 700, color: '#6f5e4d' }}>Categoría</th>
+                      <th style={{ padding: 12, textAlign: 'center', fontWeight: 700, color: '#2f8f73' }}>Hoy - Efectivo</th>
+                      <th style={{ padding: 12, textAlign: 'center', fontWeight: 700, color: '#2f8f73' }}>Hoy - Transferencia</th>
+                      <th style={{ padding: 12, textAlign: 'center', fontWeight: 700, color: '#2f8f73' }}>Histórico - Efectivo</th>
+                      <th style={{ padding: 12, textAlign: 'center', fontWeight: 700, color: '#2f8f73' }}>Histórico - Transferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid #f0e8e0' }}>
+                      <td style={{ padding: 12, fontWeight: 600, color: '#3d3d3d' }}>🍽️ Platos</td>
+                      <td style={{ padding: 12, textAlign: 'center', color: '#2f8f73', fontWeight: 600 }}>{formatCurrency(statsSummary.today.dishes.efectivo)}</td>
+                      <td style={{ padding: 12, textAlign: 'center', color: '#2f8f73', fontWeight: 600 }}>{formatCurrency(statsSummary.today.dishes.transferencia)}</td>
+                      <td style={{ padding: 12, textAlign: 'center', color: '#2f8f73', fontWeight: 600 }}>{formatCurrency(statsSummary.historical.dishes.efectivo)}</td>
+                      <td style={{ padding: 12, textAlign: 'center', color: '#2f8f73', fontWeight: 600 }}>{formatCurrency(statsSummary.historical.dishes.transferencia)}</td>
+                    </tr>
+                    <tr style={{ background: '#fafaf7' }}>
+                      <td style={{ padding: 12, fontWeight: 600, color: '#3d3d3d' }}>🥤 Bebidas</td>
+                      <td style={{ padding: 12, textAlign: 'center', color: '#2f8f73', fontWeight: 600 }}>{formatCurrency(statsSummary.today.beverages.efectivo)}</td>
+                      <td style={{ padding: 12, textAlign: 'center', color: '#2f8f73', fontWeight: 600 }}>{formatCurrency(statsSummary.today.beverages.transferencia)}</td>
+                      <td style={{ padding: 12, textAlign: 'center', color: '#2f8f73', fontWeight: 600 }}>{formatCurrency(statsSummary.historical.beverages.efectivo)}</td>
+                      <td style={{ padding: 12, textAlign: 'center', color: '#2f8f73', fontWeight: 600 }}>{formatCurrency(statsSummary.historical.beverages.transferencia)}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -1057,7 +1109,12 @@ function App() {
                           {stats.topDishes.map((dish, index) => (
                             <li key={`${dish.name}-${index}`}>
                               <span>{dish.name}</span>
-                              <strong>{dish.quantity}</strong>
+                              <div style={{ textAlign: 'right' }}>
+                                <strong>{dish.quantity}</strong>
+                                <small style={{ display: 'block', color: '#80664f', fontSize: '0.78rem' }}>
+                                  {formatCurrency(dish.revenue)}
+                                </small>
+                              </div>
                             </li>
                           ))}
                         </ol>
@@ -1068,7 +1125,12 @@ function App() {
                           {stats.bottomDishes.map((dish, index) => (
                             <li key={`${dish.name}-${index}`}>
                               <span>{dish.name}</span>
-                              <strong>{dish.quantity}</strong>
+                                <div style={{ textAlign: 'right' }}>
+                                  <strong>{dish.quantity}</strong>
+                                  <small style={{ display: 'block', color: '#80664f', fontSize: '0.78rem' }}>
+                                    {formatCurrency(dish.revenue)}
+                                  </small>
+                                </div>
                             </li>
                           ))}
                         </ol>
@@ -1096,7 +1158,12 @@ function App() {
                             {period.topDishes.map((dish, index) => (
                               <li key={`${period.id}-${dish.name}-top-${index}`}>
                                 <span>{dish.name}</span>
-                                <strong>{dish.quantity}</strong>
+                                <div style={{ textAlign: 'right' }}>
+                                  <strong>{dish.quantity}</strong>
+                                  <small style={{ display: 'block', color: '#80664f', fontSize: '0.78rem' }}>
+                                    {formatCurrency(dish.revenue)}
+                                  </small>
+                                </div>
                               </li>
                             ))}
                           </ol>
@@ -1107,7 +1174,12 @@ function App() {
                             {period.bottomDishes.map((dish, index) => (
                               <li key={`${period.id}-${dish.name}-bottom-${index}`}>
                                 <span>{dish.name}</span>
-                                <strong>{dish.quantity}</strong>
+                                <div style={{ textAlign: 'right' }}>
+                                  <strong>{dish.quantity}</strong>
+                                  <small style={{ display: 'block', color: '#80664f', fontSize: '0.78rem' }}>
+                                    {formatCurrency(dish.revenue)}
+                                  </small>
+                                </div>
                               </li>
                             ))}
                           </ol>
@@ -1723,6 +1795,9 @@ function App() {
                 <div key={`${selectedPaidOrder.id}-${item.menuItemId}`} className={editedIds.has(item.menuItemId) ? 'order-item-edited' : ''} style={{ padding: '6px 0', borderBottom: '1px solid #f0e6d2', fontSize: '14px' }}>
                   <p style={{ margin: '0 0 2px 0' }}>{item.quantity}x {item.name}{item.weightGrams != null ? ` (${item.weightGrams} g)` : ''}</p>
                   <p style={{ margin: '0', color: '#6f5e4d', fontSize: '12px' }}>{item.category}</p>
+                  <p style={{ margin: '2px 0 0', color: '#6f5e4d', fontSize: '12px' }}>
+                    Subtotal: {formatCurrency(item.subtotal ?? 0)}
+                  </p>
                 </div>
               ))}
             </div>

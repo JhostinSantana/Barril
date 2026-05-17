@@ -28,7 +28,7 @@ import {
     vacuumDatabase
 } from './database.js';
 import { printKitchenTicket } from './printer.js';
-import { calculateOrderTotal, getCashClose, getStats, summarizeItems } from './utils.js';
+import { calculateOrderTotal, detectDuplicateOrders, getCashClose, getStats, getStatsSummary, summarizeItems } from './utils.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -236,6 +236,12 @@ app.post('/api/orders', async (req, res, next) => {
 app.patch('/api/orders/:orderId', async (req, res, next) => {
   try {
     const { orderId } = req.params;
+
+        // Validar que el orderId tiene formato válido (prevención de duplicados)
+        if (!orderId || typeof orderId !== 'string' || !orderId.startsWith('COM-')) {
+          res.status(400).json({ message: 'ID de orden inválido.' });
+          return;
+        }
     const { clientName, tableNumber, waiterName, items } = req.body;
     const comment = (req.body?.comment ?? '').toString().trim();
 
@@ -431,6 +437,30 @@ app.get('/api/stats', async (req, res, next) => {
     const from = req.query.from?.toString() ?? `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
     const to = req.query.to?.toString() ?? `${new Date().toISOString().slice(0, 10)}T23:59:59.999Z`;
     res.json(getStats(orders, menu, from, to));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/stats-summary', async (req, res, next) => {
+  try {
+    const menu = await getMenu();
+    const orders = await listOrders();
+    res.json(getStatsSummary(orders, menu));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/diagnostics/duplicates', async (req, res, next) => {
+  try {
+    const orders = await listOrders();
+    const duplicates = detectDuplicateOrders(orders);
+    res.json({ 
+      totalOrders: orders.length, 
+      duplicatesFound: duplicates.length,
+      duplicates 
+    });
   } catch (error) {
     next(error);
   }
