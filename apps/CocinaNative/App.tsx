@@ -70,8 +70,23 @@ const STORAGE_COMPLETADOS_KEY = 'cocina_completados_hoy';
 const STORAGE_COMPLETADOS_DATE_KEY = 'cocina_completados_fecha';
 const EMPTY_STATUS = 'Sin comandas activas';
 
-function getTodayKey() {
-  return new Intl.DateTimeFormat('en-CA').format(new Date());
+function pad2(value: number) {
+  return value < 10 ? `0${value}` : String(value);
+}
+
+function getTodayKey(date = new Date()) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function formatHour12(date: Date, withSeconds = false) {
+  const hours = date.getHours();
+  const minutes = pad2(date.getMinutes());
+  const suffix = hours >= 12 ? 'p. m.' : 'a. m.';
+  const hour12 = hours % 12 || 12;
+  if (withSeconds) {
+    return `${hour12}:${minutes}:${pad2(date.getSeconds())} ${suffix}`;
+  }
+  return `${hour12}:${minutes} ${suffix}`;
 }
 
 function formatCommentDate(value: string) {
@@ -80,7 +95,7 @@ function formatCommentDate(value: string) {
     return '';
   }
 
-  return date.toLocaleString('es-EC');
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}, ${formatHour12(date)}`;
 }
 
 const statusMeta: Record<KitchenStatus, {label: string; color: string; accent: string}> = {
@@ -137,20 +152,13 @@ function normalizeComments(order: any): PedidoComment[] {
 }
 
 function formatTimeNow(date: Date) {
-  return new Intl.DateTimeFormat('es-EC', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(date);
+  return formatHour12(date, true);
 }
 
 function formatDateNow(date: Date) {
-  return new Intl.DateTimeFormat('es-EC', {
-    weekday: 'short',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
+  const weekdays = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  return `${weekdays[date.getDay()]}, ${pad2(date.getDate())} ${months[date.getMonth()]} ${date.getFullYear()}`;
 }
 
 function normalizeEditSummary(order: any): EditChange[] {
@@ -234,12 +242,7 @@ function mapServerOrderToKitchen(order: any): PedidoVista {
     createdAt,
     editedAt,
     editSummary,
-    horaRecibido: order?.createdAt
-      ? new Intl.DateTimeFormat('es-EC', {
-          hour: '2-digit',
-          minute: '2-digit',
-        }).format(new Date(order.createdAt))
-      : 'Ahora',
+    horaRecibido: order?.createdAt ? formatHour12(new Date(order.createdAt)) : 'Ahora',
     estado: normalizeKitchenStatus(order?.kitchenStatus ?? order?.estado ?? 'pendiente'),
   };
 }
@@ -505,42 +508,49 @@ export default function App(): React.JSX.Element {
     : null;
 
   const {width: windowWidth} = useWindowDimensions();
-  const cardWidth = Math.min(340, Math.max(280, windowWidth * 0.34));
+  const isMobile = windowWidth < 600;
+  const cardWidth = isMobile
+    ? Math.min(320, Math.max(280, Math.round(windowWidth * 0.88)))
+    : Math.min(340, Math.max(280, windowWidth * 0.34));
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={stylesVars.header} />
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, isMobile && styles.headerMobile]}>
           <View>
-            <Text style={styles.kicker}>Ahumados Barril</Text>
-            <Text style={styles.title}>Pantalla de Cocina</Text>
+            <Text style={[styles.kicker, isMobile && styles.kickerMobile]}>Ahumados Barril</Text>
+            <Text style={[styles.title, isMobile && styles.titleMobile]}>Pantalla de Cocina</Text>
           </View>
-          <View style={styles.headerRight}>
-            <View style={styles.clockBox}>
-              <Text style={styles.clock}>{formatTimeNow(ahora)}</Text>
-              <Text style={styles.date}>{formatDateNow(ahora)}</Text>
-            </View>
-            <Pressable style={styles.headerButton} onPress={() => setShowConnModal(true)}>
+          <View style={[styles.headerRight, isMobile && styles.headerRightMobile]}>
+            {!isMobile && (
+              <View style={styles.clockBox}>
+                <Text style={styles.clock}>{formatTimeNow(ahora)}</Text>
+                <Text style={styles.date}>{formatDateNow(ahora)}</Text>
+              </View>
+            )}
+            <Pressable style={[styles.headerButton, isMobile && styles.headerButtonMobile]} onPress={() => setShowConnModal(true)}>
               <Text style={styles.headerButtonText}>Conectar</Text>
             </Pressable>
-            <Pressable style={styles.headerButton} onPress={toggleSound}>
+            <Pressable style={[styles.headerButton, isMobile && styles.headerButtonMobile]} onPress={toggleSound}>
               <Text style={styles.headerButtonText}>{soundOn ? '🔔' : '🔕'}</Text>
             </Pressable>
           </View>
         </View>
 
-        <View style={styles.statsRow}>
-          <StatCard title="Pedidos Pendientes" value={counts.pendientes} description="Listos para entrar a cocina" tone="#fbbf24" />
-          <StatCard title="En Preparación" value={counts.enPreparacion} description="Pedidos en curso" tone="#7dd3fc" />
-          <StatCard title="Completados Hoy" value={counts.completadosHoy} description="Salieron de cocina" tone="#86efac" />
+        <View style={[styles.statsRow, isMobile && styles.statsRowMobile]}>
+          <StatCard title="Pendientes" value={counts.pendientes} description="Listos para cocina" tone="#fbbf24" isMobile={isMobile} />
+          <StatCard title="En Prep." value={counts.enPreparacion} description="En curso" tone="#7dd3fc" isMobile={isMobile} />
+          <StatCard title="Completados" value={counts.completadosHoy} description="Salieron" tone="#86efac" isMobile={isMobile} />
         </View>
 
-        <View style={styles.content}>
-          <View style={styles.contentHeader}>
+        <View style={[styles.content, isMobile && styles.contentMobile]}>
+          <View style={[styles.contentHeader, isMobile && styles.contentHeaderMobile]}>
             <View>
-              <Text style={styles.sectionKicker}>Pedidos activos</Text>
-              <Text style={styles.sectionTitle}>Cola por llegada: el más antiguo a la izquierda. Desliza entre comandas y baja en cada tarjeta para ver todo el pedido</Text>
+              <Text style={[styles.sectionKicker, isMobile && styles.sectionKickerMobile]}>Pedidos activos</Text>
+              <Text style={[styles.sectionTitle, isMobile && styles.sectionTitleMobile]}>
+                Cola por llegada (izquierda = primero). Desliza horizontalmente entre comandas; dentro de cada tarjeta, baja para ver el pedido
+              </Text>
             </View>
             <View style={styles.statusPill}>
               {loading ? <ActivityIndicator size="small" color="#7c2d12" /> : <Text style={styles.statusText}>{status}</Text>}
@@ -551,9 +561,15 @@ export default function App(): React.JSX.Element {
             data={visiblePedidos}
             keyExtractor={item => String(item.id)}
             horizontal
-            showsHorizontalScrollIndicator={false}
+            scrollEnabled
+            showsHorizontalScrollIndicator
+            showsVerticalScrollIndicator={false}
+            decelerationRate="fast"
+            snapToInterval={cardWidth + 12}
+            snapToAlignment="start"
+            disableIntervalMomentum
             style={styles.ordersList}
-            contentContainerStyle={styles.cardsContent}
+            contentContainerStyle={[styles.cardsContent, isMobile && styles.cardsContentMobile]}
             renderItem={({item, index}) => (
               <OrderCard
                 item={item}
@@ -563,10 +579,11 @@ export default function App(): React.JSX.Element {
                 onOpenDetail={() => setPedidoActivo(item)}
                 onStart={() => iniciarPreparacion(item.id)}
                 onComplete={() => marcarComoCompletado(item.id)}
+                isMobile={isMobile}
               />
             )}
             ListEmptyComponent={
-              <View style={styles.emptyState}>
+              <View style={[styles.emptyState, {width: Math.max(cardWidth, windowWidth - 48)}]}>
                 <Text style={styles.emptyTitle}>Sin comandas activas</Text>
                 <Text style={styles.emptyText}>{status}</Text>
               </View>
@@ -710,6 +727,7 @@ type OrderCardProps = {
   onOpenDetail: () => void;
   onStart: () => void;
   onComplete: () => void;
+  isMobile?: boolean;
 };
 
 function EditChangesPanel({editSummary}: {editSummary: EditChange[]}) {
@@ -734,7 +752,7 @@ function EditChangesPanel({editSummary}: {editSummary: EditChange[]}) {
   );
 }
 
-function OrderCard({item, queuePosition, cardWidth, nowUpdating, onOpenDetail, onStart, onComplete}: OrderCardProps) {
+function OrderCard({item, queuePosition, cardWidth, nowUpdating, onOpenDetail, onStart, onComplete, isMobile}: OrderCardProps) {
   const style = statusMeta[item.estado];
   const latestComment = item.comments[item.comments.length - 1];
   const latestCommentDate = latestComment ? formatCommentDate(latestComment.createdAt) : '';
@@ -742,7 +760,7 @@ function OrderCard({item, queuePosition, cardWidth, nowUpdating, onOpenDetail, o
   const fueModificado = pedidoFueModificado(item);
 
   return (
-    <View style={[styles.card, fueModificado && styles.cardModified, {width: cardWidth}]}>
+    <View style={[styles.card, isMobile && styles.cardMobile, fueModificado && styles.cardModified, {width: cardWidth}]}>
       <View style={[styles.cardTop, {backgroundColor: style.accent, borderColor: style.color}]}>
         <View style={{flex: 1}}>
           <Text style={styles.customer} numberOfLines={1}>
@@ -835,10 +853,23 @@ function OrderCard({item, queuePosition, cardWidth, nowUpdating, onOpenDetail, o
   );
 }
 
-function StatCard({title, value, description, tone}: {title: string; value: number; description: string; tone: string}) {
+function StatCard({title, value, description, tone, isMobile}: {title: string; value: number; description: string; tone: string; isMobile?: boolean}) {
+  if (isMobile) {
+    return (
+      <View style={[styles.statCard, styles.statCardMobile]}>
+        <View style={[styles.statTopMobile, {backgroundColor: tone}]}>
+          <Text style={styles.statTitleMobile} numberOfLines={1}>
+            {title}
+          </Text>
+          <Text style={styles.statValueMobile}>{value}</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.statCard}>
-      <View style={[styles.statTop, {backgroundColor: tone}]}> 
+      <View style={[styles.statTop, {backgroundColor: tone}]}>
         <View style={{flex: 1}}>
           <Text style={styles.statTitle}>{title}</Text>
           <Text style={styles.statValue}>{value}</Text>
@@ -1437,5 +1468,83 @@ const styles = StyleSheet.create({
     color: '#8b5e3c',
     fontSize: 11,
     fontWeight: '600',
+  },
+  // ========== RESPONSIVE MOBILE STYLES ==========
+  headerMobile: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  kickerMobile: {
+    fontSize: 10,
+  },
+  titleMobile: {
+    fontSize: 20,
+  },
+  headerRightMobile: {
+    gap: 6,
+  },
+  headerButtonMobile: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  statsRowMobile: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    paddingBottom: 2,
+  },
+  statCardMobile: {
+    flex: 1,
+    borderRadius: 14,
+  },
+  statTopMobile: {
+    borderRadius: 14,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    minHeight: 56,
+  },
+  statTitleMobile: {
+    color: 'rgba(47,32,22,0.7)',
+    fontSize: 8,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    textAlign: 'center',
+  },
+  statValueMobile: {
+    color: '#2f2016',
+    fontSize: 22,
+    fontWeight: '900',
+    lineHeight: 24,
+  },
+  contentMobile: {
+    marginTop: 6,
+    marginHorizontal: 10,
+    marginBottom: 8,
+    padding: 10,
+    borderRadius: 22,
+  },
+  contentHeaderMobile: {
+    marginBottom: 6,
+  },
+  sectionKickerMobile: {
+    fontSize: 10,
+  },
+  sectionTitleMobile: {
+    fontSize: 13,
+    marginTop: 3,
+  },
+  cardsContentMobile: {
+    paddingLeft: 4,
+    paddingRight: 16,
+    alignItems: 'stretch',
+  },
+  cardMobile: {
+    flex: 1,
   },
 });

@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sqlite3 from 'sqlite3';
-import { DEFAULT_MENU, DEFAULT_MENU_VERSION, DEFAULT_RESTAURANT_NAME } from './utils.js';
+import {
+  DEFAULT_MENU,
+  DEFAULT_MENU_VERSION,
+  DEFAULT_RESTAURANT_NAME,
+  calculateOrderTotal,
+  summarizeItems
+} from './utils.js';
 
 sqlite3.verbose();
 
@@ -307,6 +313,14 @@ export async function initializeDatabase() {
   if (!menuColumns.some((column) => column.name === 'pricing_mode')) {
     await run("ALTER TABLE menu_items ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'fixed'");
   }
+  if (!menuColumns.some((column) => column.name === 'weight_formula')) {
+    await run("ALTER TABLE menu_items ADD COLUMN weight_formula TEXT");
+  }
+
+  const orderItemColumnsAfterMenu = await all('PRAGMA table_info(order_items)');
+  if (!orderItemColumnsAfterMenu.some((column) => column.name === 'weight_formula')) {
+    await run('ALTER TABLE order_items ADD COLUMN weight_formula TEXT');
+  }
 
   await run(`
     UPDATE order_items
@@ -369,8 +383,8 @@ export async function initializeDatabase() {
     await run('DELETE FROM menu_items');
     for (const [index, item] of DEFAULT_MENU.entries()) {
       await run(
-        'INSERT INTO menu_items(id, name, category, price, pricing_mode, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
-        [item.id, item.name, item.category, item.price, item.pricingMode ?? 'fixed', index]
+        'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [item.id, item.name, item.category, item.price, item.pricingMode ?? 'fixed', item.weightFormula ?? null, index]
       );
     }
 
@@ -380,6 +394,8 @@ export async function initializeDatabase() {
       ['menuVersion', DEFAULT_MENU_VERSION]
     );
   }
+
+  await repairMispricedOpenOrders();
 }
 
 export async function getRestaurantName() {
@@ -464,7 +480,9 @@ export async function setWaiterActive(name, active) {
 }
 
 export async function getMenu() {
-  return all('SELECT id, name, category, price, pricing_mode AS pricingMode FROM menu_items ORDER BY sort_order ASC');
+  return all(
+    'SELECT id, name, category, price, pricing_mode AS pricingMode, weight_formula AS weightFormula FROM menu_items ORDER BY sort_order ASC'
+  );
 }
 
 export async function createOrder(order) {
@@ -493,8 +511,8 @@ export async function createOrder(order) {
 
   for (const item of order.items) {
     await run(
-      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         order.id,
         item.menuItemId,
@@ -504,7 +522,8 @@ export async function createOrder(order) {
         roundMoney(item.unitPrice),
         roundMoney(item.subtotal),
         item.weightGrams ?? null,
-        item.pricingMode ?? 'fixed'
+        item.pricingMode ?? 'fixed',
+        item.weightFormula ?? null
       ]
     );
   }
@@ -576,8 +595,8 @@ export async function updateOrderWithItems(orderId, order) {
 
     for (const item of order.items) {
       await run(
-        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId,
           item.menuItemId,
@@ -587,7 +606,8 @@ export async function updateOrderWithItems(orderId, order) {
           roundMoney(item.unitPrice),
           roundMoney(item.subtotal),
           item.weightGrams ?? null,
-          item.pricingMode ?? 'fixed'
+          item.pricingMode ?? 'fixed',
+          item.weightFormula ?? null
         ]
       );
     }
@@ -721,8 +741,68 @@ export async function updateOrderPayment(orderId, paymentMethod, paidAt) {
 
 async function listOrderItems(orderId) {
   return all(
-    'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, pricing_mode AS pricingMode FROM order_items WHERE order_id = ? ORDER BY id ASC',
+    'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, pricing_mode AS pricingMode, weight_formula AS weightFormula FROM order_items WHERE order_id = ? ORDER BY id ASC',
     [orderId]
+  );
+}
+
+async function repairMispricedOpenOrders() {
+  const migrationKey = '2026-05-16-fix-null-unit-price';
+  const doneRow = await get('SELECT value FROM settings WHERE key = ?', [migrationKey]);
+  if (doneRow?.value === 'done') return;
+
+  const menu = await getMenu();
+  const orders = await all(`
+    SELECT id, paid_amount AS paidAmount
+    FROM orders
+    WHERE status IN ('pending', 'partial')
+  `);
+
+  for (const order of orders) {
+    const rawItems = await listOrderItems(order.id);
+    if (!rawItems.length) continue;
+
+    const normalizedItems = rawItems.map((item) => ({
+      menuItemId: item.menuItemId,
+      quantity: item.quantity,
+      weightGrams: item.weightGrams,
+      pricingMode: item.pricingMode
+    }));
+
+    const summarizedItems = summarizeItems(normalizedItems, menu);
+    const total = calculateOrderTotal(summarizedItems, menu);
+    const paidAmount = roundMoney(order.paidAmount ?? 0);
+
+    if (paidAmount > total) continue;
+
+    await run('DELETE FROM order_items WHERE order_id = ?', [order.id]);
+
+    for (const item of summarizedItems) {
+      await run(
+        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          order.id,
+          item.menuItemId,
+          item.name,
+          item.category,
+          item.quantity,
+          roundMoney(item.unitPrice),
+          roundMoney(item.subtotal),
+          item.weightGrams ?? null,
+          item.pricingMode ?? 'fixed',
+          item.weightFormula ?? null
+        ]
+      );
+    }
+
+    await run('UPDATE orders SET total = ? WHERE id = ?', [roundMoney(total), order.id]);
+  }
+
+  await run(
+    `INSERT INTO settings(key, value) VALUES(?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [migrationKey, 'done']
   );
 }
 
@@ -759,8 +839,16 @@ export async function restoreData(payload) {
     if (Array.isArray(payload.menu)) {
       for (const item of payload.menu) {
         await run(
-          'INSERT INTO menu_items(id, name, category, price, pricing_mode, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
-          [item.id, item.name, item.category, item.price, item.pricing_mode ?? item.pricingMode ?? 'fixed', item.sort_order ?? 0]
+          'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [
+            item.id,
+            item.name,
+            item.category,
+            item.price,
+            item.pricing_mode ?? item.pricingMode ?? 'fixed',
+            item.weight_formula ?? item.weightFormula ?? null,
+            item.sort_order ?? 0
+          ]
         );
       }
     }
@@ -791,9 +879,9 @@ export async function restoreData(payload) {
     if (Array.isArray(payload.orderItems)) {
       for (const it of payload.orderItems) {
         await run(
-          `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [it.order_id, it.menu_item_id, it.name, it.category ?? 'Sin categoria', it.quantity ?? 1, it.unit_price ?? it.unitPrice ?? 0, it.subtotal ?? 0, it.weight_grams ?? it.weightGrams ?? null, it.pricing_mode ?? it.pricingMode ?? 'fixed']
+          `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [it.order_id, it.menu_item_id, it.name, it.category ?? 'Sin categoria', it.quantity ?? 1, it.unit_price ?? it.unitPrice ?? 0, it.subtotal ?? 0, it.weight_grams ?? it.weightGrams ?? null, it.pricing_mode ?? it.pricingMode ?? 'fixed', it.weight_formula ?? it.weightFormula ?? null]
         );
       }
     }

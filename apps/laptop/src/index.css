@@ -284,6 +284,7 @@ button.danger:hover {
   display: grid;
   place-items: center;
   padding: 18px;
+  overflow-y: auto;
 }
 
 .modal {
@@ -292,6 +293,36 @@ button.danger:hover {
   border-radius: 16px;
   border: 1px solid #e8d8c5;
   padding: 16px;
+}
+
+.modal-scrollable {
+  width: min(480px, 100%);
+  max-height: min(90vh, 920px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.modal-scrollable .modal-header {
+  flex-shrink: 0;
+  padding: 16px 16px 0;
+}
+
+.modal-scrollable .modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-scrollable .modal-footer {
+  flex-shrink: 0;
+  padding: 12px 16px 16px;
+  border-top: 1px solid #ecdcc9;
+  background: #fffaf1;
 }
 
 .modal h3 {

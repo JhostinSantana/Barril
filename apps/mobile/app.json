@@ -9,7 +9,10 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.asadosenelbarril.mobile",
-      "versionCode": 4
+      "versionCode": 4,
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "splash": {
       "backgroundColor": "#f5efe8"
@@ -28,9 +31,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "32019c80-0dbf-46d0-8111-90e83fad7afd"
+        "projectId": "25808fb1-de0c-46de-97ce-c9580d10d199"
       }
     },
-    "owner": "khaian"
+    "owner": "khaian2"
   }
 }

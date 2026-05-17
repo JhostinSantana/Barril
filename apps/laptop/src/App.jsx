@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { QRCode } from 'react-qr-code';
 import { io } from 'socket.io-client';
+import {
+  calculateWeightedCutPrice,
+  getWeightFormulaLabel,
+  resolveWeightFormulaForOrderItem
+} from '../../server/src/pricing.js';
 import './App.css';
 
 const socket = io('http://localhost:4000', { autoConnect: false });
@@ -95,10 +100,6 @@ function getEditChangeLabel(change) {
 
 function isWeightedItem(item) {
   return item?.pricingMode === 'weight';
-}
-
-function calculateWeightedCutPrice(weightGrams) {
-  return Math.round(((0.00666666666 * Number(weightGrams || 0) * 2) + 2.5 + Number.EPSILON) * 100) / 100;
 }
 
 function App() {
@@ -402,9 +403,11 @@ function App() {
       if (!isWeightedItem(item)) return item;
 
       const grams = parseMoneyInput(weightDrafts[item.menuItemId]);
-      const unitPrice = grams > 0 ? calculateWeightedCutPrice(grams) : 0;
+      const weightFormula = resolveWeightFormulaForOrderItem(item);
+      const unitPrice = grams > 0 ? calculateWeightedCutPrice(grams, weightFormula) : 0;
       return {
         ...item,
+        weightFormula,
         weightGrams: grams > 0 ? grams : null,
         unitPrice,
         subtotal: Math.round((unitPrice * Number(item.quantity || 1) + Number.EPSILON) * 100) / 100
@@ -1553,20 +1556,25 @@ function App() {
 
       {weightModalOrder ? (
         <div className="modal-backdrop" onClick={closeWeightModal}>
-          <article className="modal" onClick={(event) => event.stopPropagation()}>
-            <h3>Completar gramaje</h3>
-            <p>
-              {weightModalOrder.clientName} · Mesa {weightModalOrder.tableNumber}
-            </p>
-            <p style={{ color: '#6f5e4d', marginTop: 6 }}>
-              El mesero solo selecciona el corte. Aqui el cajero define los gramos antes de cobrar.
-            </p>
+          <article className="modal modal-scrollable" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Completar gramaje</h3>
+              <p>
+                {weightModalOrder.clientName} · Mesa {weightModalOrder.tableNumber}
+              </p>
+              <p style={{ color: '#6f5e4d', marginTop: 6, marginBottom: 0 }}>
+                El mesero solo selecciona el corte. Aqui el cajero define los gramos antes de cobrar.
+              </p>
+            </div>
 
-            <div style={{ backgroundColor: '#fff', border: '1px solid #ecdcc9', borderRadius: '8px', padding: '8px', marginTop: '12px' }}>
+            <div className="modal-body">
+              <div style={{ backgroundColor: '#fff', border: '1px solid #ecdcc9', borderRadius: '8px', padding: '8px' }}>
               {(weightModalOrder.items.filter(isWeightedItem)).map((item) => {
                 const grams = parseMoneyInput(weightDrafts[item.menuItemId]);
-                const unitPrice = grams > 0 ? calculateWeightedCutPrice(grams) : 0;
+                const weightFormula = resolveWeightFormulaForOrderItem(item);
+                const unitPrice = grams > 0 ? calculateWeightedCutPrice(grams, weightFormula) : 0;
                 const subtotal = Math.round((unitPrice * Number(item.quantity || 1) + Number.EPSILON) * 100) / 100;
+                const formulaLabel = getWeightFormulaLabel(weightFormula);
 
                 return (
                   <div key={item.menuItemId} style={{ padding: '10px 0', borderBottom: '1px solid #f0e6d2' }}>
@@ -1591,27 +1599,35 @@ function App() {
                     </div>
 
                     <div className="payment-summary" style={{ marginTop: 8 }}>
+                      {formulaLabel ? (
+                        <p style={{ margin: '0 0 6px 0', color: '#6f5e4d', fontSize: '11px' }}>
+                          Formula: {formulaLabel}
+                        </p>
+                      ) : null}
                       <p>Precio calculado: <strong>{formatCurrency(unitPrice)}</strong></p>
                       <p>Subtotal linea: <strong>{formatCurrency(subtotal)}</strong></p>
                     </div>
                   </div>
                 );
               })}
+              </div>
             </div>
 
-            <div className="actions" style={{ marginTop: '12px' }}>
-              <button type="button" onClick={saveWeightModal} disabled={hasPendingWeightValues}>
-                Guardar gramaje
-              </button>
-              <button type="button" className="ghost" onClick={closeWeightModal}>
-                Cerrar
-              </button>
+            <div className="modal-footer">
+              <div className="actions" style={{ marginTop: 0 }}>
+                <button type="button" onClick={saveWeightModal} disabled={hasPendingWeightValues}>
+                  Guardar gramaje
+                </button>
+                <button type="button" className="ghost" onClick={closeWeightModal}>
+                  Cerrar
+                </button>
+              </div>
+              {hasPendingWeightValues ? (
+                <p style={{ marginTop: 8, marginBottom: 0, color: '#8b4d1d', fontSize: 12, fontWeight: 700 }}>
+                  Completa los gramos de todos los cortes antes de guardar.
+                </p>
+              ) : null}
             </div>
-            {hasPendingWeightValues ? (
-              <p style={{ marginTop: 8, color: '#8b4d1d', fontSize: 12, fontWeight: 700 }}>
-                Completa los gramos de todos los cortes antes de guardar.
-              </p>
-            ) : null}
           </article>
         </div>
       ) : null}

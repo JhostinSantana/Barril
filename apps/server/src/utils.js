@@ -1,8 +1,16 @@
-export const DEFAULT_RESTAURANT_NAME = 'Asados en el Barril';
-export const DEFAULT_MENU_VERSION = '2026-05-16-menu-peso-y-cortes';
+import { calculateWeightedCutPrice, resolveWeightFormula } from './pricing.js';
 
-const WEIGHTED_CUT_RATE = 0.00666666666 * 2;
-const WEIGHTED_CUT_BASE_PRICE = 2.5;
+export {
+  calculateWeightedCutPrice,
+  getWeightFormulaLabel,
+  resolveWeightFormula,
+  WEIGHT_FORMULA_CORTE_AHUMADO,
+  WEIGHT_FORMULA_LABELS,
+  WEIGHT_FORMULAS
+} from './pricing.js';
+
+export const DEFAULT_RESTAURANT_NAME = 'Asados en el Barril';
+export const DEFAULT_MENU_VERSION = '2026-05-17-formulas-cortes-completas';
 
 export const DEFAULT_MENU = [
   { id: 'picaditas-probar', name: 'PARA PROBAR', category: 'PICADITAS CERDO', price: 2.5, pricingMode: 'fixed' },
@@ -50,20 +58,23 @@ export const DEFAULT_MENU = [
   { id: 'entrada-papas-cheddar', name: 'PAPAS CON CHEDDAR', category: 'ENTRADAS Y ACOMPAÑANTES', price: 3.0, pricingMode: 'fixed' },
   { id: 'entrada-maduro-chicle', name: 'MADURO CON CHICLE', category: 'ENTRADAS Y ACOMPAÑANTES', price: 3.0, pricingMode: 'fixed' },
 
-  { id: 'corte-lomo-fino', name: 'LOMO FINO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
-  { id: 'corte-piernitas-pollo', name: 'PIERNITAS DE POLLO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
-  { id: 'corte-costillas-san-luis', name: 'COSTILLAS SAN LUIS', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
-  { id: 'corte-costillas-baby-back', name: 'COSTILLAS BABY BACK', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
-  { id: 'corte-matambre-cerdo', name: 'MATAMBRE DE CERDO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight' },
-  { id: 'corte-t-bone-steak', name: 'T BONE STEAK', category: 'CORTES - RES ASADA', price: 0, pricingMode: 'weight' }
+  { id: 'corte-medallones-bondiola', name: 'MEDALLONES DE BONDIOLA', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight', weightFormula: 'corte-ahumado' },
+  { id: 'corte-chuleta-cerdo', name: 'CHULETA DE CERDO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight', weightFormula: 'corte-ahumado' },
+  { id: 'corte-lomo-fino', name: 'LOMO FINO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight', weightFormula: 'corte-ahumado' },
+  { id: 'corte-costillas-san-luis', name: 'COSTILLAS SAN LUIS', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight', weightFormula: 'corte-ahumado' },
+  { id: 'corte-costillas-baby-back', name: 'COSTILLAS BABY BACK', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight', weightFormula: 'corte-ahumado' },
+  { id: 'corte-matambre-cerdo', name: 'MATAMBRE', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight', weightFormula: 'corte-ahumado' },
+  { id: 'corte-filete-pechuga-pollo', name: 'FILETE DE PECHUGA DE POLLO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight', weightFormula: 'corte-pechuga-pollo' },
+  { id: 'corte-panceta-cerdo', name: 'PANCETA DE CERDO', category: 'CORTES AHUMADOS', price: 0, pricingMode: 'weight', weightFormula: 'corte-panceta' },
+  { id: 'corte-t-bone-steak', name: 'T BONE STEAK', category: 'CORTES - RES ASADA', price: 0, pricingMode: 'weight', weightFormula: 'corte-t-bone' }
 ];
 
 function roundMoney(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 }
 
-export function calculateWeightedCutPrice(weightGrams) {
-  return roundMoney(WEIGHTED_CUT_BASE_PRICE + (Number(weightGrams || 0) * WEIGHTED_CUT_RATE));
+function hasProvidedMoney(value) {
+  return value != null && value !== '' && Number.isFinite(Number(value));
 }
 
 function isWeightedMenuItem(menuItem) {
@@ -76,25 +87,27 @@ function resolveOrderItemDetails(item, menuItem) {
 
   if (isWeightedMenuItem(menuItem)) {
     const weightGrams = Number(item.weightGrams ?? item.grams ?? item.weight ?? 0);
-    const unitPrice = weightGrams > 0 ? calculateWeightedCutPrice(weightGrams) : 0;
+    const weightFormula = resolveWeightFormula(menuItem);
+    const unitPrice = weightGrams > 0 ? calculateWeightedCutPrice(weightGrams, weightFormula) : 0;
     const subtotal = weightGrams > 0
       ? roundMoney(unitPrice * quantity)
-      : (Number.isFinite(Number(item.subtotal)) ? roundMoney(item.subtotal) : 0);
+      : (hasProvidedMoney(item.subtotal) ? roundMoney(item.subtotal) : 0);
 
     return {
       pricingMode,
+      weightFormula,
       weightGrams: weightGrams > 0 ? roundMoney(weightGrams) : null,
       unitPrice: weightGrams > 0
         ? unitPrice
-        : (Number.isFinite(Number(item.unitPrice)) ? roundMoney(item.unitPrice) : 0),
+        : (hasProvidedMoney(item.unitPrice) ? roundMoney(item.unitPrice) : 0),
       subtotal
     };
   }
 
-  const unitPrice = Number.isFinite(Number(item.unitPrice))
+  const unitPrice = hasProvidedMoney(item.unitPrice)
     ? roundMoney(item.unitPrice)
     : roundMoney(menuItem?.price ?? 0);
-  const subtotal = Number.isFinite(Number(item.subtotal))
+  const subtotal = hasProvidedMoney(item.subtotal)
     ? roundMoney(item.subtotal)
     : roundMoney(unitPrice * quantity);
 
@@ -116,7 +129,7 @@ export function getDateKey(isoDate) {
 export function calculateOrderTotal(items, menu) {
   return roundMoney(items.reduce((acc, item) => {
     const menuItem = menu.find((m) => m.id === item.menuItemId);
-    const resolvedSubtotal = Number.isFinite(Number(item.subtotal))
+    const resolvedSubtotal = hasProvidedMoney(item.subtotal)
       ? Number(item.subtotal)
       : resolveOrderItemDetails(item, menuItem).subtotal;
     return acc + resolvedSubtotal;
@@ -133,6 +146,7 @@ export function summarizeItems(items, menu) {
       category: menuItem?.category ?? 'Sin categoria',
       quantity: Math.max(1, Number(item.quantity) || 1),
       pricingMode: details.pricingMode,
+      weightFormula: details.weightFormula ?? null,
       weightGrams: details.weightGrams,
       unitPrice: details.unitPrice,
       subtotal: details.subtotal
@@ -145,11 +159,11 @@ function createItemBucket(name, category) {
 }
 
 function resolveOrderItemRevenue(item) {
-  if (Number.isFinite(Number(item.subtotal))) {
+  if (hasProvidedMoney(item.subtotal)) {
     return roundMoney(item.subtotal);
   }
 
-  if (Number.isFinite(Number(item.unitPrice))) {
+  if (hasProvidedMoney(item.unitPrice)) {
     return roundMoney(Number(item.unitPrice) * Math.max(1, Number(item.quantity) || 1));
   }
 

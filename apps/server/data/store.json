@@ -41,12 +41,15 @@
     { "id": "entrada-patacones-chicle", "name": "PATACONES CON CHICLE", "category": "ENTRADAS Y ACOMPAÑANTES", "price": 3, "pricingMode": "fixed" },
     { "id": "entrada-papas-cheddar", "name": "PAPAS CON CHEDDAR", "category": "ENTRADAS Y ACOMPAÑANTES", "price": 3, "pricingMode": "fixed" },
     { "id": "entrada-maduro-chicle", "name": "MADURO CON CHICLE", "category": "ENTRADAS Y ACOMPAÑANTES", "price": 3, "pricingMode": "fixed" },
-    { "id": "corte-lomo-fino", "name": "LOMO FINO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
-    { "id": "corte-piernitas-pollo", "name": "PIERNITAS DE POLLO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
-    { "id": "corte-costillas-san-luis", "name": "COSTILLAS SAN LUIS", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
-    { "id": "corte-costillas-baby-back", "name": "COSTILLAS BABY BACK", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
-    { "id": "corte-matambre-cerdo", "name": "MATAMBRE DE CERDO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight" },
-    { "id": "corte-t-bone-steak", "name": "T BONE STEAK", "category": "CORTES - RES ASADA", "price": 0, "pricingMode": "weight" }
+    { "id": "corte-medallones-bondiola", "name": "MEDALLONES DE BONDIOLA", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight", "weightFormula": "corte-ahumado" },
+    { "id": "corte-chuleta-cerdo", "name": "CHULETA DE CERDO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight", "weightFormula": "corte-ahumado" },
+    { "id": "corte-lomo-fino", "name": "LOMO FINO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight", "weightFormula": "corte-ahumado" },
+    { "id": "corte-costillas-san-luis", "name": "COSTILLAS SAN LUIS", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight", "weightFormula": "corte-ahumado" },
+    { "id": "corte-costillas-baby-back", "name": "COSTILLAS BABY BACK", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight", "weightFormula": "corte-ahumado" },
+    { "id": "corte-matambre-cerdo", "name": "MATAMBRE", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight", "weightFormula": "corte-ahumado" },
+    { "id": "corte-filete-pechuga-pollo", "name": "FILETE DE PECHUGA DE POLLO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight", "weightFormula": "corte-pechuga-pollo" },
+    { "id": "corte-panceta-cerdo", "name": "PANCETA DE CERDO", "category": "CORTES AHUMADOS", "price": 0, "pricingMode": "weight", "weightFormula": "corte-panceta" },
+    { "id": "corte-t-bone-steak", "name": "T BONE STEAK", "category": "CORTES - RES ASADA", "price": 0, "pricingMode": "weight", "weightFormula": "corte-t-bone" }
   ],
   "orders": []
 }
