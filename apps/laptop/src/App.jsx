@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { QRCode } from 'react-qr-code';
 import { io } from 'socket.io-client';
 import {
@@ -48,6 +49,18 @@ function getSalesIntensityStyle(value, maxValue) {
   if (!maxValue) return { '--bar-fill': '0%' };
   const normalized = Math.max((value / maxValue) * 100, value > 0 ? 8 : 0);
   return { '--bar-fill': `${Math.min(normalized, 100)}%` };
+}
+
+function formatCalendarDayLabel(dateKey) {
+  const [year, month, day] = `${dateKey ?? ''}`.split('-').map(Number);
+  if (!year || !month || !day) return dateKey ?? '';
+
+  return new Date(year, month - 1, day).toLocaleDateString('es-CO', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
 }
 
 function getApiBaseUrl() {
@@ -112,7 +125,7 @@ function getOrderExpensesTotal(order) {
 
 function App() {
   const [activeView, setActiveView] = useState('cash');
-  const [restaurantName, setRestaurantName] = useState('Asados en el Barril');
+  const [restaurantName, setRestaurantName] = useState('Ahumados en el Barril');
   const [pendingOrders, setPendingOrders] = useState([]);
   const [paidOrders, setPaidOrders] = useState([]);
   const [waiters, setWaiters] = useState([]);
@@ -160,6 +173,7 @@ function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState(getApiBaseUrl());
   const [networkInfo, setNetworkInfo] = useState({ localIp: '', localApiUrl: '', publicApiUrl: '' });
   const [publicApiDraft, setPublicApiDraft] = useState('');
+  const [restaurantNameDraft, setRestaurantNameDraft] = useState('');
   const [networkStatus, setNetworkStatus] = useState('');
   const [waiterStatus, setWaiterStatus] = useState('');
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
@@ -299,6 +313,7 @@ function App() {
         getJson('/api/cash-close')
       ]);
       setRestaurantName(menuData.restaurantName);
+      setRestaurantNameDraft(menuData.restaurantName ?? '');
       setPendingOrders(pending);
       setPaidOrders(paid);
       setCashClose(close);
@@ -693,6 +708,23 @@ function App() {
     });
     setNetworkInfo((current) => ({ ...current, publicApiUrl: payload.publicApiUrl }));
     setNetworkStatus('URL publica guardada.');
+  }
+
+  async function saveRestaurantName() {
+    const name = restaurantNameDraft.trim();
+    if (!name) {
+      setNetworkStatus('Escribe el nombre del restaurante.');
+      return;
+    }
+
+    const payload = await getJson('/api/settings/restaurant-name', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ restaurantName: name })
+    });
+    setRestaurantName(payload.restaurantName);
+    setRestaurantNameDraft(payload.restaurantName);
+    setNetworkStatus('Nombre del restaurante guardado. Mobile y tickets usaran este nombre al recargar el menu.');
   }
 
   async function copyToClipboard(value, label) {
@@ -1547,6 +1579,21 @@ function App() {
 
             <div className="card-grid">
               <article className="order-card">
+                <h4>Nombre del restaurante</h4>
+                <p>Se muestra en laptop, app mobile y tickets de cocina.</p>
+                <input
+                  value={restaurantNameDraft}
+                  onChange={(event) => setRestaurantNameDraft(event.target.value)}
+                  placeholder="Ej: Ahumados en el Barril"
+                />
+                <div className="actions" style={{ marginTop: 10 }}>
+                  <button type="button" onClick={saveRestaurantName}>
+                    Guardar nombre
+                  </button>
+                </div>
+              </article>
+
+              <article className="order-card">
                 <h4>URL local para meseros</h4>
                 <p>{networkInfo.localApiUrl || 'Cargando...'}</p>
                 <div className="actions">
@@ -2011,17 +2058,14 @@ function App() {
         </div>
       ) : null}
 
-      {dayDetailModal ? (
-        <div className="modal-backdrop" onClick={() => setDayDetailModal(null)}>
-          <article className="modal" style={{ maxHeight: '80vh', overflowY: 'auto' }} onClick={(event) => event.stopPropagation()}>
-            <h3>
-              {new Date(dayDetailModal.date).toLocaleDateString('es-CO', {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric'
-              })}
-            </h3>
+      {dayDetailModal
+        ? createPortal(
+            <div className="modal-backdrop" role="presentation" onClick={() => setDayDetailModal(null)}>
+              <article
+                className="modal modal-day-detail"
+                onClick={(event) => event.stopPropagation()}
+              >
+            <h3>{formatCalendarDayLabel(dayDetailModal.date)}</h3>
             <p style={{ color: '#6f5e4d', marginTop: 0 }}>{dayDetailModal.date}</p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
@@ -2073,9 +2117,11 @@ function App() {
                 Cerrar
               </button>
             </div>
-          </article>
-        </div>
-      ) : null}
+              </article>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

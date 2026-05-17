@@ -515,6 +515,8 @@
   border: 1px solid rgba(228, 209, 189, 0.9);
   position: relative;
   overflow: hidden;
+  isolation: isolate;
+  z-index: 0;
 }
 
 .calendar-day::after {
@@ -524,6 +526,7 @@
   height: var(--bar-fill, 0%);
   background: linear-gradient(180deg, rgba(255, 177, 76, 0.22), rgba(240, 119, 29, 0.38));
   opacity: 0.95;
+  z-index: 0;
 }
 
 .calendar-empty {

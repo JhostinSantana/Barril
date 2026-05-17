@@ -280,19 +280,31 @@ button.danger:hover {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.95);
+  z-index: 5000;
+  background: rgba(16, 12, 9, 0.82);
   display: grid;
   place-items: center;
   padding: 18px;
   overflow-y: auto;
+  isolation: isolate;
 }
 
 .modal {
+  position: relative;
+  z-index: 1;
   width: min(440px, 100%);
   background: #fffaf1;
   border-radius: 16px;
   border: 1px solid #e8d8c5;
   padding: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+}
+
+.modal-day-detail {
+  width: min(520px, 100%);
+  max-height: min(85vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-scrollable {

@@ -9,7 +9,7 @@ export {
     WEIGHT_FORMULAS
 } from './pricing.js';
 
-export const DEFAULT_RESTAURANT_NAME = 'Asados en el Barril';
+export const DEFAULT_RESTAURANT_NAME = 'Ahumados en el Barril';
 export const DEFAULT_MENU_VERSION = '2026-05-17-formulas-cortes-completas';
 
 export const DEFAULT_MENU = [
@@ -177,6 +177,31 @@ export function summarizeItems(items, menu) {
       weightGrams: details.weightGrams,
       unitPrice: details.unitPrice,
       subtotal: details.subtotal
+    };
+  });
+}
+
+/** Conserva gramos ya cargados en caja cuando mobile/laptop editan sin reenviar peso. */
+export function preserveWeightFromCurrentOrder(nextItems, currentItems = []) {
+  const currentByMenuId = new Map(
+    (currentItems ?? []).map((item) => [item.menuItemId, item])
+  );
+
+  return nextItems.map((item) => {
+    const current = currentByMenuId.get(item.menuItemId);
+    if (!current) return item;
+
+    const incomingWeight = item.weightGrams != null ? Number(item.weightGrams) : 0;
+    if (incomingWeight > 0) return item;
+
+    const preservedWeight = current.weightGrams != null ? Number(current.weightGrams) : 0;
+    if (preservedWeight <= 0) return item;
+
+    return {
+      ...item,
+      weightGrams: current.weightGrams,
+      weightFormula: item.weightFormula ?? current.weightFormula ?? null,
+      pricingMode: item.pricingMode ?? current.pricingMode ?? 'weight'
     };
   });
 }

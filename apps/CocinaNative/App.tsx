@@ -519,7 +519,7 @@ export default function App(): React.JSX.Element {
       <View style={styles.container}>
         <View style={[styles.header, isMobile && styles.headerMobile]}>
           <View>
-            <Text style={[styles.kicker, isMobile && styles.kickerMobile]}>Ahumados Barril</Text>
+            <Text style={[styles.kicker, isMobile && styles.kickerMobile]}>Ahumados en el Barril</Text>
             <Text style={[styles.title, isMobile && styles.titleMobile]}>Pantalla de Cocina</Text>
           </View>
           <View style={[styles.headerRight, isMobile && styles.headerRightMobile]}>

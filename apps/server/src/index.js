@@ -28,7 +28,16 @@ import {
     vacuumDatabase
 } from './database.js';
 import { printKitchenTicket } from './printer.js';
-import { calculateOrderTotal, detectDuplicateOrders, getCashClose, getStats, getStatsSummary, normalizeOrderExpenses, summarizeItems } from './utils.js';
+import {
+  calculateOrderTotal,
+  detectDuplicateOrders,
+  getCashClose,
+  getStats,
+  getStatsSummary,
+  normalizeOrderExpenses,
+  preserveWeightFromCurrentOrder,
+  summarizeItems
+} from './utils.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -93,6 +102,22 @@ app.patch('/api/network-info/public-url', async (req, res, next) => {
 
     await setSetting('publicApiUrl', publicApiUrl);
     res.json({ ok: true, publicApiUrl });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/settings/restaurant-name', async (req, res, next) => {
+  try {
+    const restaurantName = (req.body?.restaurantName ?? '').toString().trim();
+
+    if (!restaurantName) {
+      res.status(400).json({ message: 'El nombre del restaurante no puede estar vacio.' });
+      return;
+    }
+
+    await setSetting('restaurantName', restaurantName);
+    res.json({ ok: true, restaurantName });
   } catch (error) {
     next(error);
   }
@@ -280,7 +305,8 @@ app.patch('/api/orders/:orderId', async (req, res, next) => {
       pricingMode: item.pricingMode ?? null
     }));
 
-    const summarizedItems = summarizeItems(normalizedItems, menu);
+    const mergedItems = preserveWeightFromCurrentOrder(normalizedItems, currentOrder.items);
+    const summarizedItems = summarizeItems(mergedItems, menu);
     const total = calculateOrderTotal(summarizedItems, menu, expenses ?? currentOrder.expenses ?? []);
     const updatedOrder = await updateOrderWithItems(orderId, {
       clientName,

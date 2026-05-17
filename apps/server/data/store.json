@@ -1,5 +1,5 @@
 {
-  "restaurantName": "Asados en el Barril",
+  "restaurantName": "Ahumados en el Barril",
   "menu": [
     { "id": "picaditas-probar", "name": "PARA PROBAR", "category": "PICADITAS CERDO", "price": 2.5, "pricingMode": "fixed" },
     { "id": "picaditas-picar", "name": "PARA PICAR", "category": "PICADITAS CERDO", "price": 3.5, "pricingMode": "fixed" },
