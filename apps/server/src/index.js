@@ -28,7 +28,7 @@ import {
     vacuumDatabase
 } from './database.js';
 import { printKitchenTicket } from './printer.js';
-import { calculateOrderTotal, detectDuplicateOrders, getCashClose, getStats, getStatsSummary, summarizeItems } from './utils.js';
+import { calculateOrderTotal, detectDuplicateOrders, getCashClose, getStats, getStatsSummary, normalizeOrderExpenses, summarizeItems } from './utils.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -184,6 +184,7 @@ app.post('/api/orders', async (req, res, next) => {
   try {
     const { clientName, tableNumber, waiterName, items } = req.body;
     const comment = (req.body?.comment ?? '').toString().trim();
+    const expenses = normalizeOrderExpenses(req.body?.expenses);
 
     if (!clientName || !tableNumber || !waiterName || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ message: 'Debe enviar nombre del cliente, mesa, mesero y al menos un producto.' });
@@ -207,7 +208,7 @@ app.post('/api/orders', async (req, res, next) => {
     }));
 
     const summarizedItems = summarizeItems(normalizedItems, menu);
-    const total = calculateOrderTotal(summarizedItems, menu);
+    const total = calculateOrderTotal(summarizedItems, menu, expenses);
     const order = {
       id: `COM-${nanoid(6).toUpperCase()}`,
       clientName,
@@ -220,6 +221,7 @@ app.post('/api/orders', async (req, res, next) => {
       createdAt: new Date().toISOString(),
       paidAt: null,
       items: summarizedItems,
+      expenses,
       comments: comment
         ? [{ text: comment, createdAt: new Date().toISOString(), author: waiterName, kind: 'initial' }]
         : []
@@ -244,6 +246,7 @@ app.patch('/api/orders/:orderId', async (req, res, next) => {
         }
     const { clientName, tableNumber, waiterName, items } = req.body;
     const comment = (req.body?.comment ?? '').toString().trim();
+    const expenses = req.body?.expenses !== undefined ? normalizeOrderExpenses(req.body?.expenses) : undefined;
 
     if (!clientName || !tableNumber || !waiterName || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ message: 'Debe enviar nombre del cliente, mesa, mesero y al menos un producto.' });
@@ -278,13 +281,14 @@ app.patch('/api/orders/:orderId', async (req, res, next) => {
     }));
 
     const summarizedItems = summarizeItems(normalizedItems, menu);
-    const total = calculateOrderTotal(summarizedItems, menu);
+    const total = calculateOrderTotal(summarizedItems, menu, expenses ?? currentOrder.expenses ?? []);
     const updatedOrder = await updateOrderWithItems(orderId, {
       clientName,
       tableNumber,
       waiterName,
       total,
       items: summarizedItems,
+      expenses,
       comment
     });
 

@@ -102,6 +102,14 @@ function isWeightedItem(item) {
   return item?.pricingMode === 'weight';
 }
 
+function getOrderExpenses(order) {
+  return Array.isArray(order?.expenses) ? order.expenses : [];
+}
+
+function getOrderExpensesTotal(order) {
+  return getOrderExpenses(order).reduce((acc, expense) => acc + Number(expense?.amount ?? 0), 0);
+}
+
 function App() {
   const [activeView, setActiveView] = useState('cash');
   const [restaurantName, setRestaurantName] = useState('Asados en el Barril');
@@ -158,6 +166,8 @@ function App() {
   const [confirmModal, setConfirmModal] = useState(null);
   const [weightModalOrder, setWeightModalOrder] = useState(null);
   const [weightDrafts, setWeightDrafts] = useState({});
+  const [expenseModalOrder, setExpenseModalOrder] = useState(null);
+  const [expenseDrafts, setExpenseDrafts] = useState([]);
   const [restoreFileInputKey, setRestoreFileInputKey] = useState(Date.now());
   const [dayDetailModal, setDayDetailModal] = useState(null);
   const [cleanupDateInput, setCleanupDateInput] = useState('2026-01-01');
@@ -408,6 +418,64 @@ function App() {
   function closeWeightModal() {
     setWeightModalOrder(null);
     setWeightDrafts({});
+  }
+
+  function openExpenseModal(order) {
+    const currentExpenses = getOrderExpenses(order);
+
+    setExpenseModalOrder(order);
+    setExpenseDrafts(
+      currentExpenses.length > 0
+        ? currentExpenses.map((expense) => ({
+            description: expense.description ?? '',
+            amount: `${expense.amount ?? ''}`
+          }))
+        : [{ description: '', amount: '' }]
+    );
+  }
+
+  function closeExpenseModal() {
+    setExpenseModalOrder(null);
+    setExpenseDrafts([]);
+  }
+
+  function updateExpenseDraft(index, field, value) {
+    setExpenseDrafts((current) => current.map((draft, draftIndex) => (draftIndex === index ? { ...draft, [field]: value } : draft)));
+  }
+
+  function addExpenseDraft() {
+    setExpenseDrafts((current) => [...current, { description: '', amount: '' }]);
+  }
+
+  function removeExpenseDraft(index) {
+    setExpenseDrafts((current) => current.filter((_, draftIndex) => draftIndex !== index));
+  }
+
+  async function saveExpenseModal() {
+    if (!expenseModalOrder) return;
+
+    const nextExpenses = expenseDrafts
+      .map((draft) => ({
+        description: `${draft.description ?? ''}`.trim().replace(/\s+/g, ' '),
+        amount: parseMoneyInput(draft.amount)
+      }))
+      .filter((expense) => expense.description && expense.amount > 0);
+
+    const updatedOrder = await getJson(`/api/orders/${expenseModalOrder.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientName: expenseModalOrder.clientName,
+        tableNumber: expenseModalOrder.tableNumber,
+        waiterName: expenseModalOrder.waiterName,
+        items: expenseModalOrder.items,
+        expenses: nextExpenses
+      })
+    });
+
+    setExpenseModalOrder(updatedOrder);
+    closeExpenseModal();
+    await Promise.all([loadCashView(), loadStatsView(), loadHistoryView(historyDate)]);
   }
 
   async function saveWeightModal() {
@@ -837,6 +905,8 @@ function App() {
                 const { summary, editedIds } = getEditSummary(order);
                 const hasWeightedItems = order.items.some((item) => isWeightedItem(item));
                 const needsWeightEntry = order.items.some((item) => isWeightedItem(item) && item.weightGrams == null);
+                const expenses = getOrderExpenses(order);
+                const expensesTotal = getOrderExpensesTotal(order);
 
                 return (
                 <article
@@ -873,6 +943,18 @@ function App() {
                       ))}
                     </div>
                   ) : null}
+                  {expenses.length > 0 ? (
+                    <div className="comment-card" style={{ marginTop: '12px' }}>
+                      <p className="order-edit-summary-title">Gastos adicionales</p>
+                      {expenses.map((expense, index) => (
+                        <div key={`${order.id}-expense-${index}`} style={{ padding: '8px 0', borderBottom: index < expenses.length - 1 ? '1px solid #f0e6d2' : 'none' }}>
+                          <p style={{ margin: '0 0 4px 0', fontWeight: 700 }}>{expense.description}</p>
+                          <p style={{ margin: 0, color: '#6f5e4d', fontSize: '12px' }}>{formatCurrency(expense.amount ?? 0)}</p>
+                        </div>
+                      ))}
+                      <p style={{ margin: '10px 0 0', fontWeight: 700 }}>Total gastos: {formatCurrency(expensesTotal)}</p>
+                    </div>
+                  ) : null}
                   {getComments(order).length > 0 ? (
                     <div className="comment-card">
                       <p className="order-edit-summary-title">Comentarios</p>
@@ -900,6 +982,9 @@ function App() {
                         Completar gramaje
                       </button>
                     ) : null}
+                    <button type="button" className="ghost" onClick={() => openExpenseModal(order)}>
+                      Gastos adicionales
+                    </button>
                     <button type="button" onClick={() => openPayModal(order)} disabled={needsWeightEntry}>
                       Cobrar / Abonar
                     </button>
@@ -1548,6 +1633,18 @@ function App() {
               </div>
             ) : null}
 
+            {getOrderExpenses(payingOrder).length > 0 ? (
+              <div className="comment-card" style={{ marginTop: '10px' }}>
+                <h4 style={{ marginTop: '0', marginBottom: '8px' }}>Gastos adicionales</h4>
+                {getOrderExpenses(payingOrder).map((expense, index, expenses) => (
+                  <div key={`${payingOrder.id}-expense-${index}`} style={{ padding: '8px 0', borderBottom: index < expenses.length - 1 ? '1px solid #f0e6d2' : 'none' }}>
+                    <p style={{ margin: '0 0 4px 0', fontWeight: 700 }}>{expense.description}</p>
+                    <p style={{ margin: 0, color: '#6f5e4d', fontSize: '12px' }}>{formatCurrency(expense.amount ?? 0)}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             <div className="payment-summary">
               <p>Total: <strong>{formatCurrency(payingOrder.total)}</strong></p>
               <p>Abonado: <strong>{formatCurrency(paymentPreview.paidAmount)}</strong></p>
@@ -1704,6 +1801,70 @@ function App() {
         </div>
       ) : null}
 
+      {expenseModalOrder ? (
+        <div className="modal-backdrop" onClick={closeExpenseModal}>
+          <article className="modal modal-scrollable" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Gastos adicionales</h3>
+              <p>
+                {expenseModalOrder.clientName} · Mesa {expenseModalOrder.tableNumber}
+              </p>
+              <p style={{ color: '#6f5e4d', marginTop: 6, marginBottom: 0 }}>
+                Registra uno o varios cargos extra y la caja recalculará el total automáticamente.
+              </p>
+            </div>
+
+            <div className="modal-body">
+              <div style={{ display: 'grid', gap: 12 }}>
+                {expenseDrafts.map((draft, index) => (
+                  <div key={`expense-draft-${index}`} style={{ backgroundColor: '#fff', border: '1px solid #ecdcc9', borderRadius: '8px', padding: '12px' }}>
+                    <div className="field-row">
+                      <label htmlFor={`expense-description-${index}`}>Descripción</label>
+                      <input
+                        id={`expense-description-${index}`}
+                        value={draft.description}
+                        onChange={(event) => updateExpenseDraft(index, 'description', event.target.value)}
+                        placeholder="Ej: cargo adicional"
+                      />
+                    </div>
+
+                    <div className="field-row">
+                      <label htmlFor={`expense-amount-${index}`}>Valor</label>
+                      <input
+                        id={`expense-amount-${index}`}
+                        value={draft.amount}
+                        onChange={(event) => updateExpenseDraft(index, 'amount', event.target.value)}
+                        placeholder="Ej: 1.25"
+                      />
+                    </div>
+
+                    <div className="actions" style={{ marginBottom: 0 }}>
+                      <button type="button" className="ghost" onClick={() => removeExpenseDraft(index)}>
+                        Quitar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <div className="actions" style={{ marginTop: 0 }}>
+                <button type="button" onClick={addExpenseDraft}>
+                  Agregar gasto
+                </button>
+                <button type="button" className="ghost" onClick={saveExpenseModal}>
+                  Guardar gastos
+                </button>
+                <button type="button" className="ghost" onClick={closeExpenseModal}>
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </article>
+        </div>
+      ) : null}
+
       {confirmModal ? (
         <div className="modal-backdrop" onClick={() => setConfirmModal(null)}>
           <article className="modal" onClick={(event) => event.stopPropagation()}>
@@ -1765,6 +1926,18 @@ function App() {
                   <div key={`${selectedPaidOrder.id}-${change.menuItemId}-${change.type}`} className="order-edit-summary-item">
                     <strong>{change.name}</strong>
                     <span>{getEditChangeLabel(change)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {selectedPaidOrder.expenses && selectedPaidOrder.expenses.length > 0 ? (
+              <div className="comment-card" style={{ marginTop: '10px' }}>
+                <h4 style={{ marginTop: '0', marginBottom: '8px' }}>Gastos adicionales</h4>
+                {selectedPaidOrder.expenses.map((expense, index, expenses) => (
+                  <div key={`${selectedPaidOrder.id}-expense-${index}`} style={{ padding: '8px 0', borderBottom: index < expenses.length - 1 ? '1px solid #f0e6d2' : 'none' }}>
+                    <p style={{ margin: '0 0 4px 0', fontWeight: 700 }}>{expense.description}</p>
+                    <p style={{ margin: 0, color: '#6f5e4d', fontSize: '12px' }}>{formatCurrency(expense.amount ?? 0)}</p>
                   </div>
                 ))}
               </div>

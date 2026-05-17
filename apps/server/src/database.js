@@ -5,7 +5,8 @@ import {
   DEFAULT_MENU,
   DEFAULT_MENU_VERSION,
   DEFAULT_RESTAURANT_NAME,
-  calculateOrderTotal,
+  calculateExpensesTotal,
+  normalizeOrderExpenses,
   summarizeItems
 } from './utils.js';
 
@@ -23,6 +24,17 @@ db.serialize(() => {
 
 function roundMoney(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function parseJsonArray(rawValue) {
+  if (!rawValue) return [];
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeWaiterName(name) {
@@ -90,20 +102,9 @@ function mapOrderRow(row, items, payments) {
   const paidAmount = roundMoney(row.paid_amount ?? 0);
   const balanceDue = roundMoney(Math.max(Number(row.total ?? 0) - paidAmount, 0));
   const paymentSummary = getPaymentSummary(payments);
-  let editSummary = [];
-  let comments = [];
-
-  try {
-    editSummary = row.edit_summary_json ? JSON.parse(row.edit_summary_json) : [];
-  } catch {
-    editSummary = [];
-  }
-
-  try {
-    comments = row.comments_json ? JSON.parse(row.comments_json) : [];
-  } catch {
-    comments = [];
-  }
+  const editSummary = parseJsonArray(row.edit_summary_json);
+  const comments = parseJsonArray(row.comments_json);
+  const expenses = normalizeOrderExpenses(parseJsonArray(row.expenses_json));
 
   return {
     id: row.id,
@@ -119,6 +120,8 @@ function mapOrderRow(row, items, payments) {
     paidAmount,
     balanceDue,
     total: row.total,
+    expenses,
+    expensesTotal: calculateExpensesTotal(expenses),
     createdAt: row.created_at,
     paidAt: row.paid_at,
     editSummary,
@@ -221,6 +224,7 @@ export async function initializeDatabase() {
       paid_at TEXT,
       edit_summary_json TEXT NOT NULL DEFAULT '[]',
       comments_json TEXT NOT NULL DEFAULT '[]',
+      expenses_json TEXT NOT NULL DEFAULT '[]',
       edited_at TEXT
     )
   `);
@@ -293,6 +297,9 @@ export async function initializeDatabase() {
   }
   if (!orderColumns.some((column) => column.name === 'comments_json')) {
     await run("ALTER TABLE orders ADD COLUMN comments_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!orderColumns.some((column) => column.name === 'expenses_json')) {
+    await run("ALTER TABLE orders ADD COLUMN expenses_json TEXT NOT NULL DEFAULT '[]'");
   }
   if (!orderColumns.some((column) => column.name === 'edited_at')) {
     await run('ALTER TABLE orders ADD COLUMN edited_at TEXT');
@@ -486,9 +493,10 @@ export async function getMenu() {
 }
 
 export async function createOrder(order) {
+  const expenses = normalizeOrderExpenses(order.expenses);
   await run(
-    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, kitchen_status, kitchen_started_at, kitchen_finished_at, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, edited_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, kitchen_status, kitchen_started_at, kitchen_finished_at, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, expenses_json, edited_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
     [
       order.id,
       order.clientName,
@@ -505,6 +513,7 @@ export async function createOrder(order) {
       order.paidAt,
       JSON.stringify(order.editSummary ?? []),
       JSON.stringify(order.comments ?? []),
+      JSON.stringify(expenses),
       order.editedAt ?? null
     ]
   );
@@ -533,7 +542,11 @@ export async function updateOrderWithItems(orderId, order) {
   const currentOrder = await getOrderById(orderId);
   if (!currentOrder) return null;
 
-  const normalizedTotal = roundMoney(order.total);
+  const nextExpenses = Array.isArray(order.expenses)
+    ? normalizeOrderExpenses(order.expenses)
+    : normalizeOrderExpenses(currentOrder.expenses);
+  const itemsTotal = roundMoney((Array.isArray(order.items) ? order.items : []).reduce((acc, item) => acc + Number(item.subtotal ?? 0), 0));
+  const normalizedTotal = roundMoney(itemsTotal + calculateExpensesTotal(nextExpenses));
   const paidAmount = roundMoney(currentOrder.paidAmount ?? 0);
 
   if (currentOrder.status === 'paid') {
@@ -566,7 +579,8 @@ export async function updateOrderWithItems(orderId, order) {
   const metadataChanged =
     order.clientName !== currentOrder.clientName ||
     order.tableNumber !== currentOrder.tableNumber ||
-    order.waiterName !== currentOrder.waiterName;
+    order.waiterName !== currentOrder.waiterName ||
+    Array.isArray(order.expenses);
   const editedAt = editSummary.length > 0 || commentText || metadataChanged
     ? new Date().toISOString()
     : currentOrder.editedAt ?? null;
@@ -611,6 +625,13 @@ export async function updateOrderWithItems(orderId, order) {
         ]
       );
     }
+
+    await run(
+      `UPDATE orders
+       SET expenses_json = ?
+       WHERE id = ?`,
+      [JSON.stringify(nextExpenses), orderId]
+    );
 
     await run('COMMIT');
   } catch (error) {
@@ -753,7 +774,7 @@ async function repairMispricedOpenOrders() {
 
   const menu = await getMenu();
   const orders = await all(`
-    SELECT id, paid_amount AS paidAmount
+    SELECT id, paid_amount AS paidAmount, expenses_json AS expensesJson
     FROM orders
     WHERE status IN ('pending', 'partial')
   `);
@@ -770,7 +791,10 @@ async function repairMispricedOpenOrders() {
     }));
 
     const summarizedItems = summarizeItems(normalizedItems, menu);
-    const total = calculateOrderTotal(summarizedItems, menu);
+    const expenses = normalizeOrderExpenses(parseJsonArray(order.expensesJson));
+    const total = roundMoney(
+      summarizedItems.reduce((acc, item) => acc + Number(item.subtotal ?? 0), 0) + calculateExpensesTotal(expenses)
+    );
     const paidAmount = roundMoney(order.paidAmount ?? 0);
 
     if (paidAmount > total) continue;
@@ -869,9 +893,24 @@ export async function restoreData(payload) {
     if (Array.isArray(payload.orders)) {
       for (const o of payload.orders) {
         await run(
-          `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [o.id, o.client_name ?? o.clientName, o.table_number ?? o.tableNumber, o.waiter_name ?? o.waiterName ?? '', o.status ?? 'pending', o.payment_method ?? o.paymentMethod ?? null, o.total ?? 0, o.paid_amount ?? o.paidAmount ?? 0, o.created_at ?? o.createdAt ?? new Date().toISOString(), o.paid_at ?? o.paidAt ?? null]
+          `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, expenses_json, edited_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            o.id,
+            o.client_name ?? o.clientName,
+            o.table_number ?? o.tableNumber,
+            o.waiter_name ?? o.waiterName ?? '',
+            o.status ?? 'pending',
+            o.payment_method ?? o.paymentMethod ?? null,
+            o.total ?? 0,
+            o.paid_amount ?? o.paidAmount ?? 0,
+            o.created_at ?? o.createdAt ?? new Date().toISOString(),
+            o.paid_at ?? o.paidAt ?? null,
+            o.edit_summary_json ?? o.editSummaryJson ?? '[]',
+            o.comments_json ?? o.commentsJson ?? '[]',
+            o.expenses_json ?? o.expensesJson ?? '[]',
+            o.edited_at ?? o.editedAt ?? null
+          ]
         );
       }
     }

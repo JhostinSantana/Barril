@@ -127,14 +127,40 @@ export function getDateKey(isoDate) {
   return date.toISOString().slice(0, 10);
 }
 
-export function calculateOrderTotal(items, menu) {
-  return roundMoney(items.reduce((acc, item) => {
+export function normalizeOrderExpenses(expenses) {
+  if (!Array.isArray(expenses)) return [];
+
+  return expenses
+    .map((expense) => {
+      const description = `${expense?.description ?? expense?.name ?? ''}`.trim().replace(/\s+/g, ' ');
+      const amountValue = expense?.amount ?? expense?.subtotal ?? expense?.value;
+      const amount = hasProvidedMoney(amountValue) ? roundMoney(amountValue) : 0;
+
+      return {
+        id: `${expense?.id ?? ''}`.trim() || null,
+        description,
+        amount,
+        createdAt: expense?.createdAt ?? expense?.created_at ?? null,
+        updatedAt: expense?.updatedAt ?? expense?.updated_at ?? null
+      };
+    })
+    .filter((expense) => expense.description && expense.amount > 0);
+}
+
+export function calculateExpensesTotal(expenses = []) {
+  return roundMoney(normalizeOrderExpenses(expenses).reduce((acc, expense) => acc + expense.amount, 0));
+}
+
+export function calculateOrderTotal(items, menu, expenses = []) {
+  const itemsTotal = items.reduce((acc, item) => {
     const menuItem = menu.find((m) => m.id === item.menuItemId);
     const resolvedSubtotal = hasProvidedMoney(item.subtotal)
       ? Number(item.subtotal)
       : resolveOrderItemDetails(item, menuItem).subtotal;
     return acc + resolvedSubtotal;
-  }, 0));
+  }, 0);
+
+  return roundMoney(itemsTotal + calculateExpensesTotal(expenses));
 }
 
 export function summarizeItems(items, menu) {
