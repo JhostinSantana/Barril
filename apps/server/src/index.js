@@ -8,6 +8,7 @@ import {
     addOrderPayment,
     createOrder,
     deleteAllOrders,
+    deleteOrderById,
     deleteOrdersOlderThan,
     exportAllData,
     getMenu,
@@ -29,14 +30,14 @@ import {
 } from './database.js';
 import { printKitchenTicket } from './printer.js';
 import {
-  calculateOrderTotal,
-  detectDuplicateOrders,
-  getCashClose,
-  getStats,
-  getStatsSummary,
-  normalizeOrderExpenses,
-  preserveWeightFromCurrentOrder,
-  summarizeItems
+    calculateOrderTotal,
+    detectDuplicateOrders,
+    getCashClose,
+    getStats,
+    getStatsSummary,
+    normalizeOrderExpenses,
+    preserveWeightFromCurrentOrder,
+    summarizeItems
 } from './utils.js';
 
 const app = express();
@@ -455,6 +456,39 @@ app.patch('/api/orders/:orderId/pay', async (req, res, next) => {
     }
 
     res.json(updatedOrder);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/orders/:orderId', async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+
+    if (!orderId || typeof orderId !== 'string' || !orderId.startsWith('COM-')) {
+      res.status(400).json({ message: 'ID de orden invalido.' });
+      return;
+    }
+
+    const order = await getOrderById(orderId);
+    if (!order) {
+      res.status(404).json({ message: 'Cuenta no encontrada.' });
+      return;
+    }
+
+    if (order.status === 'paid') {
+      res.status(409).json({ message: 'La cuenta ya esta pagada y no se puede eliminar.' });
+      return;
+    }
+
+    const removed = await deleteOrderById(orderId);
+    if (!removed) {
+      res.status(404).json({ message: 'Cuenta no encontrada.' });
+      return;
+    }
+
+    io.emit('order:updated', { id: orderId, deleted: true });
+    res.json({ ok: true, orderId });
   } catch (error) {
     next(error);
   }

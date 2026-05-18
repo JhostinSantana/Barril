@@ -1006,6 +1006,20 @@ export async function deleteAllOrders() {
   }
 }
 
+export async function deleteOrderById(orderId) {
+  await run('BEGIN TRANSACTION');
+  try {
+    await run('DELETE FROM order_payments WHERE order_id = ?', [orderId]);
+    await run('DELETE FROM order_items WHERE order_id = ?', [orderId]);
+    const result = await run('DELETE FROM orders WHERE id = ?', [orderId]);
+    await run('COMMIT');
+    return Number(result?.changes ?? 0) > 0;
+  } catch (err) {
+    await run('ROLLBACK');
+    throw err;
+  }
+}
+
 export async function vacuumDatabase() {
   await run('VACUUM');
 }

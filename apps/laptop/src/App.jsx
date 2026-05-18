@@ -10,6 +10,7 @@ import {
 import './App.css';
 
 const socket = io('http://localhost:4000', { autoConnect: false });
+const DELETE_ACCOUNT_PIN = '040420';
 
 const navItems = [
   { id: 'stats', label: 'Estadistica' },
@@ -178,6 +179,7 @@ function App() {
   const [waiterStatus, setWaiterStatus] = useState('');
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
   const [confirmModal, setConfirmModal] = useState(null);
+  const [deleteOrderModal, setDeleteOrderModal] = useState(null);
   const [weightModalOrder, setWeightModalOrder] = useState(null);
   const [weightDrafts, setWeightDrafts] = useState({});
   const [expenseModalOrder, setExpenseModalOrder] = useState(null);
@@ -556,6 +558,48 @@ function App() {
     }
 
     await Promise.all([loadCashView(), loadStatsView(), loadHistoryView(historyDate)]);
+  }
+
+  function openDeleteOrderModal(order) {
+    setDeleteOrderModal({
+      order,
+      pin: '',
+      error: '',
+      loading: false
+    });
+  }
+
+  function closeDeleteOrderModal() {
+    setDeleteOrderModal(null);
+  }
+
+  async function confirmDeleteOrder() {
+    if (!deleteOrderModal?.order) return;
+
+    const pin = `${deleteOrderModal.pin ?? ''}`.trim();
+    if (pin !== DELETE_ACCOUNT_PIN) {
+      setDeleteOrderModal((current) => (current ? { ...current, error: 'PIN incorrecto. Vuelve a intentarlo.' } : current));
+      return;
+    }
+
+    setDeleteOrderModal((current) => (current ? { ...current, loading: true, error: '' } : current));
+
+    try {
+      await getJson(`/api/orders/${deleteOrderModal.order.id}`, { method: 'DELETE' });
+      setNetworkStatus(`Cuenta ${deleteOrderModal.order.id} eliminada.`);
+      closeDeleteOrderModal();
+      await Promise.all([loadCashView(), loadStatsView(), loadHistoryView(historyDate)]);
+    } catch (err) {
+      setDeleteOrderModal((current) => (
+        current
+          ? {
+              ...current,
+              loading: false,
+              error: err.message ?? 'No se pudo eliminar la cuenta.'
+            }
+          : current
+      ));
+    }
   }
 
   async function loadNetworkInfo() {
@@ -1022,6 +1066,13 @@ function App() {
                     </button>
                     <button type="button" className="ghost" onClick={() => printKitchenTicket(order)}>
                       Ticket cocina
+                    </button>
+                    <button
+                      type="button"
+                      className="danger action-delete-account"
+                      onClick={() => openDeleteOrderModal(order)}
+                    >
+                      Eliminar cuenta
                     </button>
                   </div>
                 </article>
@@ -1945,6 +1996,57 @@ function App() {
                 {confirmModal.cancelText}
               </button>
             </div>
+          </article>
+        </div>
+      ) : null}
+
+      {deleteOrderModal ? (
+        <div className="modal-backdrop" onClick={deleteOrderModal.loading ? undefined : closeDeleteOrderModal}>
+          <article className="modal modal-security" onClick={(event) => event.stopPropagation()}>
+            <p className="security-flag">Acceso restringido</p>
+            <h3>Eliminar cuenta</h3>
+            <p className="security-copy">
+              {deleteOrderModal.order.id} · {deleteOrderModal.order.clientName} · Mesa {deleteOrderModal.order.tableNumber}
+            </p>
+            <p className="security-note">
+              Ingresa el PIN de seguridad para autorizar esta eliminación. La acción no se puede deshacer.
+            </p>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                confirmDeleteOrder();
+              }}
+            >
+              <div className="security-field">
+                <label htmlFor="delete-order-pin">PIN de seguridad</label>
+                <input
+                  id="delete-order-pin"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  autoFocus
+                  maxLength={6}
+                  value={deleteOrderModal.pin}
+                  onChange={(event) => setDeleteOrderModal((current) => (
+                    current ? { ...current, pin: event.target.value, error: '' } : current
+                  ))}
+                  placeholder="••••••"
+                  disabled={deleteOrderModal.loading}
+                />
+              </div>
+
+              {deleteOrderModal.error ? <p className="security-error">{deleteOrderModal.error}</p> : null}
+
+              <div className="actions security-actions">
+                <button type="submit" className="danger" disabled={deleteOrderModal.loading}>
+                  {deleteOrderModal.loading ? 'Eliminando...' : 'Eliminar cuenta'}
+                </button>
+                <button type="button" className="ghost" onClick={closeDeleteOrderModal} disabled={deleteOrderModal.loading}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
           </article>
         </div>
       ) : null}
