@@ -240,6 +240,40 @@
   margin: 0;
 }
 
+.stats-item-list {
+  display: grid;
+  gap: 10px;
+}
+
+.stats-item-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid #ebdfcf;
+}
+
+.stats-item-row strong {
+  display: block;
+  font-size: 0.98rem;
+  color: #281d15;
+}
+
+.stats-item-row p {
+  margin: 4px 0 0;
+  color: #7e6650;
+  font-size: 0.88rem;
+}
+
+.stats-item-row span {
+  font-weight: 800;
+  color: #1f8f73;
+  white-space: nowrap;
+}
+
 .stats-chip {
   display: inline-flex;
   align-items: center;
