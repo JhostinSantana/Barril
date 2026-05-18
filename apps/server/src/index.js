@@ -421,6 +421,12 @@ app.patch('/api/orders/:orderId/pay', async (req, res, next) => {
       return;
     }
 
+    const normalizedTransferNumber = `${transferenceNumber ?? ''}`.trim();
+    if (paymentMethod === 'transferencia' && !normalizedTransferNumber) {
+      res.status(400).json({ message: 'El número de comprobante es obligatorio en transferencia.' });
+      return;
+    }
+
     if (normalizedAmount > maxAmount) {
       res.status(400).json({ message: 'El abono no puede superar el saldo pendiente.' });
       return;
@@ -447,7 +453,7 @@ app.patch('/api/orders/:orderId/pay', async (req, res, next) => {
       normalizedTendered,
       changeGiven,
       paidAt,
-      transferenceNumber
+      normalizedTransferNumber
     );
 
     io.emit('order:updated', updatedOrder);

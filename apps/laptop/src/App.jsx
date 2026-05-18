@@ -135,6 +135,13 @@ function getOrderExpensesTotal(order) {
   );
 }
 
+function getOrderPaymentTotals(order) {
+  return {
+    efectivo: Number(order?.paymentSummary?.efectivo ?? 0),
+    transferencia: Number(order?.paymentSummary?.transferencia ?? 0),
+  };
+}
+
 function App() {
   const [activeView, setActiveView] = useState("cash");
   const [restaurantName, setRestaurantName] = useState("Ahumados Al Barril");
@@ -207,6 +214,7 @@ function App() {
   const [weightDrafts, setWeightDrafts] = useState({});
   const [expenseModalOrder, setExpenseModalOrder] = useState(null);
   const [expenseDrafts, setExpenseDrafts] = useState([]);
+  const [expenseModalError, setExpenseModalError] = useState("");
   const [restoreFileInputKey, setRestoreFileInputKey] = useState(Date.now());
   const [dayDetailModal, setDayDetailModal] = useState(null);
   const [cleanupDateInput, setCleanupDateInput] = useState("2026-01-01");
@@ -282,6 +290,21 @@ function App() {
         changeDue,
         canSubmit: false,
         submitMessage: "En efectivo, recibido debe ser >= abono.",
+      };
+    }
+
+    if (
+      paymentDraft.paymentMethod === "transferencia" &&
+      `${paymentDraft.transferenceNumber ?? ""}`.trim() === ""
+    ) {
+      return {
+        paidAmount,
+        balanceDue,
+        amount,
+        tenderedAmount,
+        changeDue,
+        canSubmit: false,
+        submitMessage: "El número de comprobante es obligatorio en transferencia.",
       };
     }
 
@@ -485,6 +508,7 @@ function App() {
     const currentExpenses = getOrderExpenses(order);
 
     setExpenseModalOrder(order);
+    setExpenseModalError("");
     setExpenseDrafts(
       currentExpenses.length > 0
         ? currentExpenses.map((expense) => ({
@@ -498,9 +522,11 @@ function App() {
   function closeExpenseModal() {
     setExpenseModalOrder(null);
     setExpenseDrafts([]);
+    setExpenseModalError("");
   }
 
   function updateExpenseDraft(index, field, value) {
+    setExpenseModalError("");
     setExpenseDrafts((current) =>
       current.map((draft, draftIndex) =>
         draftIndex === index ? { ...draft, [field]: value } : draft,
@@ -509,6 +535,7 @@ function App() {
   }
 
   function addExpenseDraft() {
+    setExpenseModalError("");
     setExpenseDrafts((current) => [
       ...current,
       { description: "", amount: "" },
@@ -516,6 +543,7 @@ function App() {
   }
 
   function removeExpenseDraft(index) {
+    setExpenseModalError("");
     setExpenseDrafts((current) =>
       current.filter((_, draftIndex) => draftIndex !== index),
     );
@@ -524,12 +552,25 @@ function App() {
   async function saveExpenseModal() {
     if (!expenseModalOrder) return;
 
-    const nextExpenses = expenseDrafts
-      .map((draft) => ({
-        description: `${draft.description ?? ""}`.trim().replace(/\s+/g, " "),
-        amount: parseMoneyInput(draft.amount),
-      }))
-      .filter((expense) => expense.description && expense.amount > 0);
+    const normalizedExpenses = expenseDrafts.map((draft) => ({
+      description: `${draft.description ?? ""}`.trim().replace(/\s+/g, " "),
+      amount: parseMoneyInput(draft.amount),
+    }));
+
+    const hasIncompleteExpense = normalizedExpenses.some(
+      (expense) =>
+        (expense.description && expense.amount <= 0) ||
+        (!expense.description && expense.amount > 0),
+    );
+
+    if (hasIncompleteExpense) {
+      setExpenseModalError("Completa la descripción y el valor de cada gasto antes de guardar.");
+      return;
+    }
+
+    const nextExpenses = normalizedExpenses.filter(
+      (expense) => expense.description && expense.amount > 0,
+    );
 
     const updatedOrder = await getJson(`/api/orders/${expenseModalOrder.id}`, {
       method: "PATCH",
@@ -606,7 +647,7 @@ function App() {
           : undefined,
       transferenceNumber:
         paymentDraft.paymentMethod === "transferencia"
-          ? paymentDraft.transferenceNumber
+          ? `${paymentDraft.transferenceNumber ?? ""}`.trim()
           : undefined,
     };
 
@@ -1386,43 +1427,6 @@ function App() {
 
             <div style={{ marginBottom: 32 }}>
               <div className="section-header" style={{ marginBottom: 16 }}>
-                <div>
-                  <h3>Ventas de hoy antes de cerrar el día</h3>
-                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                    Este resumen te muestra cuántos platos y bebidas salieron
-                    hoy.
-                  </p>
-                </div>
-              </div>
-              <div
-                className="kpi-grid"
-                style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
-              >
-                <article className="kpi-card">
-                  <h3>Platos vendidos hoy</h3>
-                  <strong>{statsSummary.today.dishes.quantity}</strong>
-                  <p style={{ margin: "8px 0 0", color: "#6f5e4d" }}>
-                    {formatCurrency(statsSummary.today.dishes.efectivo)} en
-                    efectivo ·{" "}
-                    {formatCurrency(statsSummary.today.dishes.transferencia)} en
-                    transferencia
-                  </p>
-                </article>
-                <article className="kpi-card">
-                  <h3>Bebidas vendidas hoy</h3>
-                  <strong>{statsSummary.today.beverages.quantity}</strong>
-                  <p style={{ margin: "8px 0 0", color: "#6f5e4d" }}>
-                    {formatCurrency(statsSummary.today.beverages.efectivo)} en
-                    efectivo ·{" "}
-                    {formatCurrency(statsSummary.today.beverages.transferencia)}{" "}
-                    en transferencia
-                  </p>
-                </article>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 32 }}>
-              <div className="section-header" style={{ marginBottom: 16 }}>
                 <h3>Desglose de hoy por producto</h3>
               </div>
               <div className="stats-split-grid">
@@ -2084,6 +2088,25 @@ function App() {
                   (s, o) => s + Number(o.total || 0),
                   0,
                 );
+                const dayPaymentTotals = group.orders.reduce(
+                  (acc, order) => {
+                    const paymentTotals = getOrderPaymentTotals(order);
+                    acc.efectivo += paymentTotals.efectivo;
+                    acc.transferencia += paymentTotals.transferencia;
+                    return acc;
+                  },
+                  { efectivo: 0, transferencia: 0 },
+                );
+                const dayPaymentTotal =
+                  dayPaymentTotals.efectivo + dayPaymentTotals.transferencia;
+                const cashShare =
+                  dayPaymentTotal > 0
+                    ? (dayPaymentTotals.efectivo / dayPaymentTotal) * 100
+                    : 0;
+                const transferShare =
+                  dayPaymentTotal > 0
+                    ? (dayPaymentTotals.transferencia / dayPaymentTotal) * 100
+                    : 0;
                 const ordersCount = group.orders.length;
                 const paidCount = group.orders.filter(
                   (o) => o.status === "paid",
@@ -2174,6 +2197,106 @@ function App() {
                         }}
                       >
                         Toca para ver detalles
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 12,
+                          paddingTop: 12,
+                          borderTop: "1px solid #ead9c5",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            alignItems: "center",
+                            marginBottom: 8,
+                          }}
+                        >
+                          <strong style={{ color: "#3d3d3d", fontSize: 13 }}>
+                            Caja del día
+                          </strong>
+                          <span style={{ color: "#6f5e4d", fontSize: 12 }}>
+                            {formatCurrency(dayPaymentTotal)}
+                          </span>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: 8,
+                            fontSize: 12,
+                            color: "#6f5e4d",
+                          }}
+                        >
+                          <div>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                marginBottom: 4,
+                              }}
+                            >
+                              <span>Efectivo</span>
+                              <strong style={{ color: "#2f8f73" }}>
+                                {formatCurrency(dayPaymentTotals.efectivo)}
+                              </strong>
+                            </div>
+                            <div
+                              style={{
+                                height: 8,
+                                borderRadius: 999,
+                                background: "#efe4d5",
+                                overflow: "hidden",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${cashShare}%`,
+                                  height: "100%",
+                                  borderRadius: "inherit",
+                                  background:
+                                    "linear-gradient(90deg, #1f8f73, #47b38f)",
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                marginBottom: 4,
+                              }}
+                            >
+                              <span>Transferencia</span>
+                              <strong style={{ color: "#b06b15" }}>
+                                {formatCurrency(dayPaymentTotals.transferencia)}
+                              </strong>
+                            </div>
+                            <div
+                              style={{
+                                height: 8,
+                                borderRadius: 999,
+                                background: "#efe4d5",
+                                overflow: "hidden",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${transferShare}%`,
+                                  height: "100%",
+                                  borderRadius: "inherit",
+                                  background:
+                                    "linear-gradient(90deg, #b06b15, #d99a3b)",
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -2832,6 +2955,11 @@ function App() {
             </div>
 
             <div className="modal-body">
+              {expenseModalError ? (
+                <p className="inline-warning" style={{ marginTop: 0 }}>
+                  {expenseModalError}
+                </p>
+              ) : null}
               <div style={{ display: "grid", gap: 12 }}>
                 {expenseDrafts.map((draft, index) => (
                   <div

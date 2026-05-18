@@ -25,6 +25,7 @@ body {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 280px 1fr;
+  align-items: start;
 }
 
 .sidebar {
@@ -35,6 +36,11 @@ body {
   flex-direction: column;
   justify-content: space-between;
   border-right: 1px solid rgba(255, 255, 255, 0.1);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .eyebrow {
@@ -469,6 +475,10 @@ button:disabled {
   }
 
   .sidebar {
+    position: relative;
+    top: auto;
+    height: auto;
+    overflow-y: visible;
     border-right: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     gap: 20px;
