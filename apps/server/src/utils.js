@@ -1,16 +1,38 @@
 import { calculateWeightedCutPrice, resolveWeightFormula } from "./pricing.js";
 
 export {
-  calculateWeightedCutPrice,
-  getWeightFormulaLabel,
-  resolveWeightFormula,
-  WEIGHT_FORMULA_CORTE_AHUMADO,
-  WEIGHT_FORMULA_LABELS,
-  WEIGHT_FORMULAS,
+    calculateWeightedCutPrice,
+    getWeightFormulaLabel,
+    resolveWeightFormula,
+    WEIGHT_FORMULA_CORTE_AHUMADO,
+    WEIGHT_FORMULA_LABELS,
+    WEIGHT_FORMULAS
 } from "./pricing.js";
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const DEFAULT_MENU_VERSION = "2026-05-18-menu-piernitas-fuerte-v2";
+export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
+export const CONTAINER_EXPENSE_AMOUNT = 0.25;
+
+export function normalizeContainerQuantity(quantity) {
+  const numericQuantity = Math.floor(Number(quantity) || 0);
+  return numericQuantity > 0 ? numericQuantity : 1;
+}
+
+export function createContainerExpense(quantity = 1) {
+  const normalizedQuantity = normalizeContainerQuantity(quantity);
+  const now = new Date().toISOString();
+  return {
+    id: `container-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`,
+    description: CONTAINER_EXPENSE_DESCRIPTION,
+    quantity: normalizedQuantity,
+    unitPrice: CONTAINER_EXPENSE_AMOUNT,
+    amount: roundMoney(normalizedQuantity * CONTAINER_EXPENSE_AMOUNT),
+    kind: "container",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 export const DEFAULT_MENU = [
   {
@@ -459,6 +481,32 @@ export function normalizeOrderExpenses(expenses) {
         .replace(/\s+/g, " ");
       const amountValue =
         expense?.amount ?? expense?.subtotal ?? expense?.value;
+      const kind = `${expense?.kind ?? expense?.type ?? ""}`
+        .trim()
+        .toLowerCase() || null;
+      const descriptionLower = description.toLowerCase();
+      const isContainer =
+        kind === "container" ||
+        descriptionLower === CONTAINER_EXPENSE_DESCRIPTION.toLowerCase();
+
+      if (isContainer) {
+        const quantity = normalizeContainerQuantity(expense?.quantity);
+        const unitPrice = hasProvidedMoney(expense?.unitPrice)
+          ? roundMoney(expense.unitPrice)
+          : CONTAINER_EXPENSE_AMOUNT;
+
+        return {
+          id: `${expense?.id ?? ""}`.trim() || null,
+          description: CONTAINER_EXPENSE_DESCRIPTION,
+          amount: roundMoney(quantity * unitPrice),
+          quantity,
+          unitPrice,
+          kind: "container",
+          createdAt: expense?.createdAt ?? expense?.created_at ?? null,
+          updatedAt: expense?.updatedAt ?? expense?.updated_at ?? null,
+        };
+      }
+
       const amount = hasProvidedMoney(amountValue)
         ? roundMoney(amountValue)
         : 0;
@@ -467,11 +515,28 @@ export function normalizeOrderExpenses(expenses) {
         id: `${expense?.id ?? ""}`.trim() || null,
         description,
         amount,
+        quantity: null,
+        unitPrice: null,
+        kind,
         createdAt: expense?.createdAt ?? expense?.created_at ?? null,
         updatedAt: expense?.updatedAt ?? expense?.updated_at ?? null,
       };
     })
     .filter((expense) => expense.description && expense.amount > 0);
+}
+
+export function isContainerExpense(expense) {
+  if (!expense) return false;
+
+  if (`${expense.kind ?? ""}`.trim().toLowerCase() === "container") {
+    return true;
+  }
+
+  const description = `${expense.description ?? expense.name ?? ""}`
+    .trim()
+    .toLowerCase();
+
+  return description === CONTAINER_EXPENSE_DESCRIPTION.toLowerCase();
 }
 
 export function calculateExpensesTotal(expenses = []) {
@@ -668,6 +733,10 @@ export function getStats(orders, menu, fromDate, toDate) {
       { method: "transferencia", label: "Transferencia", amount: 0 },
     ],
   ]);
+  const containerSummary = {
+    quantity: 0,
+    revenue: 0,
+  };
   let totalSales = 0;
   let totalPaidOrders = 0;
 
@@ -715,6 +784,17 @@ export function getStats(orders, menu, fromDate, toDate) {
           );
           dailyPayment.total = roundMoney(dailyPayment.total + amount);
         }
+      });
+
+      normalizeOrderExpenses(order.expenses).forEach((expense) => {
+        if (!isContainerExpense(expense)) return;
+
+        containerSummary.quantity += normalizeContainerQuantity(
+          expense.quantity,
+        );
+        containerSummary.revenue = roundMoney(
+          containerSummary.revenue + expense.amount,
+        );
       });
     }
 
@@ -830,6 +910,7 @@ export function getStats(orders, menu, fromDate, toDate) {
     bottomDishes: buildReverseRanking(dishMap, 10),
     categories,
     paymentSummary: [...paymentMap.values()],
+    containerSummary,
     quincenas,
     calendarDays,
   };
@@ -873,22 +954,16 @@ export function getCashClose(orders, dateKey) {
 
 export function getStatsSummary(orders, menu) {
   const today = new Date().toISOString().slice(0, 10);
-  const createBucket = () => ({
-    quantity: 0,
-    efectivo: 0,
-    transferencia: 0,
-    items: [],
-  });
-
-  // Inicializar estructura
   const summary = {
     today: {
-      dishes: createBucket(),
-      beverages: createBucket(),
+      efectivo: 0,
+      transferencia: 0,
+      total: 0,
     },
     historical: {
-      dishes: createBucket(),
-      beverages: createBucket(),
+      efectivo: 0,
+      transferencia: 0,
+      total: 0,
     },
   };
 
@@ -914,63 +989,13 @@ export function getStatsSummary(orders, menu) {
           payment.paymentMethod,
           roundMoney(paymentsByMethod.get(payment.paymentMethod) + amount),
         );
-      }
-    });
-
-    // Procesar items de la orden
-    order.items.forEach((item) => {
-      const menuItem = menu.find((m) => m.id === item.menuItemId);
-      if (!menuItem) return;
-
-      const isBeverage = menuItem.category === "BEBIDAS";
-      const productType = isBeverage ? "beverages" : "dishes";
-      const revenue = resolveOrderItemRevenue(item);
-      const itemQuantity = Math.max(1, Number(item.quantity) || 1);
-      const bucket = summary[timeRange][productType];
-
-      // Distribuir ingresos proporcionalmente según método de pago
-      const totalRevenue = roundMoney(revenue);
-      const totalPaid = roundMoney(
-        paymentsByMethod.get("efectivo") +
-          paymentsByMethod.get("transferencia"),
-      );
-
-      if (totalPaid > 0) {
-        const cashRatio = roundMoney(
-          paymentsByMethod.get("efectivo") / totalPaid,
+        summary[timeRange][payment.paymentMethod] = roundMoney(
+          summary[timeRange][payment.paymentMethod] + amount,
         );
-        const transferRatio = roundMoney(
-          paymentsByMethod.get("transferencia") / totalPaid,
-        );
-
-        bucket.quantity += itemQuantity;
-        bucket.efectivo = roundMoney(
-          bucket.efectivo + totalRevenue * cashRatio,
-        );
-        bucket.transferencia = roundMoney(
-          bucket.transferencia + totalRevenue * transferRatio,
-        );
-        bucket.items.push({
-          menuItemId: item.menuItemId,
-          name: menuItem.name,
-          category: menuItem.category,
-          quantity: itemQuantity,
-          revenue: totalRevenue,
-        });
+        summary[timeRange].total = roundMoney(summary[timeRange].total + amount);
       }
     });
   });
-
-  for (const range of ["today", "historical"]) {
-    for (const productType of ["dishes", "beverages"]) {
-      summary[range][productType].items.sort(
-        (a, b) =>
-          b.quantity - a.quantity ||
-          b.revenue - a.revenue ||
-          a.name.localeCompare(b.name),
-      );
-    }
-  }
 
   return summary;
 }

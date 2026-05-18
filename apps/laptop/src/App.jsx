@@ -3,10 +3,17 @@ import { createPortal } from "react-dom";
 import { QRCode } from "react-qr-code";
 import { io } from "socket.io-client";
 import {
-  calculateWeightedCutPrice,
-  getWeightFormulaLabel,
-  resolveWeightFormulaForOrderItem,
+    calculateWeightedCutPrice,
+    getWeightFormulaLabel,
+    resolveWeightFormulaForOrderItem,
 } from "../../server/src/pricing.js";
+import {
+    CONTAINER_EXPENSE_AMOUNT,
+    CONTAINER_EXPENSE_DESCRIPTION,
+    createContainerExpense,
+  isContainerExpense,
+  normalizeContainerQuantity,
+} from "../../server/src/utils.js";
 import "./App.css";
 
 const socket = io("http://localhost:4000", { autoConnect: false });
@@ -128,6 +135,28 @@ function getOrderExpenses(order) {
   return Array.isArray(order?.expenses) ? order.expenses : [];
 }
 
+function getContainerExpenseQuantity(expenses) {
+  return expenses.reduce((acc, expense) => {
+    if (!isContainerExpense(expense)) return acc;
+    return acc + normalizeContainerQuantity(expense?.quantity);
+  }, 0);
+}
+
+function getContainerExpenseTotal(quantity) {
+  return Math.round((normalizeContainerQuantity(quantity) * CONTAINER_EXPENSE_AMOUNT + Number.EPSILON) * 100) / 100;
+}
+
+function getExpenseLabel(expense) {
+  if (isContainerExpense(expense)) {
+    const quantity = normalizeContainerQuantity(expense?.quantity);
+    return quantity > 1
+      ? `${CONTAINER_EXPENSE_DESCRIPTION} x ${quantity}`
+      : CONTAINER_EXPENSE_DESCRIPTION;
+  }
+
+  return `${expense?.description ?? ""}`.trim();
+}
+
 function getOrderExpensesTotal(order) {
   return getOrderExpenses(order).reduce(
     (acc, expense) => acc + Number(expense?.amount ?? 0),
@@ -162,6 +191,10 @@ function App() {
     totalOrders: 0,
     totalPaidOrders: 0,
     totalSales: 0,
+    containerSummary: {
+      quantity: 0,
+      revenue: 0,
+    },
     monthLabel: "",
     rangeLabel: "",
     monthStartWeekday: 0,
@@ -187,12 +220,14 @@ function App() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [statsSummary, setStatsSummary] = useState({
     today: {
-      dishes: { quantity: 0, efectivo: 0, transferencia: 0, items: [] },
-      beverages: { quantity: 0, efectivo: 0, transferencia: 0, items: [] },
+      efectivo: 0,
+      transferencia: 0,
+      total: 0,
     },
     historical: {
-      dishes: { quantity: 0, efectivo: 0, transferencia: 0, items: [] },
-      beverages: { quantity: 0, efectivo: 0, transferencia: 0, items: [] },
+      efectivo: 0,
+      transferencia: 0,
+      total: 0,
     },
   });
   const [loading, setLoading] = useState(false);
@@ -505,18 +540,35 @@ function App() {
     setWeightDrafts({});
   }
 
-  function openExpenseModal(order) {
+  function openExpenseModal(order, options = {}) {
     const currentExpenses = getOrderExpenses(order);
+    const containerQuantity = getContainerExpenseQuantity(currentExpenses);
+    const containerExpense = containerQuantity > 0 || options.includeContainer
+      ? {
+          description: CONTAINER_EXPENSE_DESCRIPTION,
+          amount: `${getContainerExpenseTotal(containerQuantity || 1)}`,
+          quantity: `${containerQuantity || 1}`,
+          kind: "container",
+        }
+      : null;
+
+    const regularExpenses = currentExpenses
+      .filter((expense) => !isContainerExpense(expense))
+      .map((expense) => ({
+        description: expense.description ?? "",
+        amount: `${expense.amount ?? ""}`,
+        quantity: "",
+        kind: expense.kind ?? null,
+      }));
 
     setExpenseModalOrder(order);
     setExpenseModalError("");
     setExpenseDrafts(
-      currentExpenses.length > 0
-        ? currentExpenses.map((expense) => ({
-            description: expense.description ?? "",
-            amount: `${expense.amount ?? ""}`,
-          }))
-        : [{ description: "", amount: "" }],
+      containerExpense
+        ? [...regularExpenses, containerExpense]
+        : regularExpenses.length > 0
+          ? regularExpenses
+          : [{ description: "", amount: "", quantity: "", kind: null }],
     );
   }
 
@@ -539,8 +591,12 @@ function App() {
     setExpenseModalError("");
     setExpenseDrafts((current) => [
       ...current,
-      { description: "", amount: "" },
+      { description: "", amount: "", quantity: "", kind: null },
     ]);
+  }
+
+  function openContainerModal(order) {
+    openExpenseModal(order, { includeContainer: true });
   }
 
   function removeExpenseDraft(index) {
@@ -553,18 +609,35 @@ function App() {
   async function saveExpenseModal() {
     if (!expenseModalOrder) return;
 
-    const normalizedExpenses = expenseDrafts.map((draft) => ({
-      description: `${draft.description ?? ""}`.trim().replace(/\s+/g, " "),
-      amount: parseMoneyInput(draft.amount),
-    }));
+    const normalizedExpenses = expenseDrafts.map((draft) =>
+      draft.kind === "container"
+        ? createContainerExpense(draft.quantity)
+        : {
+            description: `${draft.description ?? ""}`
+              .trim()
+              .replace(/\s+/g, " "),
+            amount: parseMoneyInput(draft.amount),
+            quantity: null,
+            kind: null,
+          },
+    );
 
     const hasIncompleteExpense = normalizedExpenses.some(
       (expense) =>
-        (expense.description && expense.amount <= 0) ||
-        (!expense.description && expense.amount > 0),
+        expense.kind !== "container" &&
+        ((expense.description && expense.amount <= 0) ||
+          (!expense.description && expense.amount > 0)),
     );
 
-    if (hasIncompleteExpense) {
+    const hasInvalidContainer = normalizedExpenses.some(
+      (_, index) => {
+        const draft = expenseDrafts[index];
+        if (draft?.kind !== "container") return false;
+        return Math.floor(Number(draft.quantity) || 0) <= 0;
+      },
+    );
+
+    if (hasIncompleteExpense || hasInvalidContainer) {
       setExpenseModalError(
         "Completa la descripción y el valor de cada gasto antes de guardar.",
       );
@@ -1255,7 +1328,7 @@ function App() {
                             }}
                           >
                             <p style={{ margin: "0 0 4px 0", fontWeight: 700 }}>
-                              {expense.description}
+                              {getExpenseLabel(expense)}
                             </p>
                             <p
                               style={{
@@ -1341,6 +1414,13 @@ function App() {
                       </button>
                       <button
                         type="button"
+                        className="ghost"
+                        onClick={() => openContainerModal(order)}
+                      >
+                        Contenedor
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => openPayModal(order)}
                         disabled={needsWeightEntry}
                       >
@@ -1422,6 +1502,13 @@ function App() {
                   <strong>{formatCurrency(stats.totalSales)}</strong>
                 </article>
                 <article className="kpi-card">
+                  <h3>Contenedores vendidos</h3>
+                  <strong>{stats.containerSummary.quantity}</strong>
+                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                    {formatCurrency(stats.containerSummary.revenue)} ganados
+                  </p>
+                </article>
+                <article className="kpi-card">
                   <h3>Categorias activas</h3>
                   <strong>{stats.categories.length}</strong>
                 </article>
@@ -1430,64 +1517,7 @@ function App() {
 
             <div style={{ marginBottom: 32 }}>
               <div className="section-header" style={{ marginBottom: 16 }}>
-                <h3>Desglose de hoy por producto</h3>
-              </div>
-              <div className="stats-split-grid">
-                <article className="stats-panel">
-                  <div className="section-header stats-panel-head">
-                    <h3>Platos</h3>
-                    <span className="stats-chip">Hoy</span>
-                  </div>
-                  {statsSummary.today.dishes.items.length > 0 ? (
-                    <div className="stats-item-list">
-                      {statsSummary.today.dishes.items.map((item) => (
-                        <div
-                          key={`today-dish-${item.menuItemId}-${item.name}`}
-                          className="stats-item-row"
-                        >
-                          <div>
-                            <strong>{item.name}</strong>
-                            <p>{item.quantity} unidades</p>
-                          </div>
-                          <span>{formatCurrency(item.revenue)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="empty">Aun no hay platos vendidos hoy.</p>
-                  )}
-                </article>
-
-                <article className="stats-panel">
-                  <div className="section-header stats-panel-head">
-                    <h3>Bebidas</h3>
-                    <span className="stats-chip">Hoy</span>
-                  </div>
-                  {statsSummary.today.beverages.items.length > 0 ? (
-                    <div className="stats-item-list">
-                      {statsSummary.today.beverages.items.map((item) => (
-                        <div
-                          key={`today-beverage-${item.menuItemId}-${item.name}`}
-                          className="stats-item-row"
-                        >
-                          <div>
-                            <strong>{item.name}</strong>
-                            <p>{item.quantity} unidades</p>
-                          </div>
-                          <span>{formatCurrency(item.revenue)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="empty">Aun no hay bebidas vendidas hoy.</p>
-                  )}
-                </article>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 32 }}>
-              <div className="section-header" style={{ marginBottom: 16 }}>
-                <h3>Resumen de Ganancias por Método de Pago</h3>
+                <h3>Cobros reales por método de pago</h3>
               </div>
               <div
                 style={{
@@ -1519,7 +1549,7 @@ function App() {
                           color: "#6f5e4d",
                         }}
                       >
-                        Categoría
+                        Método
                       </th>
                       <th
                         style={{
@@ -1529,7 +1559,7 @@ function App() {
                           color: "#2f8f73",
                         }}
                       >
-                        Hoy - Efectivo
+                        Hoy
                       </th>
                       <th
                         style={{
@@ -1539,7 +1569,7 @@ function App() {
                           color: "#2f8f73",
                         }}
                       >
-                        Hoy - Transferencia
+                        Histórico
                       </th>
                       <th
                         style={{
@@ -1549,17 +1579,7 @@ function App() {
                           color: "#2f8f73",
                         }}
                       >
-                        Histórico - Efectivo
-                      </th>
-                      <th
-                        style={{
-                          padding: 12,
-                          textAlign: "center",
-                          fontWeight: 700,
-                          color: "#2f8f73",
-                        }}
-                      >
-                        Histórico - Transferencia
+                        Total
                       </th>
                     </tr>
                   </thead>
@@ -1572,7 +1592,7 @@ function App() {
                           color: "#3d3d3d",
                         }}
                       >
-                        🍽️ Platos
+                          Efectivo
                       </td>
                       <td
                         style={{
@@ -1582,7 +1602,7 @@ function App() {
                           fontWeight: 600,
                         }}
                       >
-                        {formatCurrency(statsSummary.today.dishes.efectivo)}
+                          {formatCurrency(statsSummary.today.efectivo)}
                       </td>
                       <td
                         style={{
@@ -1592,34 +1612,14 @@ function App() {
                           fontWeight: 600,
                         }}
                       >
-                        {formatCurrency(
-                          statsSummary.today.dishes.transferencia,
-                        )}
+                          {formatCurrency(statsSummary.historical.efectivo)}
                       </td>
-                      <td
-                        style={{
-                          padding: 12,
-                          textAlign: "center",
-                          color: "#2f8f73",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {formatCurrency(
-                          statsSummary.historical.dishes.efectivo,
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          padding: 12,
-                          textAlign: "center",
-                          color: "#2f8f73",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {formatCurrency(
-                          statsSummary.historical.dishes.transferencia,
-                        )}
-                      </td>
+                        <td style={{ padding: 12, textAlign: "center", color: "#2f8f73", fontWeight: 600 }}>
+                          {formatCurrency(
+                            statsSummary.today.efectivo +
+                              statsSummary.historical.efectivo,
+                          )}
+                        </td>
                     </tr>
                     <tr style={{ background: "#fafaf7" }}>
                       <td
@@ -1629,7 +1629,7 @@ function App() {
                           color: "#3d3d3d",
                         }}
                       >
-                        🥤 Bebidas
+                          Transferencia
                       </td>
                       <td
                         style={{
@@ -1639,7 +1639,7 @@ function App() {
                           fontWeight: 600,
                         }}
                       >
-                        {formatCurrency(statsSummary.today.beverages.efectivo)}
+                          {formatCurrency(statsSummary.today.transferencia)}
                       </td>
                       <td
                         style={{
@@ -1649,34 +1649,36 @@ function App() {
                           fontWeight: 600,
                         }}
                       >
-                        {formatCurrency(
-                          statsSummary.today.beverages.transferencia,
-                        )}
+                          {formatCurrency(statsSummary.historical.transferencia)}
                       </td>
-                      <td
-                        style={{
-                          padding: 12,
-                          textAlign: "center",
-                          color: "#2f8f73",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {formatCurrency(
-                          statsSummary.historical.beverages.efectivo,
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          padding: 12,
-                          textAlign: "center",
-                          color: "#2f8f73",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {formatCurrency(
-                          statsSummary.historical.beverages.transferencia,
-                        )}
-                      </td>
+                        <td style={{ padding: 12, textAlign: "center", color: "#2f8f73", fontWeight: 600 }}>
+                          {formatCurrency(
+                            statsSummary.today.transferencia +
+                              statsSummary.historical.transferencia,
+                          )}
+                        </td>
+                      </tr>
+                      <tr style={{ borderTop: "1px solid #f0e8e0" }}>
+                        <td
+                          style={{
+                            padding: 12,
+                            fontWeight: 700,
+                            color: "#3d3d3d",
+                          }}
+                        >
+                          Total
+                        </td>
+                        <td style={{ padding: 12, textAlign: "center" }}>
+                          {formatCurrency(statsSummary.today.total)}
+                        </td>
+                        <td style={{ padding: 12, textAlign: "center" }}>
+                          {formatCurrency(statsSummary.historical.total)}
+                        </td>
+                        <td style={{ padding: 12, textAlign: "center" }}>
+                          {formatCurrency(
+                            statsSummary.today.total + statsSummary.historical.total,
+                          )}
+                        </td>
                     </tr>
                   </tbody>
                 </table>
@@ -2981,6 +2983,7 @@ function App() {
                       <input
                         id={`expense-description-${index}`}
                         value={draft.description}
+                        disabled={draft.kind === "container"}
                         onChange={(event) =>
                           updateExpenseDraft(
                             index,
@@ -2988,7 +2991,11 @@ function App() {
                             event.target.value,
                           )
                         }
-                        placeholder="Ej: cargo adicional"
+                        placeholder={
+                          draft.kind === "container"
+                            ? CONTAINER_EXPENSE_DESCRIPTION
+                            : "Ej: cargo adicional"
+                        }
                       />
                     </div>
 
@@ -2997,6 +3004,7 @@ function App() {
                       <input
                         id={`expense-amount-${index}`}
                         value={draft.amount}
+                        disabled={draft.kind === "container"}
                         onChange={(event) =>
                           updateExpenseDraft(
                             index,
@@ -3004,9 +3012,41 @@ function App() {
                             event.target.value,
                           )
                         }
-                        placeholder="Ej: 1.25"
+                        placeholder={
+                          draft.kind === "container"
+                            ? `${CONTAINER_EXPENSE_AMOUNT}`
+                            : "Ej: 1.25"
+                        }
                       />
                     </div>
+
+                    {draft.kind === "container" ? (
+                      <div className="field-row">
+                        <label htmlFor={`expense-quantity-${index}`}>
+                          Cantidad
+                        </label>
+                        <input
+                          id={`expense-quantity-${index}`}
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={draft.quantity ?? "1"}
+                          onChange={(event) =>
+                            updateExpenseDraft(
+                              index,
+                              "quantity",
+                              event.target.value,
+                            )
+                          }
+                        />
+                      </div>
+                    ) : null}
+
+                    {draft.kind === "container" ? (
+                      <p style={{ margin: "0 0 8px", color: "#8b4d1d" }}>
+                        Total: {formatCurrency(getContainerExpenseTotal(draft.quantity))}.
+                      </p>
+                    ) : null}
 
                     <div className="actions" style={{ marginBottom: 0 }}>
                       <button
@@ -3242,7 +3282,7 @@ function App() {
                             }}
                           >
                             <p style={{ margin: "0 0 4px 0", fontWeight: 700 }}>
-                              {expense.description}
+                              {getExpenseLabel(expense)}
                             </p>
                             <p
                               style={{
