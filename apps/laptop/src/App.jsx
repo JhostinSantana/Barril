@@ -304,7 +304,8 @@ function App() {
         tenderedAmount,
         changeDue,
         canSubmit: false,
-        submitMessage: "El número de comprobante es obligatorio en transferencia.",
+        submitMessage:
+          "El número de comprobante es obligatorio en transferencia.",
       };
     }
 
@@ -564,7 +565,9 @@ function App() {
     );
 
     if (hasIncompleteExpense) {
-      setExpenseModalError("Completa la descripción y el valor de cada gasto antes de guardar.");
+      setExpenseModalError(
+        "Completa la descripción y el valor de cada gasto antes de guardar.",
+      );
       return;
     }
 
