@@ -1,8 +1,11 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  type AppStateStatus,
   FlatList,
+  type ListRenderItemInfo,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -32,7 +35,7 @@ type PedidoComment = {
 type EditChangeType = 'added' | 'removed' | 'quantity-up' | 'quantity-down';
 
 type EditChange = {
-  menuItemId: number;
+  menuItemId: string;
   nombre: string;
   type: EditChangeType;
   previousQuantity: number;
@@ -40,11 +43,14 @@ type EditChange = {
 };
 
 type PedidoItem = {
-  id: number;
+  id: string;
   nombre: string;
   cantidad: number;
+  cantidadPreparada?: number;
+  cantidadPendiente?: number;
   notas?: string;
   editado?: boolean;
+  preparado?: boolean;
 };
 
 type Pedido = {
@@ -57,6 +63,7 @@ type Pedido = {
   createdAt: string;
   editedAt: string | null;
   editSummary: EditChange[];
+  kitchenFulfilledItems: Array<{menuItemId: string; nombre: string; quantity: number}>;
   estado: KitchenStatus;
 };
 
@@ -168,7 +175,7 @@ function normalizeEditSummary(order: any): EditChange[] {
 
   return order.editSummary
     .map((change: any) => ({
-      menuItemId: Number(change?.menuItemId ?? 0),
+      menuItemId: String(change?.menuItemId ?? ''),
       nombre: String(change?.name ?? change?.nombre ?? 'Item'),
       type: (['added', 'removed', 'quantity-up', 'quantity-down'].includes(change?.type)
         ? change.type
@@ -176,7 +183,7 @@ function normalizeEditSummary(order: any): EditChange[] {
       previousQuantity: Number(change?.previousQuantity ?? 0),
       quantity: Number(change?.quantity ?? 0),
     }))
-    .filter((change: EditChange) => Boolean(change.nombre));
+    .filter((change: EditChange) => Boolean(change.nombre && change.menuItemId));
 }
 
 function getEditChangeLabel(change: EditChange) {
@@ -199,6 +206,50 @@ function pedidoFueModificado(pedido: Pick<Pedido, 'editSummary'>) {
   return pedido.editSummary.length > 0;
 }
 
+function normalizeKitchenFulfilledItems(order: any) {
+  const raw = order?.kitchenFulfilledItems ?? order?.kitchen_fulfilled_items;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .map((item: any) => ({
+      menuItemId: String(item?.menuItemId ?? ''),
+      nombre: String(item?.name ?? item?.nombre ?? 'Item'),
+      quantity: Number(item?.quantity ?? 0),
+    }))
+    .filter(item => item.menuItemId.length > 0);
+}
+
+function pedidoTieneHistorialPreparado(pedido: Pick<Pedido, 'items'>) {
+  return pedido.items.some(item => (item.cantidadPreparada ?? 0) > 0);
+}
+
+function pedidoTieneTrabajoPendiente(pedido: Pick<Pedido, 'estado' | 'items'>) {
+  if (pedido.estado !== 'completado') {
+    return true;
+  }
+
+  return pedido.items.some(item => (item.cantidadPendiente ?? 0) > 0);
+}
+
+function pedidoEsReapertura(pedido: Pick<Pedido, 'items'>) {
+  return pedido.items.some(item => (item.cantidadPreparada ?? 0) > 0 && (item.cantidadPendiente ?? 0) > 0);
+}
+
+/** Solo entra a la cola horizontal lo que cocina aún debe hacer. */
+function pedidoVisibleEnCocina(pedido: PedidoVista) {
+  return pedidoTieneTrabajoPendiente(pedido);
+}
+
+function upsertPedidoEnCola(current: PedidoVista[], mapped: PedidoVista): PedidoVista[] {
+  if (!pedidoVisibleEnCocina(mapped)) {
+    return current.filter(pedido => pedido.id !== mapped.id);
+  }
+
+  return mergeKitchenOrderInList(current, mapped);
+}
+
 function sortKitchenQueue(orders: PedidoVista[]): PedidoVista[] {
   return [...orders].sort((left, right) => {
     const leftTime = new Date(left.createdAt).getTime();
@@ -212,20 +263,45 @@ function sortKitchenQueue(orders: PedidoVista[]): PedidoVista[] {
   });
 }
 
+function isSocketOrderPayload(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function mergeKitchenOrderInList(current: PedidoVista[], mapped: PedidoVista): PedidoVista[] {
+  const index = current.findIndex(pedido => pedido.id === mapped.id);
+  if (index === -1) {
+    return sortKitchenQueue([...current, mapped]);
+  }
+
+  const next = current.slice();
+  next[index] = mapped;
+  return sortKitchenQueue(next);
+}
+
 function mapServerOrderToKitchen(order: any): PedidoVista {
   const editSummary = normalizeEditSummary(order);
+  const kitchenFulfilledItems = normalizeKitchenFulfilledItems(order);
+  const fulfilledMap = new Map(
+    kitchenFulfilledItems.map(item => [String(item.menuItemId), item.quantity]),
+  );
   const editedMenuIds = new Set(
-    editSummary.filter(change => change.type !== 'removed').map(change => change.menuItemId),
+    editSummary.filter(change => change.type !== 'removed').map(change => String(change.menuItemId)),
   );
   const items = Array.isArray(order?.items)
     ? order.items.map((item: any, index: number) => {
-        const menuItemId = Number(item.menuItemId ?? index + 1);
+        const menuItemId = String(item.menuItemId ?? `item-${index}`);
+        const cantidad = Number(item.quantity ?? item.cantidad ?? 1);
+        const cantidadPreparada = Math.min(fulfilledMap.get(menuItemId) ?? 0, cantidad);
+        const cantidadPendiente = Math.max(0, cantidad - cantidadPreparada);
         return {
           id: menuItemId,
           nombre: String(item.name ?? item.nombre ?? 'Item'),
-          cantidad: Number(item.quantity ?? item.cantidad ?? 1),
+          cantidad,
+          cantidadPreparada,
+          cantidadPendiente,
           notas: String(item.notes ?? item.notas ?? ''),
-          editado: editedMenuIds.has(menuItemId),
+          editado: editedMenuIds.has(menuItemId) && cantidadPendiente > 0,
+          preparado: cantidad > 0 && cantidadPendiente <= 0,
         };
       })
     : [];
@@ -242,13 +318,20 @@ function mapServerOrderToKitchen(order: any): PedidoVista {
     createdAt,
     editedAt,
     editSummary,
+    kitchenFulfilledItems,
     horaRecibido: order?.createdAt ? formatHour12(new Date(order.createdAt)) : 'Ahora',
     estado: normalizeKitchenStatus(order?.kitchenStatus ?? order?.estado ?? 'pendiente'),
   };
 }
 
 export default function App(): React.JSX.Element {
-  const [ahora, setAhora] = useState(new Date());
+  const {width: windowWidth} = useWindowDimensions();
+  const isMobile = windowWidth < 600;
+  const cardWidth = isMobile
+    ? Math.min(320, Math.max(280, Math.round(windowWidth * 0.88)))
+    : Math.min(340, Math.max(280, windowWidth * 0.34));
+  const cardStride = cardWidth + 12;
+
   const [pedidos, setPedidos] = useState<PedidoVista[]>([]);
   const [pedidoActivo, setPedidoActivo] = useState<PedidoVista | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,10 +342,15 @@ export default function App(): React.JSX.Element {
   const [completadosHoy, setCompletadosHoy] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
   const [nowUpdating, setNowUpdating] = useState<string | null>(null);
+  const [socketConnected, setSocketConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const timeoutRefs = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const loadGenerationRef = useRef(0);
   const soundOnRef = useRef(soundOn);
+  const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadOrdersRef = useRef<(options?: {silent?: boolean; statusMessage?: string}) => Promise<void>>(
+    async () => {},
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -309,11 +397,6 @@ export default function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setAhora(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     const pendingTimeouts = timeoutRefs.current;
 
     return () => {
@@ -327,10 +410,33 @@ export default function App(): React.JSX.Element {
     AsyncStorage.setItem(STORAGE_SOUND_KEY, soundOn ? 'true' : 'false').catch(() => {});
   }, [soundOn]);
 
+  const reconnectSocket = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket) {
+      return;
+    }
+
+    if (socket.connected) {
+      loadOrdersRef.current({silent: true, statusMessage: 'Sincronizando comandas...'}).catch(() => {});
+      return;
+    }
+
+    if (socket.active) {
+      return;
+    }
+
+    socket.connect();
+  }, []);
+
   useEffect(() => {
     const socket = io(apiBase, {
       autoConnect: false,
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 8000,
+      timeout: 20000,
     });
 
     socketRef.current = socket;
@@ -344,7 +450,11 @@ export default function App(): React.JSX.Element {
       }
 
       try {
-        const response = await fetch(`${apiBase}/api/orders?status=pending`);
+        let response = await fetch(`${apiBase}/api/orders/kitchen`);
+        if (response.status === 404) {
+          response = await fetch(`${apiBase}/api/orders?status=pending`);
+        }
+
         const data = await response.json();
 
         if (!response.ok) {
@@ -356,7 +466,7 @@ export default function App(): React.JSX.Element {
         }
 
         const mapped = sortKitchenQueue((Array.isArray(data) ? data : []).map(mapServerOrderToKitchen));
-        setPedidos(mapped);
+        setPedidos(mapped.filter(pedido => pedidoVisibleEnCocina(pedido)));
         setStatus(options?.statusMessage ?? (mapped.length ? 'Comandas sincronizadas con la laptop.' : EMPTY_STATUS));
       } catch (error) {
         if (generation !== loadGenerationRef.current) {
@@ -372,6 +482,8 @@ export default function App(): React.JSX.Element {
       }
     };
 
+    loadOrdersRef.current = loadOrders;
+
     const notifyNewOrder = () => {
       if (soundOnRef.current) {
         try {
@@ -385,19 +497,79 @@ export default function App(): React.JSX.Element {
     };
 
     const syncOrders = (statusMessage?: string) => {
-      loadOrders({silent: true, statusMessage}).catch(() => {});
+      if (syncDebounceRef.current) {
+        clearTimeout(syncDebounceRef.current);
+      }
+
+      syncDebounceRef.current = setTimeout(() => {
+        syncDebounceRef.current = null;
+        loadOrders({silent: true, statusMessage}).catch(() => {});
+      }, 400);
     };
 
-    const onOrderNew = () => {
+    const applyOrderFromSocket = (rawOrder: unknown) => {
+      if (!isSocketOrderPayload(rawOrder)) {
+        syncOrders();
+        return;
+      }
+
+      const mapped = mapServerOrderToKitchen(rawOrder);
+      if (String(rawOrder.status ?? '') === 'paid') {
+        setPedidos(current => current.filter(pedido => pedido.id !== mapped.id));
+        return;
+      }
+
+      setPedidos(current => upsertPedidoEnCola(current, mapped));
+    };
+
+    const onOrderNew = (rawOrder: unknown) => {
       notifyNewOrder();
-      syncOrders('Nueva comanda recibida desde el móvil.');
+      applyOrderFromSocket(rawOrder);
     };
 
-    const onOrdersChanged = () => {
-      syncOrders();
+    const onOrdersChanged = (rawOrder: unknown) => {
+      if (isSocketOrderPayload(rawOrder)) {
+        const mapped = mapServerOrderToKitchen(rawOrder);
+        if (pedidoTieneHistorialPreparado(mapped)) {
+          if (soundOnRef.current) {
+            try {
+              Vibration.vibrate(250);
+            } catch {
+              // Ignore vibration failures on devices that do not support it reliably.
+            }
+          }
+          setStatus('Comanda ampliada: en gris ya está listo, preparar lo resaltado.');
+        }
+      }
+
+      applyOrderFromSocket(rawOrder);
+    };
+
+    const onConnect = () => {
+      setSocketConnected(true);
+      loadOrders({silent: true}).catch(() => {});
+    };
+
+    const onDisconnect = () => {
+      setSocketConnected(false);
+      setStatus('Sin conexión con el servidor. Reconectando automáticamente...');
+    };
+
+    const onReconnect = () => {
+      setSocketConnected(true);
+      setStatus('Conexión restaurada. Sincronizando comandas...');
+      loadOrders({silent: true, statusMessage: 'Conexión restaurada. Sincronizando comandas...'}).catch(() => {});
+    };
+
+    const onConnectError = () => {
+      setSocketConnected(false);
     };
 
     socket.connect();
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('reconnect', onReconnect);
+    socket.on('connect_error', onConnectError);
     socket.on('order:new', onOrderNew);
     socket.on('order:updated', onOrdersChanged);
     socket.on('order:kitchen-updated', onOrdersChanged);
@@ -407,22 +579,52 @@ export default function App(): React.JSX.Element {
 
     return () => {
       loadGenerationRef.current += 1;
+      if (syncDebounceRef.current) {
+        clearTimeout(syncDebounceRef.current);
+        syncDebounceRef.current = null;
+      }
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('reconnect', onReconnect);
+      socket.off('connect_error', onConnectError);
       socket.off('order:new', onOrderNew);
       socket.off('order:updated', onOrdersChanged);
       socket.off('order:kitchen-updated', onOrdersChanged);
       socket.off('order:paid', onOrdersChanged);
       socket.disconnect();
+      setSocketConnected(false);
     };
   }, [apiBase]);
 
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState !== 'active') {
+        return;
+      }
+
+      reconnectSocket();
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [reconnectSocket]);
+
   const visiblePedidos = useMemo(
-    () => sortKitchenQueue(pedidos.filter(pedido => pedido.estado !== 'completado')),
+    () => sortKitchenQueue(pedidos.filter(pedido => pedidoVisibleEnCocina(pedido))),
     [pedidos],
   );
 
   const counts = useMemo(() => {
-    const pendientes = visiblePedidos.filter(pedido => pedido.estado === 'pendiente').length;
-    const enPreparacion = visiblePedidos.filter(pedido => pedido.estado === 'en_preparacion').length;
+    let pendientes = 0;
+    let enPreparacion = 0;
+
+    for (const pedido of visiblePedidos) {
+      if (pedido.estado === 'pendiente') {
+        pendientes += 1;
+      } else if (pedido.estado === 'en_preparacion') {
+        enPreparacion += 1;
+      }
+    }
 
     return {pendientes, enPreparacion, completadosHoy};
   }, [completadosHoy, visiblePedidos]);
@@ -444,7 +646,7 @@ export default function App(): React.JSX.Element {
     }
   }
 
-  async function actualizarPedido(pedidoId: string, nextEstado: KitchenStatus) {
+  const actualizarPedido = useCallback(async (pedidoId: string, nextEstado: KitchenStatus) => {
     setNowUpdating(pedidoId);
     try {
       const response = await fetch(`${apiBase}/api/orders/${encodeURIComponent(pedidoId)}/kitchen-status`, {
@@ -459,25 +661,25 @@ export default function App(): React.JSX.Element {
       }
 
       const mapped = mapServerOrderToKitchen(payload);
-      setPedidos(current => sortKitchenQueue(current.map(pedido => (pedido.id === mapped.id ? mapped : pedido))));
+      setPedidos(current => upsertPedidoEnCola(current, mapped));
       return mapped;
     } finally {
       setNowUpdating(null);
     }
-  }
+  }, [apiBase]);
 
-  async function iniciarPreparacion(pedidoId: string) {
+  const iniciarPreparacion = useCallback(async (pedidoId: string) => {
     try {
       await actualizarPedido(pedidoId, 'en_preparacion');
       setStatus('Pedido enviado a preparación.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'No se pudo iniciar la preparación.');
     }
-  }
+  }, [actualizarPedido]);
 
-  async function marcarComoCompletado(pedidoId: string) {
+  const marcarComoCompletado = useCallback(async (pedidoId: string) => {
     try {
-      await actualizarPedido(pedidoId, 'completado');
+      const mapped = await actualizarPedido(pedidoId, 'completado');
       setCompletadosHoy(current => {
         const next = current + 1;
         AsyncStorage.multiSet([
@@ -487,17 +689,41 @@ export default function App(): React.JSX.Element {
         return next;
       });
 
-      const timeoutId = setTimeout(() => {
-        setPedidos(current => current.filter(pedido => pedido.id !== pedidoId));
-        setPedidoActivo(current => (current?.id === pedidoId ? null : current));
-      }, 1800);
-
-      timeoutRefs.current.push(timeoutId);
-      setStatus('Pedido marcado como completado.');
+      setPedidoActivo(current => (current?.id === pedidoId ? null : current));
+      setStatus(
+        mapped && pedidoVisibleEnCocina(mapped)
+          ? 'Comanda completada con pendientes. Prepara lo nuevo.'
+          : 'Pedido completado. Salió de la cola.',
+      );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'No se pudo completar la comanda.');
     }
-  }
+  }, [actualizarPedido]);
+
+  const renderOrderCard = useCallback(
+    ({item, index}: ListRenderItemInfo<PedidoVista>) => (
+      <OrderCard
+        item={item}
+        queuePosition={index + 1}
+        cardWidth={cardWidth}
+        nowUpdating={nowUpdating}
+        onOpenDetail={() => setPedidoActivo(item)}
+        onStart={() => iniciarPreparacion(item.id)}
+        onComplete={() => marcarComoCompletado(item.id)}
+        isMobile={isMobile}
+      />
+    ),
+    [cardWidth, iniciarPreparacion, isMobile, marcarComoCompletado, nowUpdating],
+  );
+
+  const getOrderCardLayout = useCallback(
+    (_: ArrayLike<PedidoVista> | null | undefined, index: number) => ({
+      length: cardStride,
+      offset: cardStride * index,
+      index,
+    }),
+    [cardStride],
+  );
 
   function toggleSound() {
     setSoundOn(current => !current);
@@ -506,12 +732,6 @@ export default function App(): React.JSX.Element {
   const pedidoModal = pedidoActivo
     ? pedidos.find(pedido => pedido.id === pedidoActivo.id) ?? pedidoActivo
     : null;
-
-  const {width: windowWidth} = useWindowDimensions();
-  const isMobile = windowWidth < 600;
-  const cardWidth = isMobile
-    ? Math.min(320, Math.max(280, Math.round(windowWidth * 0.88)))
-    : Math.min(340, Math.max(280, windowWidth * 0.34));
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -523,15 +743,18 @@ export default function App(): React.JSX.Element {
             <Text style={[styles.title, isMobile && styles.titleMobile]}>Pantalla de Cocina</Text>
           </View>
           <View style={[styles.headerRight, isMobile && styles.headerRightMobile]}>
-            {!isMobile && (
-              <View style={styles.clockBox}>
-                <Text style={styles.clock}>{formatTimeNow(ahora)}</Text>
-                <Text style={styles.date}>{formatDateNow(ahora)}</Text>
-              </View>
-            )}
+            {!isMobile ? <KitchenClock /> : null}
             <Pressable style={[styles.headerButton, isMobile && styles.headerButtonMobile]} onPress={() => setShowConnModal(true)}>
               <Text style={styles.headerButtonText}>Conectar</Text>
             </Pressable>
+            {!socketConnected ? (
+              <Pressable
+                style={[styles.headerButton, styles.headerButtonReconnect, isMobile && styles.headerButtonMobile]}
+                onPress={reconnectSocket}
+              >
+                <Text style={styles.headerButtonText}>Reconectar</Text>
+              </Pressable>
+            ) : null}
             <Pressable style={[styles.headerButton, isMobile && styles.headerButtonMobile]} onPress={toggleSound}>
               <Text style={styles.headerButtonText}>{soundOn ? '🔔' : '🔕'}</Text>
             </Pressable>
@@ -541,7 +764,13 @@ export default function App(): React.JSX.Element {
         <View style={[styles.statsRow, isMobile && styles.statsRowMobile]}>
           <StatCard title="Pendientes" value={counts.pendientes} description="Listos para cocina" tone="#fbbf24" isMobile={isMobile} />
           <StatCard title="En Prep." value={counts.enPreparacion} description="En curso" tone="#7dd3fc" isMobile={isMobile} />
-          <StatCard title="Completados" value={counts.completadosHoy} description="Salieron" tone="#86efac" isMobile={isMobile} />
+          <StatCard
+            title="Completados hoy"
+            value={counts.completadosHoy}
+            description="Ya salieron de la cola"
+            tone="#86efac"
+            isMobile={isMobile}
+          />
         </View>
 
         <View style={[styles.content, isMobile && styles.contentMobile]}>
@@ -549,11 +778,18 @@ export default function App(): React.JSX.Element {
             <View>
               <Text style={[styles.sectionKicker, isMobile && styles.sectionKickerMobile]}>Pedidos activos</Text>
               <Text style={[styles.sectionTitle, isMobile && styles.sectionTitleMobile]}>
-                Cola por llegada (izquierda = primero). Desliza horizontalmente entre comandas; dentro de cada tarjeta, baja para ver el pedido
+                Solo comandas activas (pendiente o en preparación). Al marcar completado salen de la cola; vuelven si el mesero agrega platos
               </Text>
             </View>
-            <View style={styles.statusPill}>
-              {loading ? <ActivityIndicator size="small" color="#7c2d12" /> : <Text style={styles.statusText}>{status}</Text>}
+            <View style={[styles.statusPill, !socketConnected && styles.statusPillOffline]}>
+              {loading ? (
+                <ActivityIndicator size="small" color="#7c2d12" />
+              ) : (
+                <Text style={[styles.statusText, !socketConnected && styles.statusTextOffline]}>
+                  {!socketConnected ? '● Desconectado · ' : '● En línea · '}
+                  {status}
+                </Text>
+              )}
             </View>
           </View>
 
@@ -565,23 +801,18 @@ export default function App(): React.JSX.Element {
             showsHorizontalScrollIndicator
             showsVerticalScrollIndicator={false}
             decelerationRate="fast"
-            snapToInterval={cardWidth + 12}
+            snapToInterval={cardStride}
             snapToAlignment="start"
             disableIntervalMomentum
+            initialNumToRender={3}
+            maxToRenderPerBatch={4}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS === 'android'}
+            getItemLayout={getOrderCardLayout}
+            extraData={nowUpdating}
             style={styles.ordersList}
             contentContainerStyle={[styles.cardsContent, isMobile && styles.cardsContentMobile]}
-            renderItem={({item, index}) => (
-              <OrderCard
-                item={item}
-                queuePosition={index + 1}
-                cardWidth={cardWidth}
-                nowUpdating={nowUpdating}
-                onOpenDetail={() => setPedidoActivo(item)}
-                onStart={() => iniciarPreparacion(item.id)}
-                onComplete={() => marcarComoCompletado(item.id)}
-                isMobile={isMobile}
-              />
-            )}
+            renderItem={renderOrderCard}
             ListEmptyComponent={
               <View style={[styles.emptyState, {width: Math.max(cardWidth, windowWidth - 48)}]}>
                 <Text style={styles.emptyTitle}>Sin comandas activas</Text>
@@ -644,21 +875,14 @@ export default function App(): React.JSX.Element {
             </View>
 
             <ScrollView style={{maxHeight: 360}} contentContainerStyle={{gap: 12}}>
-              {pedidoModal && pedidoFueModificado(pedidoModal) ? <EditChangesPanel editSummary={pedidoModal.editSummary} /> : null}
+              {pedidoModal && pedidoTieneHistorialPreparado(pedidoModal) ? <PreparedReopenBanner /> : null}
+              {pedidoModal && pedidoFueModificado(pedidoModal) ? (
+                <EditChangesPanel editSummary={pedidoModal.editSummary} />
+              ) : null}
 
               {pedidoModal?.items.map((item, index) => (
-                <View
-                  key={`${pedidoModal.id}-item-${index}`}
-                  style={[styles.detailItem, item.editado && styles.itemRowEdited]}
-                >
-                  <View style={styles.detailQty}>
-                    <Text style={styles.detailQtyText}>{item.cantidad}</Text>
-                  </View>
-                  <View style={{flex: 1}}>
-                    <Text style={styles.itemLabel}>Item {index + 1}</Text>
-                    <Text style={styles.itemName}>{item.nombre}</Text>
-                    <Text style={styles.detailNotes}>{item.notas || 'Sin notas especiales.'}</Text>
-                  </View>
+                <View key={`${pedidoModal.id}-detail-${index}`} style={styles.detailItemWrap}>
+                  <KitchenItemRows item={item} />
                 </View>
               ))}
 
@@ -730,6 +954,95 @@ type OrderCardProps = {
   isMobile?: boolean;
 };
 
+const KitchenClock = memo(function KitchenClock() {
+  const [ahora, setAhora] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setAhora(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <View style={styles.clockBox}>
+      <Text style={styles.clock}>{formatTimeNow(ahora)}</Text>
+      <Text style={styles.date}>{formatDateNow(ahora)}</Text>
+    </View>
+  );
+});
+
+function PlateNote({notas, muted}: {notas?: string; muted?: boolean}) {
+  const text = String(notas ?? '').trim();
+  if (!text) {
+    return null;
+  }
+
+  return (
+    <View style={[styles.plateNoteCard, muted && styles.plateNoteCardMuted]}>
+      <Text style={[styles.plateNoteLabel, muted && styles.plateNoteLabelMuted]}>Nota del plato</Text>
+      <Text style={[styles.plateNoteText, muted && styles.plateNoteTextMuted]}>{text}</Text>
+    </View>
+  );
+}
+
+function PreparedReopenBanner() {
+  return (
+    <View style={styles.reopenBanner}>
+      <Text style={styles.reopenBannerTitle}>Comanda ampliada</Text>
+      <Text style={styles.reopenBannerHint}>Gris = ya preparado · Resaltado = preparar ahora</Text>
+    </View>
+  );
+}
+
+function KitchenItemRows({item}: {item: PedidoItem}) {
+  const preparada = item.cantidadPreparada ?? 0;
+  const pendiente = item.cantidadPendiente ?? item.cantidad;
+  const todoPreparado = Boolean(item.preparado) || pendiente <= 0;
+
+  if (todoPreparado && preparada > 0) {
+    return (
+      <View style={[styles.itemRow, styles.itemRowPrepared]}>
+        <View style={[styles.quantityBubble, styles.quantityBubblePrepared]}>
+          <Text style={styles.quantityTextPrepared}>{preparada}</Text>
+        </View>
+        <View style={{flex: 1}}>
+          <Text style={styles.itemLabelPrepared}>Ya preparado</Text>
+          <Text style={styles.itemNamePrepared}>{item.nombre}</Text>
+          <PlateNote notas={item.notas} muted />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      {preparada > 0 ? (
+        <View style={[styles.itemRow, styles.itemRowPrepared]}>
+          <View style={[styles.quantityBubble, styles.quantityBubblePrepared]}>
+            <Text style={styles.quantityTextPrepared}>{preparada}</Text>
+          </View>
+          <View style={{flex: 1}}>
+            <Text style={styles.itemLabelPrepared}>Ya preparado</Text>
+            <Text style={styles.itemNamePrepared}>{item.nombre}</Text>
+            <PlateNote notas={item.notas} muted />
+          </View>
+        </View>
+      ) : null}
+      {pendiente > 0 ? (
+        <View style={[styles.itemRow, item.editado && styles.itemRowEdited]}>
+          <View style={[styles.quantityBubble, item.editado && styles.quantityBubbleEdited]}>
+            <Text style={styles.quantityText}>{pendiente}</Text>
+          </View>
+          <View style={{flex: 1}}>
+            <Text style={styles.itemLabel}>{item.editado ? 'Por preparar' : 'Item'}</Text>
+            <Text style={styles.itemName}>{item.nombre}</Text>
+            <PlateNote notas={item.notas} />
+          </View>
+        </View>
+      ) : null}
+    </>
+  );
+}
+
 function EditChangesPanel({editSummary}: {editSummary: EditChange[]}) {
   if (!editSummary.length) {
     return null;
@@ -752,15 +1065,34 @@ function EditChangesPanel({editSummary}: {editSummary: EditChange[]}) {
   );
 }
 
-function OrderCard({item, queuePosition, cardWidth, nowUpdating, onOpenDetail, onStart, onComplete, isMobile}: OrderCardProps) {
+const OrderCard = memo(function OrderCard({
+  item,
+  queuePosition,
+  cardWidth,
+  nowUpdating,
+  onOpenDetail,
+  onStart,
+  onComplete,
+  isMobile,
+}: OrderCardProps) {
   const style = statusMeta[item.estado];
   const latestComment = item.comments[item.comments.length - 1];
   const latestCommentDate = latestComment ? formatCommentDate(latestComment.createdAt) : '';
   const showDetailLink = item.items.length > 4 || item.comments.length > 1;
   const fueModificado = pedidoFueModificado(item);
+  const esReapertura = pedidoEsReapertura(item);
+  const tieneHistorialPreparado = pedidoTieneHistorialPreparado(item);
 
   return (
-    <View style={[styles.card, isMobile && styles.cardMobile, fueModificado && styles.cardModified, {width: cardWidth}]}>
+    <View
+      style={[
+        styles.card,
+        isMobile && styles.cardMobile,
+        (fueModificado || tieneHistorialPreparado) && styles.cardModified,
+        tieneHistorialPreparado && styles.cardReopened,
+        {width: cardWidth},
+      ]}
+    >
       <View style={[styles.cardTop, {backgroundColor: style.accent, borderColor: style.color}]}>
         <View style={{flex: 1}}>
           <Text style={styles.customer} numberOfLines={1}>
@@ -782,6 +1114,7 @@ function OrderCard({item, queuePosition, cardWidth, nowUpdating, onOpenDetail, o
         </View>
       </View>
 
+      {tieneHistorialPreparado ? <PreparedReopenBanner /> : null}
       {fueModificado ? <EditChangesPanel editSummary={item.editSummary} /> : null}
 
       <ScrollView
@@ -791,21 +1124,7 @@ function OrderCard({item, queuePosition, cardWidth, nowUpdating, onOpenDetail, o
         showsVerticalScrollIndicator
       >
         {item.items.map((orderItem, index) => (
-          <View
-            key={`${item.id}-item-${index}`}
-            style={[styles.itemRow, orderItem.editado && styles.itemRowEdited]}
-          >
-            <View style={[styles.quantityBubble, orderItem.editado && styles.quantityBubbleEdited]}>
-              <Text style={styles.quantityText}>{orderItem.cantidad}</Text>
-            </View>
-            <View style={{flex: 1}}>
-              <Text style={styles.itemLabel}>
-                {orderItem.editado ? 'Modificado' : `Item ${index + 1}`}
-              </Text>
-              <Text style={styles.itemName}>{orderItem.nombre}</Text>
-              {orderItem.notas ? <Text style={styles.itemNotes}>{orderItem.notas}</Text> : null}
-            </View>
-          </View>
+          <KitchenItemRows key={`${item.id}-item-${index}`} item={orderItem} />
         ))}
 
         {latestComment ? (
@@ -843,17 +1162,25 @@ function OrderCard({item, queuePosition, cardWidth, nowUpdating, onOpenDetail, o
           >
             <Text style={styles.primaryButtonText}>Marcar Completado</Text>
           </Pressable>
-        ) : (
-          <View style={styles.disabledButton}>
-            <Text style={styles.disabledButtonText}>Pedido listo</Text>
-          </View>
-        )}
+        ) : null}
       </View>
     </View>
   );
-}
+});
 
-function StatCard({title, value, description, tone, isMobile}: {title: string; value: number; description: string; tone: string; isMobile?: boolean}) {
+const StatCard = memo(function StatCard({
+  title,
+  value,
+  description,
+  tone,
+  isMobile,
+}: {
+  title: string;
+  value: number;
+  description: string;
+  tone: string;
+  isMobile?: boolean;
+}) {
   if (isMobile) {
     return (
       <View style={[styles.statCard, styles.statCardMobile]}>
@@ -878,7 +1205,7 @@ function StatCard({title, value, description, tone, isMobile}: {title: string; v
       <Text style={styles.statDescription}>{description}</Text>
     </View>
   );
-}
+});
 
 const stylesVars = {
   header: '#8b421d',
@@ -953,6 +1280,9 @@ const styles = StyleSheet.create({
   headerButtonText: {
     color: '#2f2016',
     fontWeight: '900',
+  },
+  headerButtonReconnect: {
+    backgroundColor: '#fde68a',
   },
   statsRow: {
     flexDirection: 'row',
@@ -1029,12 +1359,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    maxWidth: 220,
+    maxWidth: 280,
+  },
+  statusPillOffline: {
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
   },
   statusText: {
     color: '#4b341f',
     fontWeight: '700',
     fontSize: 12,
+  },
+  statusTextOffline: {
+    color: '#991b1b',
   },
   ordersList: {
     flex: 1,
@@ -1058,6 +1396,29 @@ const styles = StyleSheet.create({
   cardModified: {
     borderColor: '#f59e0b',
     borderWidth: 2,
+  },
+  cardReopened: {
+    borderColor: '#6366f1',
+  },
+  reopenBanner: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: '#eef2ff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#c7d2fe',
+    gap: 2,
+  },
+  reopenBannerTitle: {
+    color: '#3730a3',
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  reopenBannerHint: {
+    color: '#4f46e5',
+    fontSize: 11,
+    fontWeight: '600',
   },
   cardTopBadges: {
     flexDirection: 'row',
@@ -1185,6 +1546,42 @@ const styles = StyleSheet.create({
     borderColor: '#f59e0b',
     borderWidth: 2,
   },
+  itemRowPrepared: {
+    backgroundColor: '#f3f4f6',
+    borderColor: '#d1d5db',
+    opacity: 0.95,
+  },
+  itemLabelPrepared: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  itemNamePrepared: {
+    color: '#6b7280',
+    fontSize: 15,
+    fontWeight: '800',
+    marginTop: 2,
+    textDecorationLine: 'line-through',
+  },
+  itemNotesPrepared: {
+    marginTop: 6,
+    color: '#9ca3af',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  quantityBubblePrepared: {
+    backgroundColor: '#9ca3af',
+  },
+  quantityTextPrepared: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 16,
+  },
+  detailItemWrap: {
+    gap: 8,
+  },
   quantityBubble: {
     width: 42,
     height: 42,
@@ -1214,15 +1611,38 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 2,
   },
-  itemNotes: {
-    marginTop: 6,
-    color: '#6f4a13',
-    fontWeight: '700',
-    backgroundColor: '#f6df98',
-    alignSelf: 'flex-start',
+  plateNoteCard: {
+    marginTop: 8,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#f4c38d',
+    gap: 2,
+  },
+  plateNoteCardMuted: {
+    backgroundColor: '#f3f4f6',
+    borderColor: '#d1d5db',
+  },
+  plateNoteLabel: {
+    color: '#9a3412',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  plateNoteLabelMuted: {
+    color: '#6b7280',
+  },
+  plateNoteText: {
+    color: '#7c2d12',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  plateNoteTextMuted: {
+    color: '#6b7280',
   },
   secondaryButton: {
     borderRadius: 18,

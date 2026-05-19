@@ -103,6 +103,7 @@ function mapOrderRow(row, items, payments) {
   const balanceDue = roundMoney(Math.max(Number(row.total ?? 0) - paidAmount, 0));
   const paymentSummary = getPaymentSummary(payments);
   const editSummary = parseJsonArray(row.edit_summary_json);
+  const kitchenFulfilledItems = parseJsonArray(row.kitchen_fulfilled_items_json);
   const comments = parseJsonArray(row.comments_json);
   const expenses = normalizeOrderExpenses(parseJsonArray(row.expenses_json));
 
@@ -115,6 +116,7 @@ function mapOrderRow(row, items, payments) {
     kitchenStatus: row.kitchen_status ?? 'pendiente',
     kitchenStartedAt: row.kitchen_started_at ?? null,
     kitchenFinishedAt: row.kitchen_finished_at ?? null,
+    kitchenFulfilledItems,
     paymentMethod: resolvePaymentMethod(paymentSummary, row.payment_method),
     paymentSummary,
     paidAmount,
@@ -184,6 +186,62 @@ function buildEditSummary(currentItems, nextItems) {
   return summary;
 }
 
+function buildKitchenFulfilledSnapshot(items) {
+  return (items ?? []).map((item) => ({
+    menuItemId: item.menuItemId,
+    name: item.name,
+    quantity: Number(item.quantity) || 0
+  }));
+}
+
+export function orderHasPendingKitchenWork(order) {
+  if (!order || order.kitchenStatus !== 'completado') {
+    return order?.kitchenStatus !== 'completado';
+  }
+
+  const fulfilledMap = new Map(
+    (order.kitchenFulfilledItems ?? []).map((item) => [String(item.menuItemId), Number(item.quantity) || 0])
+  );
+
+  for (const item of order.items ?? []) {
+    const currentQty = Number(item.quantity) || 0;
+    const fulfilledQty = fulfilledMap.get(String(item.menuItemId)) ?? 0;
+    if (currentQty > fulfilledQty) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function editSummaryRequiresKitchenReopen(editSummary) {
+  return (editSummary ?? []).some((change) => change.type === 'added' || change.type === 'quantity-up');
+}
+
+function normalizeItemNotes(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value.trim().slice(0, 240);
+}
+
+function itemNotesChanged(currentItems, nextItems) {
+  const currentMap = new Map(
+    (currentItems ?? []).map((item) => [String(item.menuItemId), normalizeItemNotes(item.notes)])
+  );
+
+  for (const item of nextItems ?? []) {
+    const key = String(item.menuItemId);
+    const nextNotes = normalizeItemNotes(item.notes);
+    if ((currentMap.get(key) ?? '') !== nextNotes) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function initializeDatabase() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -241,6 +299,8 @@ export async function initializeDatabase() {
       subtotal REAL NOT NULL,
       weight_grams REAL,
       pricing_mode TEXT NOT NULL DEFAULT 'fixed',
+      weight_formula TEXT,
+      notes TEXT NOT NULL DEFAULT '',
       FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
     )
   `);
@@ -304,6 +364,23 @@ export async function initializeDatabase() {
   if (!orderColumns.some((column) => column.name === 'edited_at')) {
     await run('ALTER TABLE orders ADD COLUMN edited_at TEXT');
   }
+  if (!orderColumns.some((column) => column.name === 'kitchen_fulfilled_items_json')) {
+    await run("ALTER TABLE orders ADD COLUMN kitchen_fulfilled_items_json TEXT NOT NULL DEFAULT '[]'");
+  }
+
+  const completedWithoutSnapshot = await all(`
+    SELECT id
+    FROM orders
+    WHERE kitchen_status = 'completado'
+      AND (kitchen_fulfilled_items_json IS NULL OR kitchen_fulfilled_items_json = '[]')
+  `);
+  for (const row of completedWithoutSnapshot) {
+    const items = await listOrderItems(row.id);
+    await run('UPDATE orders SET kitchen_fulfilled_items_json = ? WHERE id = ?', [
+      JSON.stringify(buildKitchenFulfilledSnapshot(items)),
+      row.id
+    ]);
+  }
 
   const itemColumns = await all('PRAGMA table_info(order_items)');
   if (!itemColumns.some((column) => column.name === 'category')) {
@@ -327,6 +404,9 @@ export async function initializeDatabase() {
   const orderItemColumnsAfterMenu = await all('PRAGMA table_info(order_items)');
   if (!orderItemColumnsAfterMenu.some((column) => column.name === 'weight_formula')) {
     await run('ALTER TABLE order_items ADD COLUMN weight_formula TEXT');
+  }
+  if (!orderItemColumnsAfterMenu.some((column) => column.name === 'notes')) {
+    await run("ALTER TABLE order_items ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
   }
 
   await run(`
@@ -546,8 +626,8 @@ export async function createOrder(order) {
 
   for (const item of order.items) {
     await run(
-      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         order.id,
         item.menuItemId,
@@ -558,7 +638,8 @@ export async function createOrder(order) {
         roundMoney(item.subtotal),
         item.weightGrams ?? null,
         item.pricingMode ?? 'fixed',
-        item.weightFormula ?? null
+        item.weightFormula ?? null,
+        normalizeItemNotes(item.notes)
       ]
     );
   }
@@ -610,13 +691,18 @@ export async function updateOrderWithItems(orderId, order) {
   const editedAt = editSummary.length > 0 || commentText || metadataChanged
     ? new Date().toISOString()
     : currentOrder.editedAt ?? null;
+  const shouldReopenKitchen =
+    currentOrder.kitchenStatus === 'completado' &&
+    (editSummaryRequiresKitchenReopen(editSummary) ||
+      itemNotesChanged(currentOrder.items, order.items));
+  const nextKitchenStatus = shouldReopenKitchen ? 'pendiente' : currentOrder.kitchenStatus;
 
   await run('BEGIN TRANSACTION');
 
   try {
     await run(
       `UPDATE orders
-       SET client_name = ?, table_number = ?, waiter_name = ?, total = ?, status = ?, edit_summary_json = ?, comments_json = ?, edited_at = ?
+       SET client_name = ?, table_number = ?, waiter_name = ?, total = ?, status = ?, edit_summary_json = ?, comments_json = ?, edited_at = ?, kitchen_status = ?
        WHERE id = ?`,
       [
         order.clientName,
@@ -627,6 +713,7 @@ export async function updateOrderWithItems(orderId, order) {
         JSON.stringify(editSummary),
         JSON.stringify(comments),
         editedAt,
+        nextKitchenStatus,
         orderId
       ]
     );
@@ -635,8 +722,8 @@ export async function updateOrderWithItems(orderId, order) {
 
     for (const item of order.items) {
       await run(
-        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId,
           item.menuItemId,
@@ -647,7 +734,8 @@ export async function updateOrderWithItems(orderId, order) {
           roundMoney(item.subtotal),
           item.weightGrams ?? null,
           item.pricingMode ?? 'fixed',
-          item.weightFormula ?? null
+          item.weightFormula ?? null,
+          normalizeItemNotes(item.notes)
         ]
       );
     }
@@ -686,15 +774,61 @@ export async function updateOrderKitchenStatus(orderId, kitchenStatus) {
   const nextFinishedAt = kitchenStatus === 'completado'
     ? now
     : (kitchenStatus === 'pendiente' ? null : currentOrder.kitchenFinishedAt ?? null);
+  const nextFulfilledItemsJson = kitchenStatus === 'completado'
+    ? JSON.stringify(buildKitchenFulfilledSnapshot(currentOrder.items))
+    : currentOrder.kitchenFulfilledItems?.length
+      ? JSON.stringify(currentOrder.kitchenFulfilledItems)
+      : '[]';
 
   await run(
     `UPDATE orders
-     SET kitchen_status = ?, kitchen_started_at = ?, kitchen_finished_at = ?
+     SET kitchen_status = ?, kitchen_started_at = ?, kitchen_finished_at = ?, kitchen_fulfilled_items_json = ?
      WHERE id = ?`,
-    [kitchenStatus, nextStartedAt, nextFinishedAt, orderId]
+    [kitchenStatus, nextStartedAt, nextFinishedAt, nextFulfilledItemsJson, orderId]
   );
 
   return getOrderById(orderId);
+}
+
+async function listOrderItemsByOrderIds(orderIds) {
+  const itemsByOrderId = new Map();
+  if (!orderIds.length) {
+    return itemsByOrderId;
+  }
+
+  const placeholders = orderIds.map(() => '?').join(', ');
+  const rows = await all(
+    `SELECT order_id AS orderId, menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, pricing_mode AS pricingMode, weight_formula AS weightFormula, notes
+     FROM order_items
+     WHERE order_id IN (${placeholders})
+     ORDER BY order_id ASC, id ASC`,
+    orderIds
+  );
+
+  for (const row of rows) {
+    const { orderId, ...item } = row;
+    const bucket = itemsByOrderId.get(orderId);
+    if (bucket) {
+      bucket.push(item);
+    } else {
+      itemsByOrderId.set(orderId, [item]);
+    }
+  }
+
+  return itemsByOrderId;
+}
+
+export async function listOrdersForKitchen() {
+  const rows = await all(
+    `SELECT * FROM orders
+     WHERE status IN ('pending', 'partial')
+     ORDER BY created_at ASC`
+  );
+  const itemsByOrderId = await listOrderItemsByOrderIds(rows.map((row) => row.id));
+
+  return rows
+    .map((row) => mapOrderRow(row, itemsByOrderId.get(row.id) ?? [], []))
+    .filter((order) => orderHasPendingKitchenWork(order));
 }
 
 export async function listOrders({ status, query } = {}) {
@@ -788,7 +922,7 @@ export async function updateOrderPayment(orderId, paymentMethod, paidAt) {
 
 async function listOrderItems(orderId) {
   return all(
-    'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, pricing_mode AS pricingMode, weight_formula AS weightFormula FROM order_items WHERE order_id = ? ORDER BY id ASC',
+    'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, pricing_mode AS pricingMode, weight_formula AS weightFormula, notes FROM order_items WHERE order_id = ? ORDER BY id ASC',
     [orderId]
   );
 }
@@ -827,10 +961,12 @@ async function repairMispricedOpenOrders() {
 
     await run('DELETE FROM order_items WHERE order_id = ?', [order.id]);
 
+    const notesByMenuId = new Map(rawItems.map((item) => [item.menuItemId, item.notes]));
+
     for (const item of summarizedItems) {
       await run(
-        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           order.id,
           item.menuItemId,
@@ -841,7 +977,8 @@ async function repairMispricedOpenOrders() {
           roundMoney(item.subtotal),
           item.weightGrams ?? null,
           item.pricingMode ?? 'fixed',
-          item.weightFormula ?? null
+          item.weightFormula ?? null,
+          normalizeItemNotes(notesByMenuId.get(item.menuItemId))
         ]
       );
     }
@@ -944,9 +1081,9 @@ export async function restoreData(payload) {
     if (Array.isArray(payload.orderItems)) {
       for (const it of payload.orderItems) {
         await run(
-          `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [it.order_id, it.menu_item_id, it.name, it.category ?? 'Sin categoria', it.quantity ?? 1, it.unit_price ?? it.unitPrice ?? 0, it.subtotal ?? 0, it.weight_grams ?? it.weightGrams ?? null, it.pricing_mode ?? it.pricingMode ?? 'fixed', it.weight_formula ?? it.weightFormula ?? null]
+          `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [it.order_id, it.menu_item_id, it.name, it.category ?? 'Sin categoria', it.quantity ?? 1, it.unit_price ?? it.unitPrice ?? 0, it.subtotal ?? 0, it.weight_grams ?? it.weightGrams ?? null, it.pricing_mode ?? it.pricingMode ?? 'fixed', it.weight_formula ?? it.weightFormula ?? null, normalizeItemNotes(it.notes)]
         );
       }
     }

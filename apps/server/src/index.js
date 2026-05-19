@@ -17,8 +17,9 @@ import {
   getSetting,
   getWaiterByName,
   initializeDatabase,
-  listOrders,
-  listOrdersByDate,
+    listOrders,
+    listOrdersByDate,
+    listOrdersForKitchen,
   listWaiters,
   restoreData,
   setSetting,
@@ -141,6 +142,14 @@ app.get("/api/orders", async (req, res, next) => {
   }
 });
 
+app.get("/api/orders/kitchen", async (_, res, next) => {
+  try {
+    res.json(await listOrdersForKitchen());
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/orders/history", async (req, res, next) => {
   try {
     const date = req.query.date?.toString();
@@ -255,6 +264,7 @@ app.post("/api/orders", async (req, res, next) => {
       unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
       subtotal: item.subtotal != null ? Number(item.subtotal) : null,
       pricingMode: item.pricingMode ?? null,
+      notes: typeof item.notes === "string" ? item.notes : "",
     }));
 
     const summarizedItems = summarizeItems(normalizedItems, menu);
@@ -364,6 +374,7 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
       unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
       subtotal: item.subtotal != null ? Number(item.subtotal) : null,
       pricingMode: item.pricingMode ?? null,
+      notes: typeof item.notes === "string" ? item.notes : "",
     }));
 
     const mergedItems = preserveWeightFromCurrentOrder(
@@ -435,7 +446,6 @@ app.patch("/api/orders/:orderId/kitchen-status", async (req, res, next) => {
 
     const updatedOrder = await updateOrderKitchenStatus(orderId, kitchenStatus);
     io.emit("order:kitchen-updated", updatedOrder);
-    io.emit("order:updated", updatedOrder);
     res.json(updatedOrder);
   } catch (error) {
     if (error?.code === "INVALID_KITCHEN_STATUS") {

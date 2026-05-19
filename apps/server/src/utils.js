@@ -560,6 +560,14 @@ export function calculateOrderTotal(items, menu, expenses = []) {
   return roundMoney(itemsTotal + calculateExpensesTotal(expenses));
 }
 
+function normalizeItemNotes(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, 240);
+}
+
 export function summarizeItems(items, menu) {
   return items.map((item) => {
     const menuItem = menu.find((m) => m.id === item.menuItemId);
@@ -574,6 +582,7 @@ export function summarizeItems(items, menu) {
       weightGrams: details.weightGrams,
       unitPrice: details.unitPrice,
       subtotal: details.subtotal,
+      notes: normalizeItemNotes(item.notes),
     };
   });
 }
@@ -596,11 +605,15 @@ export function preserveWeightFromCurrentOrder(nextItems, currentItems = []) {
       current.weightGrams != null ? Number(current.weightGrams) : 0;
     if (preservedWeight <= 0) return item;
 
+    const incomingNotes = normalizeItemNotes(item.notes);
+    const preservedNotes = normalizeItemNotes(current.notes);
+
     return {
       ...item,
       weightGrams: current.weightGrams,
       weightFormula: item.weightFormula ?? current.weightFormula ?? null,
       pricingMode: item.pricingMode ?? current.pricingMode ?? "weight",
+      notes: incomingNotes || preservedNotes,
     };
   });
 }

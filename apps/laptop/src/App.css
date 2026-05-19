@@ -681,3 +681,15 @@
 .order-edit-summary-item strong {
   color: #b42318;
 }
+
+.item-plate-note {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #f4c38d;
+  color: #7c2d12;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}

@@ -19,6 +19,10 @@ function buildTicketText(order, restaurantName) {
   lines.push('PEDIDO');
   order.items.forEach((item) => {
     lines.push(`${item.category} - ${item.quantity} x ${item.name}`);
+    const note = typeof item.notes === 'string' ? item.notes.trim() : '';
+    if (note) {
+      lines.push(`   Nota: ${note}`);
+    }
   });
 
   if (Array.isArray(order.comments) && order.comments.length > 0) {

@@ -118,10 +118,16 @@ async function discoverServer() {
   const gatewayIp = await Network.getGatewayIPAddressAsync().catch(() => '');
   const candidates = buildCandidates(localIp, gatewayIp);
 
-  for (const candidate of candidates) {
-    if (await isBarrilServer(candidate)) {
-      await getStorage().setItem(STORAGE_API_KEY, candidate);
-      return candidate;
+  const batchSize = 24;
+  for (let offset = 0; offset < candidates.length; offset += batchSize) {
+    const batch = candidates.slice(offset, offset + batchSize);
+    const hits = await Promise.all(
+      batch.map(async (candidate) => ((await isBarrilServer(candidate)) ? candidate : null))
+    );
+    const found = hits.find(Boolean);
+    if (found) {
+      await getStorage().setItem(STORAGE_API_KEY, found);
+      return found;
     }
   }
 
@@ -158,6 +164,7 @@ export default function App() {
   const [clientName, setClientName] = useState('');
   const [tableNumber, setTableNumber] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
+  const [itemNotes, setItemNotes] = useState({});
   const [quantities, setQuantities] = useState({});
   const [originalQuantities, setOriginalQuantities] = useState({});
   const [pendingOrders, setPendingOrders] = useState([]);
@@ -279,8 +286,14 @@ export default function App() {
     return normalizedApiUrl;
   }
 
-  async function saveDraftOrder() {
-    const draft = { clientName, tableNumber, commentDraft, quantities };
+  async function saveDraftOrder(overrides = {}) {
+    const draft = {
+      clientName: overrides.clientName ?? clientName,
+      tableNumber: overrides.tableNumber ?? tableNumber,
+      commentDraft: overrides.commentDraft ?? commentDraft,
+      quantities: overrides.quantities ?? quantities,
+      itemNotes: overrides.itemNotes ?? itemNotes
+    };
     await getStorage().setItem(STORAGE_DRAFT_ORDER_KEY, JSON.stringify(draft));
     setHasDraft(true);
   }
@@ -290,11 +303,18 @@ export default function App() {
       const stored = await getStorage().getItem(STORAGE_DRAFT_ORDER_KEY);
       if (stored) {
         const draft = JSON.parse(stored);
-        if (draft.clientName || draft.tableNumber || draft.commentDraft || Object.keys(draft.quantities || {}).length > 0) {
+        if (
+          draft.clientName ||
+          draft.tableNumber ||
+          draft.commentDraft ||
+          Object.keys(draft.quantities || {}).length > 0 ||
+          Object.keys(draft.itemNotes || {}).length > 0
+        ) {
           setClientName(draft.clientName || '');
           setTableNumber(draft.tableNumber || '');
           setCommentDraft(draft.commentDraft || '');
           setQuantities(draft.quantities || {});
+          setItemNotes(draft.itemNotes || {});
           setHasDraft(true);
         }
       }
@@ -489,11 +509,19 @@ export default function App() {
       acc[item.menuItemId] = Number(item.quantity) || 0;
       return acc;
     }, {});
+    const nextItemNotes = order.items.reduce((acc, item) => {
+      const note = String(item.notes ?? '').trim();
+      if (note) {
+        acc[item.menuItemId] = note;
+      }
+      return acc;
+    }, {});
 
     setSelectedOrderId(order.id);
     setClientName(order.clientName ?? '');
     setTableNumber(order.tableNumber ?? '');
     setCommentDraft('');
+    setItemNotes(nextItemNotes);
     setQuantities(nextQuantities);
     setOriginalQuantities(nextQuantities);
     setStatus(`Editando ${order.id}. Los cambios actualizaran la misma cuenta.`);
@@ -504,9 +532,24 @@ export default function App() {
     setClientName('');
     setTableNumber('');
     setCommentDraft('');
+    setItemNotes({});
     setQuantities({});
     setOriginalQuantities({});
     clearDraftOrder();
+  }
+
+  function setItemNote(menuItemId, text) {
+    setItemNotes((current) => {
+      const nextValue = text.slice(0, 240);
+      const next = { ...current };
+      if (!nextValue) {
+        delete next[menuItemId];
+      } else {
+        next[menuItemId] = nextValue;
+      }
+      saveDraftOrder({ itemNotes: next });
+      return next;
+    });
   }
 
   function openWaiterSettings() {
@@ -522,7 +565,14 @@ export default function App() {
   async function submitOrder() {
     const items = Object.entries(quantities)
       .filter(([, quantity]) => Number(quantity) > 0)
-      .map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) }));
+      .map(([menuItemId, quantity]) => {
+        const note = String(itemNotes[menuItemId] ?? '').trim();
+        return {
+          menuItemId,
+          quantity: Number(quantity),
+          ...(note ? { notes: note } : {})
+        };
+      });
     const comment = commentDraft.trim();
 
     if (!waiterConfigured || !waiterName.trim()) {
@@ -887,6 +937,8 @@ export default function App() {
                   const currentQuantity = Number(quantities[item.id] ?? 0);
                   const originalQuantity = Number(originalQuantities[item.id] ?? 0);
                   const isEdited = Boolean(selectedOrderId) && currentQuantity !== originalQuantity;
+                  const itemNote = String(itemNotes[item.id] ?? '').trim();
+                  const showItemNote = currentQuantity > 0 || itemNote.length > 0;
                   return (
                 <View key={item.id} style={[styles.menuCard, isEdited ? styles.menuCardEdited : null]}>
                   <View style={[styles.menuMeta, isEdited ? styles.menuMetaEdited : null]}>
@@ -909,6 +961,21 @@ export default function App() {
                       <Text style={styles.quantityButtonText}>+</Text>
                     </Pressable>
                   </View>
+
+                  {showItemNote ? (
+                    <View style={styles.itemNoteBox}>
+                      <Text style={styles.itemNoteLabel}>Nota del plato</Text>
+                      <TextInput
+                        value={itemNotes[item.id] ?? ''}
+                        onChangeText={(text) => setItemNote(item.id, text)}
+                        placeholder="Ej: sin cebolla, término medio..."
+                        placeholderTextColor="#9a8b7d"
+                        style={styles.itemNoteInput}
+                        multiline
+                        maxLength={240}
+                      />
+                    </View>
+                  ) : null}
                 </View>
                   );
                 })()
@@ -1360,6 +1427,29 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.6
+  },
+  itemNoteBox: {
+    marginTop: 10,
+    gap: 6
+  },
+  itemNoteLabel: {
+    color: '#8b5e3c',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8
+  },
+  itemNoteInput: {
+    borderWidth: 1,
+    borderColor: '#e2d4c3',
+    borderRadius: 12,
+    backgroundColor: '#fffaf4',
+    color: '#2f2319',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 44,
+    fontSize: 14,
+    fontWeight: '600'
   },
   weightedPrice: {
     color: '#8b5a2b',

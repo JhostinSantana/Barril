@@ -117,6 +117,19 @@ function getComments(order) {
   return Array.isArray(order?.comments) ? order.comments : [];
 }
 
+function getItemNotes(item) {
+  return String(item?.notes ?? "").trim();
+}
+
+function ItemPlateNote({ item }) {
+  const text = getItemNotes(item);
+  if (!text) {
+    return null;
+  }
+
+  return <p className="item-plate-note">{text}</p>;
+}
+
 function getEditChangeLabel(change) {
   if (change.type === "added") return `Agregado: ${change.quantity}`;
   if (change.type === "removed") return `Eliminado: ${change.previousQuantity}`;
@@ -1049,7 +1062,11 @@ function App() {
               const editedClass = editedIds.has(item.menuItemId)
                 ? "edited"
                 : "";
-              return `<li class="${editedClass}">${item.category} - ${item.quantity} x ${item.name}${weightLabel}</li>`;
+              const note = getItemNotes(item);
+              const noteLabel = note
+                ? `<div class="item-plate-note">${note}</div>`
+                : "";
+              return `<li class="${editedClass}">${item.category} - ${item.quantity} x ${item.name}${weightLabel}${noteLabel}</li>`;
             })
             .join("")}
         </ul>
@@ -1082,24 +1099,22 @@ function App() {
   useEffect(() => {
     setApiBaseUrl(getApiBaseUrl());
     socket.connect();
+
+    const refreshOrderViews = () => {
+      loadCashView();
+      loadStatsView();
+      loadHistoryView(historyDate);
+    };
+
     socket.on("order:new", (incomingOrder) => {
       if (autoPrintEnabled) {
         triggerAutoPrint(incomingOrder);
       }
-      loadCashView();
-      loadStatsView();
-      loadHistoryView(historyDate);
+      refreshOrderViews();
     });
-    socket.on("order:updated", () => {
-      loadCashView();
-      loadStatsView();
-      loadHistoryView(historyDate);
-    });
-    socket.on("order:paid", () => {
-      loadCashView();
-      loadStatsView();
-      loadHistoryView(historyDate);
-    });
+    socket.on("order:updated", refreshOrderViews);
+    socket.on("order:kitchen-updated", refreshOrderViews);
+    socket.on("order:paid", refreshOrderViews);
 
     loadCashView();
     loadStatsView();
@@ -1109,8 +1124,9 @@ function App() {
 
     return () => {
       socket.off("order:new");
-      socket.off("order:updated");
-      socket.off("order:paid");
+      socket.off("order:updated", refreshOrderViews);
+      socket.off("order:kitchen-updated", refreshOrderViews);
+      socket.off("order:paid", refreshOrderViews);
       socket.disconnect();
     };
   }, [historyDate, autoPrintEnabled]);
@@ -1280,6 +1296,7 @@ function App() {
                           {item.weightGrams != null
                             ? ` (${item.weightGrams} g)`
                             : ""}
+                          <ItemPlateNote item={item} />
                           <div
                             style={{
                               color: "#6f5e4d",
@@ -2848,6 +2865,7 @@ function App() {
                           >
                             {item.category}
                           </p>
+                          <ItemPlateNote item={item} />
                         </div>
                         <div
                           style={{
@@ -3386,6 +3404,7 @@ function App() {
                             ? ` (${item.weightGrams} g)`
                             : ""}
                         </p>
+                        <ItemPlateNote item={item} />
                         <p
                           style={{
                             margin: "0",
