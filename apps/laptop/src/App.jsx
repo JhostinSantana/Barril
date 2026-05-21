@@ -18,6 +18,7 @@ import "./App.css";
 
 const socket = io("http://localhost:4000", { autoConnect: false });
 const DELETE_ACCOUNT_PIN = "040420";
+const BOGOTA_TIME_ZONE = "America/Bogota";
 
 const navItems = [
   { id: "stats", label: "Estadistica" },
@@ -45,12 +46,38 @@ function parseMoneyInput(rawValue) {
 
 function getCurrentMonthRange() {
   const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BOGOTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(now);
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? 0);
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? 0);
   return {
-    from: new Date(Date.UTC(year, month, 1, 0, 0, 0, 0)).toISOString(),
-    to: new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999)).toISOString(),
+    from: new Date(Date.UTC(year, month - 1, 1, 5, 0, 0, 0)).toISOString(),
+    to: new Date(Date.UTC(year, month, 1, 4, 59, 59, 999)).toISOString(),
   };
+}
+
+function getWeightDraftValues(draftValue, quantity, fallbackWeight) {
+  const targetQuantity = Math.max(1, Number(quantity) || 1);
+  const values = Array.isArray(draftValue)
+    ? draftValue.slice(0, targetQuantity)
+    : [];
+
+  while (values.length < targetQuantity) {
+    values.push(fallbackWeight != null ? `${fallbackWeight}` : "");
+  }
+
+  return values;
+}
+
+function formatWeightBreakdown(item) {
+  if (Array.isArray(item?.weightBreakdown) && item.weightBreakdown.length > 0) {
+    return item.weightBreakdown.map((grams) => `${grams} g`).join(" + ");
+  }
+
+  return item?.weightGrams != null ? `${item.weightGrams} g` : "";
 }
 
 function getSalesIntensityStyle(value, maxValue) {
@@ -393,7 +420,11 @@ function App() {
     return weightModalOrder.items.some(
       (item) =>
         isWeightedItem(item) &&
-        parseMoneyInput(weightDrafts[item.menuItemId]) <= 0,
+        getWeightDraftValues(
+          weightDrafts[item.menuItemId],
+          item.quantity,
+          item.weightGrams,
+        ).some((value) => parseMoneyInput(value) <= 0),
     );
   }, [weightDrafts, weightModalOrder]);
 
@@ -538,8 +569,11 @@ function App() {
   function openWeightModal(order) {
     const drafts = order.items.reduce((acc, item) => {
       if (isWeightedItem(item)) {
-        acc[item.menuItemId] =
-          item.weightGrams != null ? `${item.weightGrams}` : "";
+        acc[item.menuItemId] = getWeightDraftValues(
+          item.weightBreakdown,
+          item.quantity,
+          item.weightGrams,
+        );
       }
       return acc;
     }, {});
@@ -688,19 +722,29 @@ function App() {
     const nextItems = weightModalOrder.items.map((item) => {
       if (!isWeightedItem(item)) return item;
 
-      const grams = parseMoneyInput(weightDrafts[item.menuItemId]);
+      const gramsPerUnit = getWeightDraftValues(
+        weightDrafts[item.menuItemId],
+        item.quantity,
+        item.weightGrams,
+      ).map((value) => parseMoneyInput(value));
       const weightFormula = resolveWeightFormulaForOrderItem(item);
-      const unitPrice =
-        grams > 0 ? calculateWeightedCutPrice(grams, weightFormula) : 0;
+      const unitPrices = gramsPerUnit.map((grams) =>
+        grams > 0 ? calculateWeightedCutPrice(grams, weightFormula) : 0,
+      );
+      const subtotal = unitPrices.reduce((acc, value) => acc + value, 0);
+      const totalWeight = gramsPerUnit.reduce((acc, value) => acc + value, 0);
       return {
         ...item,
         weightFormula,
-        weightGrams: grams > 0 ? grams : null,
-        unitPrice,
-        subtotal:
-          Math.round(
-            (unitPrice * Number(item.quantity || 1) + Number.EPSILON) * 100,
-          ) / 100,
+        weightGrams: totalWeight > 0 ? totalWeight : null,
+        weightBreakdown: gramsPerUnit,
+        unitPrice:
+          gramsPerUnit.length > 0
+            ? Math.round(
+                ((subtotal / gramsPerUnit.length) + Number.EPSILON) * 100,
+              ) / 100
+            : 0,
+        subtotal: Math.round((subtotal + Number.EPSILON) * 100) / 100,
       };
     });
 
@@ -1057,8 +1101,9 @@ function App() {
         <ul>
           ${order.items
             .map((item) => {
-              const weightLabel =
-                item.weightGrams != null ? ` - ${item.weightGrams} g` : "";
+              const weightLabel = formatWeightBreakdown(item)
+                ? ` - ${formatWeightBreakdown(item)}`
+                : "";
               const editedClass = editedIds.has(item.menuItemId)
                 ? "edited"
                 : "";
@@ -1293,8 +1338,8 @@ function App() {
                           }
                         >
                           {item.category} - {item.quantity} x {item.name}
-                          {item.weightGrams != null
-                            ? ` (${item.weightGrams} g)`
+                          {formatWeightBreakdown(item)
+                            ? ` (${formatWeightBreakdown(item)})`
                             : ""}
                           <ItemPlateNote item={item} />
                           <div
@@ -2822,15 +2867,21 @@ function App() {
                 }}
               >
                 {weightModalOrder.items.filter(isWeightedItem).map((item) => {
-                  const grams = parseMoneyInput(weightDrafts[item.menuItemId]);
+                  const gramsPerUnit = getWeightDraftValues(
+                    weightDrafts[item.menuItemId],
+                    item.quantity,
+                    item.weightGrams,
+                  );
+                  const parsedWeights = gramsPerUnit.map((value) =>
+                    parseMoneyInput(value),
+                  );
                   const weightFormula = resolveWeightFormulaForOrderItem(item);
-                  const unitPrice =
-                    grams > 0
-                      ? calculateWeightedCutPrice(grams, weightFormula)
-                      : 0;
+                  const unitPrices = parsedWeights.map((grams) =>
+                    grams > 0 ? calculateWeightedCutPrice(grams, weightFormula) : 0,
+                  );
                   const subtotal =
                     Math.round(
-                      (unitPrice * Number(item.quantity || 1) +
+                      (unitPrices.reduce((acc, value) => acc + value, 0) +
                         Number.EPSILON) *
                         100,
                     ) / 100;
@@ -2881,20 +2932,33 @@ function App() {
                       </div>
 
                       <div className="field-row">
-                        <label htmlFor={`grams-${item.menuItemId}`}>
-                          Gramos por unidad
+                        <label htmlFor={`grams-${item.menuItemId}-0`}>
+                          Gramaje por unidad
                         </label>
-                        <input
-                          id={`grams-${item.menuItemId}`}
-                          value={weightDrafts[item.menuItemId] ?? ""}
-                          onChange={(event) =>
-                            setWeightDrafts((current) => ({
-                              ...current,
-                              [item.menuItemId]: event.target.value,
-                            }))
-                          }
-                          placeholder="Ej: 500"
-                        />
+                        <div style={{ display: "grid", gap: 8 }}>
+                          {gramsPerUnit.map((value, index) => (
+                            <input
+                              key={`${item.menuItemId}-${index}`}
+                              id={`grams-${item.menuItemId}-${index}`}
+                              value={value}
+                              onChange={(event) =>
+                                setWeightDrafts((current) => ({
+                                  ...current,
+                                  [item.menuItemId]: getWeightDraftValues(
+                                    current[item.menuItemId],
+                                    item.quantity,
+                                    item.weightGrams,
+                                  ).map((draftValue, draftIndex) =>
+                                    draftIndex === index
+                                      ? event.target.value
+                                      : draftValue,
+                                  ),
+                                }))
+                              }
+                              placeholder={`Ej: 500 (unidad ${index + 1})`}
+                            />
+                          ))}
+                        </div>
                       </div>
 
                       <div className="payment-summary" style={{ marginTop: 8 }}>
@@ -2909,10 +2973,6 @@ function App() {
                             Formula: {formulaLabel}
                           </p>
                         ) : null}
-                        <p>
-                          Precio calculado:{" "}
-                          <strong>{formatCurrency(unitPrice)}</strong>
-                        </p>
                         <p>
                           Subtotal linea:{" "}
                           <strong>{formatCurrency(subtotal)}</strong>
@@ -3400,8 +3460,8 @@ function App() {
                       >
                         <p style={{ margin: "0 0 2px 0" }}>
                           {item.quantity}x {item.name}
-                          {item.weightGrams != null
-                            ? ` (${item.weightGrams} g)`
+                          {formatWeightBreakdown(item)
+                            ? ` (${formatWeightBreakdown(item)})`
                             : ""}
                         </p>
                         <ItemPlateNote item={item} />

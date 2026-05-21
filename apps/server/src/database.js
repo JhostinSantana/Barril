@@ -298,6 +298,7 @@ export async function initializeDatabase() {
       unit_price REAL NOT NULL,
       subtotal REAL NOT NULL,
       weight_grams REAL,
+      weight_breakdown_json TEXT,
       pricing_mode TEXT NOT NULL DEFAULT 'fixed',
       weight_formula TEXT,
       notes TEXT NOT NULL DEFAULT '',
@@ -391,6 +392,9 @@ export async function initializeDatabase() {
   }
   if (!itemColumns.some((column) => column.name === 'pricing_mode')) {
     await run("ALTER TABLE order_items ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'fixed'");
+  }
+  if (!itemColumns.some((column) => column.name === 'weight_breakdown_json')) {
+    await run('ALTER TABLE order_items ADD COLUMN weight_breakdown_json TEXT');
   }
 
   const menuColumns = await all('PRAGMA table_info(menu_items)');
@@ -626,8 +630,8 @@ export async function createOrder(order) {
 
   for (const item of order.items) {
     await run(
-      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, weight_breakdown_json, pricing_mode, weight_formula, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         order.id,
         item.menuItemId,
@@ -637,6 +641,7 @@ export async function createOrder(order) {
         roundMoney(item.unitPrice),
         roundMoney(item.subtotal),
         item.weightGrams ?? null,
+        item.weightBreakdown != null ? JSON.stringify(item.weightBreakdown) : null,
         item.pricingMode ?? 'fixed',
         item.weightFormula ?? null,
         normalizeItemNotes(item.notes)
@@ -722,8 +727,8 @@ export async function updateOrderWithItems(orderId, order) {
 
     for (const item of order.items) {
       await run(
-        `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, weight_breakdown_json, pricing_mode, weight_formula, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
         [
           orderId,
           item.menuItemId,
@@ -733,6 +738,7 @@ export async function updateOrderWithItems(orderId, order) {
           roundMoney(item.unitPrice),
           roundMoney(item.subtotal),
           item.weightGrams ?? null,
+          item.weightBreakdown != null ? JSON.stringify(item.weightBreakdown) : null,
           item.pricingMode ?? 'fixed',
           item.weightFormula ?? null,
           normalizeItemNotes(item.notes)
@@ -798,7 +804,7 @@ async function listOrderItemsByOrderIds(orderIds) {
 
   const placeholders = orderIds.map(() => '?').join(', ');
   const rows = await all(
-    `SELECT order_id AS orderId, menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, pricing_mode AS pricingMode, weight_formula AS weightFormula, notes
+    `SELECT order_id AS orderId, menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, weight_breakdown_json AS weightBreakdownJson, pricing_mode AS pricingMode, weight_formula AS weightFormula, notes
      FROM order_items
      WHERE order_id IN (${placeholders})
      ORDER BY order_id ASC, id ASC`,
@@ -808,10 +814,14 @@ async function listOrderItemsByOrderIds(orderIds) {
   for (const row of rows) {
     const { orderId, ...item } = row;
     const bucket = itemsByOrderId.get(orderId);
+    const normalizedItem = {
+      ...item,
+      weightBreakdown: parseJsonArray(item.weightBreakdownJson),
+    };
     if (bucket) {
-      bucket.push(item);
+      bucket.push(normalizedItem);
     } else {
-      itemsByOrderId.set(orderId, [item]);
+      itemsByOrderId.set(orderId, [normalizedItem]);
     }
   }
 
@@ -861,7 +871,7 @@ export async function listOrders({ status, query } = {}) {
 
 export async function listOrdersByDate(dateKey) {
   const rows = await all(
-    'SELECT * FROM orders WHERE substr(created_at, 1, 10) = ? ORDER BY created_at DESC',
+    "SELECT * FROM orders WHERE substr(datetime(created_at, '-5 hours'), 1, 10) = ? ORDER BY created_at DESC",
     [dateKey]
   );
 
@@ -921,10 +931,15 @@ export async function updateOrderPayment(orderId, paymentMethod, paidAt) {
 }
 
 async function listOrderItems(orderId) {
-  return all(
-    'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, pricing_mode AS pricingMode, weight_formula AS weightFormula, notes FROM order_items WHERE order_id = ? ORDER BY id ASC',
+  const rows = await all(
+    'SELECT menu_item_id AS menuItemId, name, category, quantity, unit_price AS unitPrice, subtotal, weight_grams AS weightGrams, weight_breakdown_json AS weightBreakdownJson, pricing_mode AS pricingMode, weight_formula AS weightFormula, notes FROM order_items WHERE order_id = ? ORDER BY id ASC',
     [orderId]
   );
+
+  return rows.map((row) => ({
+    ...row,
+    weightBreakdown: parseJsonArray(row.weightBreakdownJson),
+  }));
 }
 
 async function repairMispricedOpenOrders() {
@@ -947,7 +962,8 @@ async function repairMispricedOpenOrders() {
       menuItemId: item.menuItemId,
       quantity: item.quantity,
       weightGrams: item.weightGrams,
-      pricingMode: item.pricingMode
+        weightBreakdown: item.weightBreakdown,
+        pricingMode: item.pricingMode
     }));
 
     const summarizedItems = summarizeItems(normalizedItems, menu);
@@ -1081,9 +1097,9 @@ export async function restoreData(payload) {
     if (Array.isArray(payload.orderItems)) {
       for (const it of payload.orderItems) {
         await run(
-          `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, pricing_mode, weight_formula, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [it.order_id, it.menu_item_id, it.name, it.category ?? 'Sin categoria', it.quantity ?? 1, it.unit_price ?? it.unitPrice ?? 0, it.subtotal ?? 0, it.weight_grams ?? it.weightGrams ?? null, it.pricing_mode ?? it.pricingMode ?? 'fixed', it.weight_formula ?? it.weightFormula ?? null, normalizeItemNotes(it.notes)]
+          `INSERT INTO order_items(order_id, menu_item_id, name, category, quantity, unit_price, subtotal, weight_grams, weight_breakdown_json, pricing_mode, weight_formula, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ,[it.order_id, it.menu_item_id, it.name, it.category ?? 'Sin categoria', it.quantity ?? 1, it.unit_price ?? it.unitPrice ?? 0, it.subtotal ?? 0, it.weight_grams ?? it.weightGrams ?? null, it.weight_breakdown_json ?? it.weightBreakdownJson ?? null, it.pricing_mode ?? it.pricingMode ?? 'fixed', it.weight_formula ?? it.weightFormula ?? null, normalizeItemNotes(it.notes)]
         );
       }
     }

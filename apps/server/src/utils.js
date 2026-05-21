@@ -413,35 +413,64 @@ function isWeightedMenuItem(menuItem) {
   return menuItem?.pricingMode === "weight";
 }
 
+function normalizeWeightBreakdown(rawValue) {
+  if (!Array.isArray(rawValue)) return [];
+
+  return rawValue
+    .map((value) => roundMoney(Number(value)))
+    .filter((value) => Number.isFinite(value) && value > 0);
+}
+
 function resolveOrderItemDetails(item, menuItem) {
   const quantity = Math.max(1, Number(item.quantity) || 1);
   const pricingMode = item?.pricingMode ?? menuItem?.pricingMode ?? "fixed";
   const weightGrams = Number(
     item.weightGrams ?? item.grams ?? item.weight ?? 0,
   );
+  const weightBreakdown = normalizeWeightBreakdown(
+    item.weightBreakdown ?? item.weightBreakdownJson,
+  );
   const isWeighted =
-    pricingMode === "weight" || isWeightedMenuItem(menuItem) || weightGrams > 0;
+    pricingMode === "weight" ||
+    isWeightedMenuItem(menuItem) ||
+    weightGrams > 0 ||
+    weightBreakdown.length > 0;
 
   if (isWeighted) {
     const weightFormula = item?.weightFormula ?? resolveWeightFormula(menuItem);
-    const unitPrice =
-      weightGrams > 0
-        ? calculateWeightedCutPrice(weightGrams, weightFormula)
-        : 0;
+    const unitWeights =
+      weightBreakdown.length > 0
+        ? weightBreakdown
+        : weightGrams > 0
+        ? Array.from({ length: quantity }, () => roundMoney(weightGrams))
+        : [];
     const subtotal =
-      weightGrams > 0
-        ? roundMoney(unitPrice * quantity)
+      unitWeights.length > 0
+        ? roundMoney(
+            unitWeights.reduce(
+              (acc, grams) =>
+                acc + calculateWeightedCutPrice(grams, weightFormula),
+              0,
+            ),
+          )
         : hasProvidedMoney(item.subtotal)
         ? roundMoney(item.subtotal)
         : 0;
+    const totalWeight =
+      unitWeights.length > 0
+        ? roundMoney(unitWeights.reduce((acc, grams) => acc + grams, 0))
+        : weightGrams > 0
+        ? roundMoney(weightGrams)
+        : null;
 
     return {
       pricingMode: "weight",
       weightFormula,
-      weightGrams: weightGrams > 0 ? roundMoney(weightGrams) : null,
+      weightGrams: totalWeight,
+      weightBreakdown: unitWeights.length > 0 ? unitWeights : null,
       unitPrice:
-        weightGrams > 0
-          ? unitPrice
+        subtotal > 0
+          ? roundMoney(subtotal / quantity)
           : hasProvidedMoney(item.unitPrice)
           ? roundMoney(item.unitPrice)
           : 0,
@@ -459,16 +488,40 @@ function resolveOrderItemDetails(item, menuItem) {
   return {
     pricingMode,
     weightGrams: null,
+    weightBreakdown: null,
     unitPrice,
     subtotal,
   };
 }
 
-export function getDateKey(isoDate) {
-  if (!isoDate) return null;
+const BOGOTA_TIME_ZONE = "America/Bogota";
+
+function getBogotaDateParts(isoDate) {
   const date = new Date(isoDate);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 10);
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BOGOTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) return null;
+  return { year: Number(year), month: Number(month), day: Number(day) };
+}
+
+export function getDateKey(isoDate) {
+  if (!isoDate) return null;
+  const parts = getBogotaDateParts(isoDate);
+  if (!parts) return null;
+  const month = String(parts.month).padStart(2, "0");
+  const day = String(parts.day).padStart(2, "0");
+  return `${parts.year}-${month}-${day}`;
 }
 
 export function normalizeOrderExpenses(expenses) {
@@ -580,6 +633,7 @@ export function summarizeItems(items, menu) {
       pricingMode: details.pricingMode,
       weightFormula: details.weightFormula ?? null,
       weightGrams: details.weightGrams,
+      weightBreakdown: details.weightBreakdown ?? null,
       unitPrice: details.unitPrice,
       subtotal: details.subtotal,
       notes: normalizeItemNotes(item.notes),
@@ -611,6 +665,7 @@ export function preserveWeightFromCurrentOrder(nextItems, currentItems = []) {
     return {
       ...item,
       weightGrams: current.weightGrams,
+      weightBreakdown: item.weightBreakdown ?? current.weightBreakdown ?? null,
       weightFormula: item.weightFormula ?? current.weightFormula ?? null,
       pricingMode: item.pricingMode ?? current.pricingMode ?? "weight",
       notes: incomingNotes || preservedNotes,
@@ -670,20 +725,21 @@ function getPaymentEntries(order) {
 }
 
 function getMonthDateRange(dateValue) {
-  const sourceDate = new Date(dateValue);
-  const year = sourceDate.getUTCFullYear();
-  const month = sourceDate.getUTCMonth();
-  const monthStart = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
-  const monthEnd = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+  const parts = getBogotaDateParts(dateValue);
+  const date = new Date(dateValue);
+  const year = parts?.year ?? date.getUTCFullYear();
+  const month = (parts?.month ?? date.getUTCMonth() + 1) - 1;
+  const monthStart = new Date(Date.UTC(year, month, 1, 5, 0, 0, 0));
+  const monthEnd = new Date(Date.UTC(year, month + 1, 1, 4, 59, 59, 999));
   return { monthStart, monthEnd };
 }
 
 function getMonthLabel(dateValue) {
-  const date = new Date(dateValue);
+  const date = new Date(`${dateValue}T12:00:00.000Z`);
   return new Intl.DateTimeFormat("es-CO", {
     month: "long",
     year: "numeric",
-    timeZone: "UTC",
+    timeZone: BOGOTA_TIME_ZONE,
   }).format(date);
 }
 
@@ -691,8 +747,8 @@ function getDayLabel(dateValue) {
   return new Intl.DateTimeFormat("es-CO", {
     weekday: "short",
     day: "2-digit",
-    timeZone: "UTC",
-  }).format(new Date(dateValue));
+    timeZone: BOGOTA_TIME_ZONE,
+  }).format(new Date(`${dateValue}T12:00:00.000Z`));
 }
 
 function finalizeSectionBuckets(sectionMap) {
@@ -755,8 +811,9 @@ export function getStats(orders, menu, fromDate, toDate) {
 
   filtered.forEach((order) => {
     const createdAt = new Date(order.createdAt);
-    const dayKey = createdAt.toISOString().slice(0, 10);
-    const dayNumber = createdAt.getUTCDate();
+    const dayKey = getDateKey(order.createdAt);
+    const dayParts = getBogotaDateParts(order.createdAt);
+    const dayNumber = dayParts?.day ?? createdAt.getUTCDate();
     const dailyEntry = dailyMap.get(dayKey) ?? {
       date: dayKey,
       dayNumber,
@@ -864,7 +921,7 @@ export function getStats(orders, menu, fromDate, toDate) {
     cursor <= monthEnd;
     cursor.setUTCDate(cursor.getUTCDate() + 1)
   ) {
-    const dateKey = cursor.toISOString().slice(0, 10);
+    const dateKey = getDateKey(cursor.toISOString());
     const entry = dailyMap.get(dateKey) ?? {
       date: dateKey,
       dayNumber: cursor.getUTCDate(),
@@ -966,7 +1023,7 @@ export function getCashClose(orders, dateKey) {
 }
 
 export function getStatsSummary(orders, menu) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getDateKey(new Date().toISOString());
   const summary = {
     today: {
       efectivo: 0,
