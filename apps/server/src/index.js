@@ -15,6 +15,7 @@ import {
   getOrderById,
   getRestaurantName,
   getSetting,
+  deleteWaiter,
   getWaiterByName,
   initializeDatabase,
     listOrders,
@@ -219,6 +220,22 @@ app.patch("/api/waiters/:waiterName", async (req, res, next) => {
     }
 
     res.json(waiter);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/waiters/:waiterName", async (req, res, next) => {
+  try {
+    const waiterName = req.params.waiterName?.toString() ?? "";
+    const deletedWaiter = await deleteWaiter(waiterName);
+
+    if (!deletedWaiter) {
+      res.status(404).json({ message: "Mesero no encontrado." });
+      return;
+    }
+
+    res.json({ ok: true, deletedWaiter });
   } catch (error) {
     next(error);
   }

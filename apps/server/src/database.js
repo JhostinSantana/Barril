@@ -596,6 +596,18 @@ export async function setWaiterActive(name, active) {
   return getWaiterByName(displayName);
 }
 
+export async function deleteWaiter(name) {
+  const displayName = formatWaiterName(name);
+  const waiterKey = normalizeWaiterName(displayName);
+  if (!waiterKey) return null;
+
+  const existing = await getWaiterByName(displayName);
+  if (!existing) return null;
+
+  await run('DELETE FROM waiters WHERE waiter_key = ?', [waiterKey]);
+  return existing;
+}
+
 export async function getMenu() {
   return all(
     'SELECT id, name, category, price, pricing_mode AS pricingMode, weight_formula AS weightFormula FROM menu_items ORDER BY sort_order ASC'

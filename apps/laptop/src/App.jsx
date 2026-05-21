@@ -500,6 +500,28 @@ function App() {
     await loadWaiters();
   }
 
+  function confirmDeleteWaiter(waiter) {
+    setConfirmModal({
+      title: "Eliminar mesero",
+      message: `Se eliminará a ${waiter.displayName} de la lista de meseros autorizados. Esta acción no afecta pedidos ya guardados.`,
+      action: async () => {
+        try {
+          await getJson(`/api/waiters/${encodeURIComponent(waiter.displayName)}`, {
+            method: "DELETE",
+          });
+          setWaiterStatus(`Mesero eliminado: ${waiter.displayName}`);
+          setConfirmModal(null);
+          await loadWaiters();
+        } catch (error) {
+          setWaiterStatus(`Error eliminando mesero: ${error.message}`);
+        }
+      },
+      confirmText: "Eliminar mesero",
+      cancelText: "Cancelar",
+      isDanger: true,
+    });
+  }
+
   async function loadHistoryView(date) {
     const result = await getJson(`/api/orders/history?date=${date}`);
     setHistoryOrders(result);
@@ -2503,6 +2525,13 @@ function App() {
                         Reautorizar
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => confirmDeleteWaiter(waiter)}
+                    >
+                      Eliminar mesero
+                    </button>
                   </div>
                 </article>
               ))}
