@@ -724,6 +724,30 @@ function getPaymentEntries(order) {
   ];
 }
 
+function getPaymentMovements(order) {
+  const payments = Array.isArray(order?.payments) ? order.payments : [];
+
+  if (payments.length > 0) {
+    return payments.map((payment) => ({
+      orderId: order.id,
+      paymentMethod: payment.paymentMethod ?? order.paymentMethod ?? "efectivo",
+      amount: roundMoney(payment.amount ?? 0),
+      createdAt: payment.createdAt ?? order.paidAt ?? order.createdAt ?? null,
+    }));
+  }
+
+  if (order?.status !== "paid") return [];
+
+  return [
+    {
+      orderId: order.id,
+      paymentMethod: order.paymentMethod ?? "efectivo",
+      amount: roundMoney(order.total ?? 0),
+      createdAt: order.paidAt ?? order.createdAt ?? null,
+    },
+  ];
+}
+
 function getMonthDateRange(dateValue) {
   const parts = getBogotaDateParts(dateValue);
   const date = new Date(dateValue);
@@ -782,6 +806,7 @@ export function getStats(orders, menu, fromDate, toDate) {
         orders: 0,
         totalSales: 0,
         dishMap: new Map(),
+        orderIds: new Set(),
       },
     ],
     [
@@ -792,6 +817,7 @@ export function getStats(orders, menu, fromDate, toDate) {
         orders: 0,
         totalSales: 0,
         dishMap: new Map(),
+        orderIds: new Set(),
       },
     ],
   ]);
@@ -808,15 +834,16 @@ export function getStats(orders, menu, fromDate, toDate) {
   };
   let totalSales = 0;
   let totalPaidOrders = 0;
+  const paidOrderIds = new Set();
 
-  filtered.forEach((order) => {
-    const createdAt = new Date(order.createdAt);
-    const dayKey = getDateKey(order.createdAt);
-    const dayParts = getBogotaDateParts(order.createdAt);
-    const dayNumber = dayParts?.day ?? createdAt.getUTCDate();
-    const dailyEntry = dailyMap.get(dayKey) ?? {
+  function ensureDailyEntry(dateKey, dateParts, fallbackDate) {
+    const dayKey = dateKey ?? fallbackDate;
+    const existing = dailyMap.get(dayKey);
+    if (existing) return existing;
+
+    const entry = {
       date: dayKey,
-      dayNumber,
+      dayNumber: dateParts?.day ?? new Date(`${dayKey}T12:00:00.000Z`).getUTCDate(),
       label: getDayLabel(dayKey),
       orders: 0,
       paidOrders: 0,
@@ -826,47 +853,19 @@ export function getStats(orders, menu, fromDate, toDate) {
         ["efectivo", { method: "efectivo", total: 0 }],
         ["transferencia", { method: "transferencia", total: 0 }],
       ]),
+      paidOrderIds: new Set(),
     };
+    dailyMap.set(dayKey, entry);
+    return entry;
+  }
+
+  filtered.forEach((order) => {
+    const createdAt = new Date(order.createdAt);
+    const dayKey = getDateKey(order.createdAt);
+    const dayParts = getBogotaDateParts(order.createdAt);
+    const dayNumber = dayParts?.day ?? createdAt.getUTCDate();
+    const dailyEntry = ensureDailyEntry(dayKey, dayParts, dayKey);
     dailyEntry.orders += 1;
-
-    if (order.status === "paid") {
-      totalSales = roundMoney(totalSales + order.total);
-      totalPaidOrders += 1;
-      dailyEntry.paidOrders += 1;
-      dailyEntry.totalSales = roundMoney(dailyEntry.totalSales + order.total);
-
-      const quincenaKey = dayNumber <= 15 ? "first" : "second";
-      const quincenaEntry = quincenaMap.get(quincenaKey);
-      quincenaEntry.orders += 1;
-      quincenaEntry.totalSales = roundMoney(
-        quincenaEntry.totalSales + order.total,
-      );
-
-      getPaymentEntries(order).forEach((payment) => {
-        const amount = roundMoney(payment?.amount ?? 0);
-        if (paymentMap.has(payment.paymentMethod)) {
-          const paymentEntry = paymentMap.get(payment.paymentMethod);
-          paymentEntry.amount = roundMoney(paymentEntry.amount + amount);
-        }
-        if (dailyEntry.paymentsByMethod.has(payment.paymentMethod)) {
-          const dailyPayment = dailyEntry.paymentsByMethod.get(
-            payment.paymentMethod,
-          );
-          dailyPayment.total = roundMoney(dailyPayment.total + amount);
-        }
-      });
-
-      normalizeOrderExpenses(order.expenses).forEach((expense) => {
-        if (!isContainerExpense(expense)) return;
-
-        containerSummary.quantity += normalizeContainerQuantity(
-          expense.quantity,
-        );
-        containerSummary.revenue = roundMoney(
-          containerSummary.revenue + expense.amount,
-        );
-      });
-    }
 
     order.items.forEach((item) => {
       const menuItem = menu.find((m) => m.id === item.menuItemId);
@@ -912,6 +911,50 @@ export function getStats(orders, menu, fromDate, toDate) {
       quincenaEntry.dishMap.set(menuItem.id, quincenaItem);
     });
 
+    const movements = getPaymentMovements(order).filter((movement) => {
+      const movementDate = getDateKey(movement.createdAt);
+      return movementDate && movementDate >= fromDate.slice(0, 10) && movementDate <= toDate.slice(0, 10);
+    });
+
+    movements.forEach((movement) => {
+      const movementDate = getDateKey(movement.createdAt);
+      const movementParts = getBogotaDateParts(movement.createdAt);
+      if (!movementDate || !movementParts) return;
+
+      const movementEntry = ensureDailyEntry(movementDate, movementParts, movementDate);
+      const amount = roundMoney(movement.amount ?? 0);
+      totalSales = roundMoney(totalSales + amount);
+      paidOrderIds.add(order.id);
+      movementEntry.paidOrderIds.add(order.id);
+      movementEntry.paidOrders = movementEntry.paidOrderIds.size;
+      movementEntry.totalSales = roundMoney(movementEntry.totalSales + amount);
+
+      const quincenaKey = movementParts.day <= 15 ? "first" : "second";
+      const quincenaEntry = quincenaMap.get(quincenaKey);
+      quincenaEntry.orderIds.add(order.id);
+      quincenaEntry.totalSales = roundMoney(quincenaEntry.totalSales + amount);
+
+      if (paymentMap.has(movement.paymentMethod)) {
+        const paymentEntry = paymentMap.get(movement.paymentMethod);
+        paymentEntry.amount = roundMoney(paymentEntry.amount + amount);
+      }
+
+      if (movementEntry.paymentsByMethod.has(movement.paymentMethod)) {
+        const dailyPayment = movementEntry.paymentsByMethod.get(movement.paymentMethod);
+        dailyPayment.total = roundMoney(dailyPayment.total + amount);
+      }
+
+      normalizeOrderExpenses(order.expenses).forEach((expense) => {
+        if (!isContainerExpense(expense)) return;
+
+        containerSummary.quantity += normalizeContainerQuantity(expense.quantity);
+        containerSummary.revenue = roundMoney(
+          containerSummary.revenue + expense.amount,
+        );
+      });
+    });
+
+    dailyEntry.paidOrders = dailyEntry.paidOrderIds.size;
     dailyMap.set(dayKey, dailyEntry);
   });
 
@@ -934,6 +977,7 @@ export function getStats(orders, menu, fromDate, toDate) {
         ["efectivo", { method: "efectivo", total: 0 }],
         ["transferencia", { method: "transferencia", total: 0 }],
       ]),
+      paidOrderIds: new Set(),
     };
     const topDishes = buildRanking(entry.dishMap, 5);
     const paymentMethods = [...entry.paymentsByMethod.values()].filter(
@@ -954,7 +998,7 @@ export function getStats(orders, menu, fromDate, toDate) {
   const quincenas = [...quincenaMap.values()].map((bucket) => ({
     id: bucket.id,
     label: bucket.label,
-    orders: bucket.orders,
+    orders: bucket.orderIds.size,
     totalSales: bucket.totalSales,
     topDishes: buildRanking(bucket.dishMap, 5),
     bottomDishes: buildReverseRanking(bucket.dishMap, 5),
@@ -969,7 +1013,7 @@ export function getStats(orders, menu, fromDate, toDate) {
 
   return {
     totalOrders: filtered.length,
-    totalPaidOrders,
+    totalPaidOrders: paidOrderIds.size,
     totalSales,
     monthLabel: getMonthLabel(fromDate),
     rangeLabel: `${from.toISOString().slice(0, 10)} al ${to
@@ -987,38 +1031,23 @@ export function getStats(orders, menu, fromDate, toDate) {
 }
 
 export function getCashClose(orders, dateKey) {
-  const paidOrders = orders.filter(
-    (order) => order.status === "paid" && getDateKey(order.paidAt) === dateKey,
-  );
+  const movements = orders
+    .flatMap((order) => getPaymentMovements(order))
+    .filter((movement) => getDateKey(movement.createdAt) === dateKey);
+  const uniqueOrders = new Set(movements.map((movement) => movement.orderId));
 
-  return paidOrders.reduce(
+  return movements.reduce(
     (acc, order) => {
-      const payments = Array.isArray(order.payments) ? order.payments : [];
-      const hasPayments = payments.length > 0;
-
-      if (hasPayments) {
-        payments.forEach((payment) => {
-          const amount = roundMoney(payment?.amount ?? 0);
-          acc.total = roundMoney(acc.total + amount);
-          if (payment.paymentMethod === "efectivo") {
-            acc.efectivo = roundMoney(acc.efectivo + amount);
-          }
-          if (payment.paymentMethod === "transferencia") {
-            acc.transferencia = roundMoney(acc.transferencia + amount);
-          }
-        });
-      } else {
-        acc.total = roundMoney(acc.total + order.total);
-        if (order.paymentMethod === "efectivo")
-          acc.efectivo = roundMoney(acc.efectivo + order.total);
-        if (order.paymentMethod === "transferencia")
-          acc.transferencia = roundMoney(acc.transferencia + order.total);
+      acc.total = roundMoney(acc.total + order.amount);
+      if (order.paymentMethod === "efectivo") {
+        acc.efectivo = roundMoney(acc.efectivo + order.amount);
       }
-
-      acc.orders += 1;
+      if (order.paymentMethod === "transferencia") {
+        acc.transferencia = roundMoney(acc.transferencia + order.amount);
+      }
       return acc;
     },
-    { date: dateKey, total: 0, efectivo: 0, transferencia: 0, orders: 0 },
+    { date: dateKey, total: 0, efectivo: 0, transferencia: 0, orders: uniqueOrders.size },
   );
 }
 
@@ -1037,33 +1066,23 @@ export function getStatsSummary(orders, menu) {
     },
   };
 
-  // Solo procesar órdenes pagadas
-  const paidOrders = orders.filter((order) => order.status === "paid");
+  orders.forEach((order) => {
+    const movements = getPaymentMovements(order);
 
-  paidOrders.forEach((order) => {
-    const orderDate = getDateKey(order.paidAt);
-    const isPaidToday = orderDate === today;
-    const timeRange = isPaidToday ? "today" : "historical";
+    movements.forEach((movement) => {
+      const movementDate = getDateKey(movement.createdAt);
+      const timeRange = movementDate === today ? "today" : "historical";
+      const amount = roundMoney(movement.amount ?? 0);
 
-    // Obtener pagos de la orden
-    const payments = getPaymentEntries(order);
-    const paymentsByMethod = new Map([
-      ["efectivo", 0],
-      ["transferencia", 0],
-    ]);
-
-    payments.forEach((payment) => {
-      const amount = roundMoney(payment?.amount ?? 0);
-      if (paymentsByMethod.has(payment.paymentMethod)) {
-        paymentsByMethod.set(
-          payment.paymentMethod,
-          roundMoney(paymentsByMethod.get(payment.paymentMethod) + amount),
-        );
-        summary[timeRange][payment.paymentMethod] = roundMoney(
-          summary[timeRange][payment.paymentMethod] + amount,
-        );
-        summary[timeRange].total = roundMoney(summary[timeRange].total + amount);
+      if (!summary[timeRange]) return;
+      if (!Object.prototype.hasOwnProperty.call(summary[timeRange], movement.paymentMethod)) {
+        return;
       }
+
+      summary[timeRange][movement.paymentMethod] = roundMoney(
+        summary[timeRange][movement.paymentMethod] + amount,
+      );
+      summary[timeRange].total = roundMoney(summary[timeRange].total + amount);
     });
   });
 

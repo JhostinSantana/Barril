@@ -35,6 +35,7 @@ import {
     calculateOrderTotal,
     detectDuplicateOrders,
     getCashClose,
+  getDateKey,
     getStats,
     getStatsSummary,
     normalizeOrderExpenses,
@@ -677,9 +678,8 @@ app.get("/api/diagnostics/duplicates", async (req, res, next) => {
 
 app.get("/api/cash-close", async (req, res, next) => {
   try {
-    const orders = await listOrders({ status: "paid" });
-    const date =
-      req.query.date?.toString() ?? new Date().toISOString().slice(0, 10);
+    const orders = await listOrders();
+    const date = req.query.date?.toString() ?? getDateKey(new Date().toISOString());
     res.json(getCashClose(orders, date));
   } catch (error) {
     next(error);
