@@ -11,8 +11,8 @@ import {
     CONTAINER_EXPENSE_AMOUNT,
     CONTAINER_EXPENSE_DESCRIPTION,
     createContainerExpense,
-  isContainerExpense,
-  normalizeContainerQuantity,
+    isContainerExpense,
+    normalizeContainerQuantity,
 } from "../../server/src/utils.js";
 import "./App.css";
 
