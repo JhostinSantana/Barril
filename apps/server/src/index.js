@@ -35,7 +35,7 @@ import {
     calculateOrderTotal,
     detectDuplicateOrders,
     getCashClose,
-  getDateKey,
+    getDateKey,
     getStats,
     getStatsSummary,
     normalizeOrderExpenses,
