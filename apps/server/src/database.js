@@ -6,7 +6,11 @@ import {
     DEFAULT_MENU_VERSION,
     DEFAULT_RESTAURANT_NAME,
     calculateExpensesTotal,
+    defaultTableForServiceType,
+    inferServiceTypeFromTable,
+    isPickupServiceType,
     normalizeOrderExpenses,
+    normalizeServiceType,
     summarizeItems
 } from './utils.js';
 
@@ -111,6 +115,7 @@ function mapOrderRow(row, items, payments) {
     id: row.id,
     clientName: row.client_name,
     tableNumber: row.table_number,
+    serviceType: row.service_type ?? inferServiceTypeFromTable(row.table_number),
     waiterName: row.waiter_name,
     status: row.status,
     kitchenStatus: row.kitchen_status ?? 'pendiente',
@@ -368,6 +373,26 @@ export async function initializeDatabase() {
   if (!orderColumns.some((column) => column.name === 'kitchen_fulfilled_items_json')) {
     await run("ALTER TABLE orders ADD COLUMN kitchen_fulfilled_items_json TEXT NOT NULL DEFAULT '[]'");
   }
+  const orderColumnsAfterKitchen = await all('PRAGMA table_info(orders)');
+  if (!orderColumnsAfterKitchen.some((column) => column.name === 'service_type')) {
+    await run("ALTER TABLE orders ADD COLUMN service_type TEXT NOT NULL DEFAULT 'mesa'");
+  }
+
+  await run(`
+    UPDATE orders
+    SET service_type = 'domicilio'
+    WHERE service_type = 'mesa'
+      AND UPPER(TRIM(table_number)) LIKE '%DOMICILIO%'
+  `);
+  await run(`
+    UPDATE orders
+    SET service_type = 'para_llevar'
+    WHERE service_type = 'mesa'
+      AND (
+        UPPER(TRIM(table_number)) LIKE '%PARA LLEVAR%'
+        OR UPPER(TRIM(table_number)) = 'LLEVAR'
+      )
+  `);
 
   const completedWithoutSnapshot = await all(`
     SELECT id
@@ -616,13 +641,15 @@ export async function getMenu() {
 
 export async function createOrder(order) {
   const expenses = normalizeOrderExpenses(order.expenses);
+  const serviceType = normalizeServiceType(order.serviceType);
   await run(
-    `INSERT INTO orders(id, client_name, table_number, waiter_name, status, kitchen_status, kitchen_started_at, kitchen_finished_at, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, expenses_json, edited_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+    `INSERT INTO orders(id, client_name, table_number, service_type, waiter_name, status, kitchen_status, kitchen_started_at, kitchen_finished_at, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, expenses_json, edited_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
     [
       order.id,
       order.clientName,
       order.tableNumber,
+      serviceType,
       order.waiterName,
       order.status,
       order.kitchenStatus ?? 'pendiente',
@@ -700,10 +727,14 @@ export async function updateOrderWithItems(orderId, order) {
     });
   }
 
+  const nextServiceType = order.serviceType != null
+    ? normalizeServiceType(order.serviceType)
+    : currentOrder.serviceType;
   const metadataChanged =
     order.clientName !== currentOrder.clientName ||
     order.tableNumber !== currentOrder.tableNumber ||
     order.waiterName !== currentOrder.waiterName ||
+    nextServiceType !== currentOrder.serviceType ||
     Array.isArray(order.expenses);
   const editedAt = editSummary.length > 0 || commentText || metadataChanged
     ? new Date().toISOString()
@@ -719,11 +750,12 @@ export async function updateOrderWithItems(orderId, order) {
   try {
     await run(
       `UPDATE orders
-       SET client_name = ?, table_number = ?, waiter_name = ?, total = ?, status = ?, edit_summary_json = ?, comments_json = ?, edited_at = ?, kitchen_status = ?
+       SET client_name = ?, table_number = ?, service_type = ?, waiter_name = ?, total = ?, status = ?, edit_summary_json = ?, comments_json = ?, edited_at = ?, kitchen_status = ?
        WHERE id = ?`,
       [
         order.clientName,
         order.tableNumber,
+        nextServiceType,
         order.waiterName,
         normalizedTotal,
         nextStatus,
@@ -843,7 +875,10 @@ async function listOrderItemsByOrderIds(orderIds) {
 export async function listOrdersForKitchen() {
   const rows = await all(
     `SELECT * FROM orders
-     WHERE status IN ('pending', 'partial')
+     WHERE (
+       status IN ('pending', 'partial')
+       OR (status = 'paid' AND service_type IN ('domicilio', 'para_llevar'))
+     )
      ORDER BY created_at ASC`
   );
   const itemsByOrderId = await listOrderItemsByOrderIds(rows.map((row) => row.id));
@@ -903,9 +938,28 @@ export async function getOrderById(orderId) {
   return mapOrderRow(row, items, payments);
 }
 
-export async function addOrderPayment(orderId, paymentMethod, amount, tenderedAmount, changeGiven, paidAt, transferenceNumber) {
+export async function addOrderPayment(orderId, paymentMethod, amount, tenderedAmount, changeGiven, paidAt, transferenceNumber, serviceType) {
   const order = await getOrderById(orderId);
   if (!order) return null;
+
+  if (serviceType != null) {
+    const normalizedServiceType = normalizeServiceType(serviceType);
+    if (isPickupServiceType(normalizedServiceType)) {
+      await run(
+        'UPDATE orders SET service_type = ?, table_number = ? WHERE id = ?',
+        [
+          normalizedServiceType,
+          defaultTableForServiceType(normalizedServiceType),
+          orderId
+        ]
+      );
+    } else {
+      await run('UPDATE orders SET service_type = ? WHERE id = ?', [
+        normalizedServiceType,
+        orderId
+      ]);
+    }
+  }
 
   const normalizedAmount = roundMoney(amount);
   const normalizedTendered = roundMoney(tenderedAmount);
@@ -1084,12 +1138,15 @@ export async function restoreData(payload) {
     if (Array.isArray(payload.orders)) {
       for (const o of payload.orders) {
         await run(
-          `INSERT INTO orders(id, client_name, table_number, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, expenses_json, edited_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO orders(id, client_name, table_number, service_type, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, expenses_json, edited_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             o.id,
             o.client_name ?? o.clientName,
             o.table_number ?? o.tableNumber,
+            normalizeServiceType(
+              o.service_type ?? o.serviceType ?? inferServiceTypeFromTable(o.table_number ?? o.tableNumber)
+            ),
             o.waiter_name ?? o.waiterName ?? '',
             o.status ?? 'pending',
             o.payment_method ?? o.paymentMethod ?? null,

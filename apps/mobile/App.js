@@ -21,6 +21,11 @@ const ENV_API_URL = typeof globalThis.process !== 'undefined'
   ? globalThis.process.env?.EXPO_PUBLIC_API_URL ?? ''
   : '';
 const TABLE_OPTIONS = Array.from({ length: 16 }, (_, index) => String(index + 1));
+const SERVICE_OPTIONS = [
+  { id: 'mesa', label: 'Mesa' },
+  { id: 'domicilio', label: 'Domicilio' },
+  { id: 'para_llevar', label: 'Para llevar' }
+];
 
 const fallbackStorage = (() => {
   const memory = new Map();
@@ -162,6 +167,7 @@ export default function App() {
   const [waiterConfigured, setWaiterConfigured] = useState(false);
   const [showWaiterSettings, setShowWaiterSettings] = useState(false);
   const [clientName, setClientName] = useState('');
+  const [serviceType, setServiceType] = useState('mesa');
   const [tableNumber, setTableNumber] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
   const [itemNotes, setItemNotes] = useState({});
@@ -289,6 +295,7 @@ export default function App() {
   async function saveDraftOrder(overrides = {}) {
     const draft = {
       clientName: overrides.clientName ?? clientName,
+      serviceType: overrides.serviceType ?? serviceType,
       tableNumber: overrides.tableNumber ?? tableNumber,
       commentDraft: overrides.commentDraft ?? commentDraft,
       quantities: overrides.quantities ?? quantities,
@@ -305,12 +312,14 @@ export default function App() {
         const draft = JSON.parse(stored);
         if (
           draft.clientName ||
+          draft.serviceType ||
           draft.tableNumber ||
           draft.commentDraft ||
           Object.keys(draft.quantities || {}).length > 0 ||
           Object.keys(draft.itemNotes || {}).length > 0
         ) {
           setClientName(draft.clientName || '');
+          setServiceType(draft.serviceType || 'mesa');
           setTableNumber(draft.tableNumber || '');
           setCommentDraft(draft.commentDraft || '');
           setQuantities(draft.quantities || {});
@@ -493,7 +502,21 @@ export default function App() {
     if (clientName || tableNumber || commentDraft.trim() || Object.keys(quantities).length > 0) {
       saveDraftOrder();
     }
-  }, [clientName, tableNumber, commentDraft]);
+  }, [clientName, serviceType, tableNumber, commentDraft]);
+
+  function selectServiceType(nextType) {
+    const nextTable =
+      nextType === 'domicilio'
+        ? 'DOMICILIO'
+        : nextType === 'para_llevar'
+          ? 'PARA LLEVAR'
+          : TABLE_OPTIONS.includes(tableNumber)
+            ? tableNumber
+            : '';
+    setServiceType(nextType);
+    setTableNumber(nextTable);
+    saveDraftOrder({ serviceType: nextType, tableNumber: nextTable });
+  }
 
   function changeQuantity(id, delta) {
     setQuantities((current) => {
@@ -517,8 +540,17 @@ export default function App() {
       return acc;
     }, {});
 
+    const inferredService =
+      order.serviceType ??
+      (String(order.tableNumber ?? '').toUpperCase().includes('DOMICILIO')
+        ? 'domicilio'
+        : String(order.tableNumber ?? '').toUpperCase().includes('PARA LLEVAR')
+          ? 'para_llevar'
+          : 'mesa');
+
     setSelectedOrderId(order.id);
     setClientName(order.clientName ?? '');
+    setServiceType(inferredService);
     setTableNumber(order.tableNumber ?? '');
     setCommentDraft('');
     setItemNotes(nextItemNotes);
@@ -530,6 +562,7 @@ export default function App() {
   function resetDraft() {
     setSelectedOrderId(null);
     setClientName('');
+    setServiceType('mesa');
     setTableNumber('');
     setCommentDraft('');
     setItemNotes({});
@@ -580,13 +613,22 @@ export default function App() {
       return;
     }
 
-    if (!clientName.trim() || !tableNumber.trim() || items.length === 0) {
-      setStatus('Completa cliente, mesa y al menos un producto.');
+    if (!clientName.trim() || items.length === 0) {
+      setStatus('Completa cliente y al menos un producto.');
       return;
     }
 
-    if (!TABLE_OPTIONS.includes(tableNumber)) {
-      setStatus('Selecciona una mesa valida entre 1 y 16.');
+    if (serviceType === 'mesa') {
+      if (!tableNumber.trim()) {
+        setStatus('Selecciona una mesa entre 1 y 16.');
+        return;
+      }
+      if (!TABLE_OPTIONS.includes(tableNumber)) {
+        setStatus('Selecciona una mesa valida entre 1 y 16.');
+        return;
+      }
+    } else if (!tableNumber.trim()) {
+      setStatus('Selecciona el tipo de pedido (domicilio o para llevar).');
       return;
     }
 
@@ -604,7 +646,14 @@ export default function App() {
         {
           method: selectedOrderId ? 'PATCH' : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ waiterName, clientName, tableNumber, items, comment })
+          body: JSON.stringify({
+            waiterName,
+            clientName,
+            tableNumber,
+            serviceType,
+            items,
+            comment
+          })
         }
       );
 
@@ -810,26 +859,61 @@ export default function App() {
             placeholderTextColor="#8c7d6f"
             style={styles.input}
           />
-          <TextInput
-            value={tableNumber}
-            editable={false}
-            placeholder="Selecciona mesa"
-            placeholderTextColor="#8c7d6f"
-            style={styles.input}
-          />
+          <Text style={styles.sectionTitle}>Tipo de pedido</Text>
           <View style={styles.tableGrid}>
-            {TABLE_OPTIONS.map((table) => (
+            {SERVICE_OPTIONS.map((option) => (
               <Pressable
-                key={table}
-                style={[styles.tableChip, tableNumber === table ? styles.tableChipActive : null]}
-                onPress={() => setTableNumber(table)}
+                key={option.id}
+                style={[styles.tableChip, serviceType === option.id ? styles.tableChipActive : null]}
+                onPress={() => selectServiceType(option.id)}
               >
-                <Text style={[styles.tableChipText, tableNumber === table ? styles.tableChipTextActive : null]}>
-                  Mesa {table}
+                <Text
+                  style={[
+                    styles.tableChipText,
+                    serviceType === option.id ? styles.tableChipTextActive : null
+                  ]}
+                >
+                  {option.label}
                 </Text>
               </Pressable>
             ))}
           </View>
+          {serviceType === 'mesa' ? (
+            <>
+              <TextInput
+                value={tableNumber}
+                editable={false}
+                placeholder="Selecciona mesa"
+                placeholderTextColor="#8c7d6f"
+                style={styles.input}
+              />
+              <View style={styles.tableGrid}>
+                {TABLE_OPTIONS.map((table) => (
+                  <Pressable
+                    key={table}
+                    style={[styles.tableChip, tableNumber === table ? styles.tableChipActive : null]}
+                    onPress={() => {
+                      setTableNumber(table);
+                      saveDraftOrder({ tableNumber: table });
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.tableChipText,
+                        tableNumber === table ? styles.tableChipTextActive : null
+                      ]}
+                    >
+                      Mesa {table}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : (
+            <Text style={styles.serverBadge}>
+              {serviceType === 'domicilio' ? 'Pedido a domicilio' : 'Pedido para llevar'}
+            </Text>
+          )}
 
           <View style={styles.commentCard}>
             <Text style={styles.sectionTitle}>

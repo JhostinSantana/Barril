@@ -14,6 +14,56 @@ export const DEFAULT_MENU_VERSION = "2026-05-18-menu-piernitas-fuerte-v2";
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
 
+export function normalizeServiceType(value) {
+  const raw = `${value ?? ""}`.trim().toLowerCase();
+  if (raw === "domicilio" || raw === "delivery") return "domicilio";
+  if (raw === "para_llevar" || raw === "llevar" || raw === "takeaway") {
+    return "para_llevar";
+  }
+  return "mesa";
+}
+
+export function isPickupServiceType(serviceType) {
+  return serviceType === "domicilio" || serviceType === "para_llevar";
+}
+
+export function getServiceTypeLabel(serviceType) {
+  if (serviceType === "domicilio") return "Domicilio";
+  if (serviceType === "para_llevar") return "Para llevar";
+  return "Mesa";
+}
+
+export function defaultTableForServiceType(serviceType) {
+  if (serviceType === "domicilio") return "DOMICILIO";
+  if (serviceType === "para_llevar") return "PARA LLEVAR";
+  return "";
+}
+
+export function inferServiceTypeFromTable(tableNumber) {
+  const normalized = `${tableNumber ?? ""}`.trim().toUpperCase();
+  if (normalized === "DOMICILIO" || normalized.includes("DOMICILIO")) {
+    return "domicilio";
+  }
+  if (
+    normalized === "PARA LLEVAR" ||
+    normalized.includes("PARA LLEVAR") ||
+    normalized === "LLEVAR"
+  ) {
+    return "para_llevar";
+  }
+  return "mesa";
+}
+
+export function formatOrderLocation(order) {
+  const serviceType = normalizeServiceType(
+    order?.serviceType ?? inferServiceTypeFromTable(order?.tableNumber),
+  );
+  if (serviceType === "domicilio") return "Domicilio";
+  if (serviceType === "para_llevar") return "Para llevar";
+  const table = `${order?.tableNumber ?? ""}`.trim();
+  return table ? `Mesa ${table}` : "Mesa";
+}
+
 export function normalizeContainerQuantity(quantity) {
   const numericQuantity = Math.floor(Number(quantity) || 0);
   return numericQuantity > 0 ? numericQuantity : 1;

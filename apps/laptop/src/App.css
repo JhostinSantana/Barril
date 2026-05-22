@@ -693,3 +693,20 @@
   font-weight: 600;
   line-height: 1.35;
 }
+
+.service-type-row {
+  margin-top: 12px;
+}
+
+.service-type-label {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: #6f5e4d;
+  font-weight: 700;
+}
+
+.service-type-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

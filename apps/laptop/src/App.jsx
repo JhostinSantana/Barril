@@ -11,14 +11,22 @@ import {
     CONTAINER_EXPENSE_AMOUNT,
     CONTAINER_EXPENSE_DESCRIPTION,
     createContainerExpense,
+    formatOrderLocation,
+    inferServiceTypeFromTable,
     isContainerExpense,
     normalizeContainerQuantity,
+    normalizeServiceType,
 } from "../../server/src/utils.js";
 import "./App.css";
 
 const socket = io("http://localhost:4000", { autoConnect: false });
 const DELETE_ACCOUNT_PIN = "040420";
 const BOGOTA_TIME_ZONE = "America/Bogota";
+const SERVICE_TYPE_OPTIONS = [
+  { id: "mesa", label: "Mesa" },
+  { id: "domicilio", label: "Domicilio" },
+  { id: "para_llevar", label: "Para llevar" },
+];
 
 const navItems = [
   { id: "stats", label: "Estadistica" },
@@ -226,6 +234,7 @@ function App() {
     amount: "",
     tenderedAmount: "",
     transferenceNumber: "",
+    serviceType: "mesa",
   });
   const [stats, setStats] = useState({
     totalOrders: 0,
@@ -575,6 +584,9 @@ function App() {
       amount: `${balanceDue}`,
       tenderedAmount: `${balanceDue}`,
       transferenceNumber: "",
+      serviceType: normalizeServiceType(
+        order.serviceType ?? inferServiceTypeFromTable(order.tableNumber),
+      ),
     });
   }
 
@@ -585,6 +597,7 @@ function App() {
       amount: "",
       tenderedAmount: "",
       transferenceNumber: "",
+      serviceType: "mesa",
     });
   }
 
@@ -796,6 +809,7 @@ function App() {
     const payload = {
       paymentMethod: paymentDraft.paymentMethod,
       amount: paymentPreview.amount,
+      serviceType: normalizeServiceType(paymentDraft.serviceType),
       tenderedAmount:
         paymentDraft.paymentMethod === "efectivo"
           ? paymentPreview.tenderedAmount
@@ -1117,7 +1131,7 @@ function App() {
         <p><strong>ID:</strong> ${order.id}</p>
         <p><strong>Cliente:</strong> ${order.clientName}</p>
         <p><strong>Mesero:</strong> ${order.waiterName}</p>
-        <p><strong>Mesa:</strong> ${order.tableNumber}</p>
+        <p><strong>Ubicación:</strong> ${formatOrderLocation(order)}</p>
         <hr />
         <p><strong>Pedido</strong></p>
         <ul>
@@ -1343,10 +1357,11 @@ function App() {
                   <article key={order.id} className="order-card">
                     <div className="order-head">
                       <span>{order.id}</span>
-                      <span>Mesa {order.tableNumber}</span>
+                      <span>{formatOrderLocation(order)}</span>
                     </div>
                     <h4>{order.clientName}</h4>
                     <p>Mesero: {order.waiterName}</p>
+                    <p>Pedido: {formatOrderLocation(order)}</p>
                     <p>Estado: {getStatusLabel(order.status)}</p>
                     <p>Cocina: {getKitchenStatusLabel(order.kitchenStatus)}</p>
                     <ul>
@@ -2406,7 +2421,7 @@ function App() {
                               >
                                 <div className="order-head">
                                   <span>{order.id}</span>
-                                  <span>Mesa {order.tableNumber}</span>
+                                  <span>{formatOrderLocation(order)}</span>
                                 </div>
                                 <h4>{order.clientName}</h4>
                                 <p>Mesero: {order.waiterName}</p>
@@ -2439,7 +2454,7 @@ function App() {
                   >
                     <div className="order-head">
                       <span>{order.id}</span>
-                      <span>Mesa {order.tableNumber}</span>
+                      <span>{formatOrderLocation(order)}</span>
                     </div>
                     <h4>{order.clientName}</h4>
                     <p>Mesero: {order.waiterName}</p>
@@ -2667,8 +2682,31 @@ function App() {
           >
             <h3>Cobro por abonos</h3>
             <p>
-              {payingOrder.clientName} · Mesa {payingOrder.tableNumber}
+              {payingOrder.clientName} · {formatOrderLocation(payingOrder)}
             </p>
+
+            <div className="service-type-row">
+              <p className="service-type-label">Tipo de pedido</p>
+              <div className="service-type-options">
+                {SERVICE_TYPE_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={
+                      paymentDraft.serviceType === option.id ? "" : "ghost"
+                    }
+                    onClick={() =>
+                      setPaymentDraft((current) => ({
+                        ...current,
+                        serviceType: option.id,
+                      }))
+                    }
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {getComments(payingOrder).length > 0 ? (
               <div className="comment-card" style={{ marginTop: "10px" }}>
@@ -2877,8 +2915,8 @@ function App() {
             <div className="modal-header">
               <h3>Completar gramaje</h3>
               <p>
-                {weightModalOrder.clientName} · Mesa{" "}
-                {weightModalOrder.tableNumber}
+                {weightModalOrder.clientName} ·{" "}
+                {formatOrderLocation(weightModalOrder)}
               </p>
               <p style={{ color: "#6f5e4d", marginTop: 6, marginBottom: 0 }}>
                 El mesero solo selecciona el corte. Aqui el cajero define los
@@ -3057,8 +3095,8 @@ function App() {
             <div className="modal-header">
               <h3>Gastos adicionales</h3>
               <p>
-                {expenseModalOrder.clientName} · Mesa{" "}
-                {expenseModalOrder.tableNumber}
+                {expenseModalOrder.clientName} ·{" "}
+                {formatOrderLocation(expenseModalOrder)}
               </p>
               <p style={{ color: "#6f5e4d", marginTop: 6, marginBottom: 0 }}>
                 Registra uno o varios cargos extra y la caja recalculará el
@@ -3266,7 +3304,7 @@ function App() {
             <h3>Eliminar cuenta</h3>
             <p className="security-copy">
               {deleteOrderModal.order.id} · {deleteOrderModal.order.clientName}{" "}
-              · Mesa {deleteOrderModal.order.tableNumber}
+              · {formatOrderLocation(deleteOrderModal.order)}
             </p>
             <p className="security-note">
               Ingresa el PIN de seguridad para autorizar esta eliminación. La
@@ -3346,8 +3384,8 @@ function App() {
                 <>
                   <h3>Detalles de la comanda pagada</h3>
                   <p>
-                    {selectedPaidOrder.clientName} · Mesa{" "}
-                    {selectedPaidOrder.tableNumber}
+                    {selectedPaidOrder.clientName} ·{" "}
+                    {formatOrderLocation(selectedPaidOrder)}
                   </p>
 
                   {summary.length > 0 ? (

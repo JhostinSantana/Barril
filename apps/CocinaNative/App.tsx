@@ -57,6 +57,8 @@ type Pedido = {
   id: string;
   numeroMesa: string;
   nombreCliente: string;
+  serviceType?: string;
+  orderStatus?: string;
   items: PedidoItem[];
   comments: PedidoComment[];
   horaRecibido: string;
@@ -66,6 +68,17 @@ type Pedido = {
   kitchenFulfilledItems: Array<{menuItemId: string; nombre: string; quantity: number}>;
   estado: KitchenStatus;
 };
+
+function isPickupServiceType(serviceType: unknown) {
+  const value = String(serviceType ?? '').toLowerCase();
+  return value === 'domicilio' || value === 'para_llevar';
+}
+
+function getPedidoLocationLabel(pedido: Pick<Pedido, 'serviceType' | 'numeroMesa'>) {
+  if (pedido.serviceType === 'domicilio') return 'Domicilio';
+  if (pedido.serviceType === 'para_llevar') return 'Para llevar';
+  return `Mesa ${pedido.numeroMesa}`;
+}
 
 type PedidoVista = Pedido & {
   completadoEn?: number;
@@ -309,10 +322,24 @@ function mapServerOrderToKitchen(order: any): PedidoVista {
   const createdAt = String(order?.createdAt ?? new Date().toISOString());
   const editedAt = order?.editedAt ? String(order.editedAt) : null;
 
+  const tableLabel = normalizeTextId(order?.tableNumber ?? order?.numeroMesa, '0');
+  let serviceType = String(order?.serviceType ?? '').toLowerCase();
+  if (!serviceType) {
+    const tableUpper = tableLabel.toUpperCase();
+    if (tableUpper.includes('DOMICILIO')) serviceType = 'domicilio';
+    else if (tableUpper.includes('PARA LLEVAR') || tableUpper === 'LLEVAR') {
+      serviceType = 'para_llevar';
+    } else {
+      serviceType = 'mesa';
+    }
+  }
+
   return {
     id: normalizeTextId(order?.id ?? order?.orderId ?? order?._id, `pedido-${Date.now()}`),
     numeroMesa: normalizeTextId(order?.tableNumber ?? order?.numeroMesa, '0'),
     nombreCliente: String(order?.clientName ?? order?.nombreCliente ?? 'Cliente'),
+    serviceType: serviceType || undefined,
+    orderStatus: String(order?.status ?? ''),
     items,
     comments,
     createdAt,
@@ -514,7 +541,10 @@ export default function App(): React.JSX.Element {
       }
 
       const mapped = mapServerOrderToKitchen(rawOrder);
-      if (String(rawOrder.status ?? '') === 'paid') {
+      if (
+        String(rawOrder.status ?? '') === 'paid' &&
+        !isPickupServiceType(rawOrder.serviceType)
+      ) {
         setPedidos(current => current.filter(pedido => pedido.id !== mapped.id));
         return;
       }
@@ -867,7 +897,10 @@ export default function App(): React.JSX.Element {
             <View style={styles.detailHeader}>
               <View style={{flex: 1}}>
                 <Text style={styles.modalTitle}>Detalle completo del pedido</Text>
-                <Text style={styles.detailSubtitle}>Pedido #{pedidoModal?.id} • {pedidoModal?.nombreCliente} • Mesa {pedidoModal?.numeroMesa}</Text>
+                <Text style={styles.detailSubtitle}>
+                  Pedido #{pedidoModal?.id} • {pedidoModal?.nombreCliente} •{' '}
+                  {pedidoModal ? getPedidoLocationLabel(pedidoModal) : ''}
+                </Text>
               </View>
               <Pressable style={styles.closeButton} onPress={() => setPedidoActivo(null)}>
                 <Text style={styles.closeButtonText}>✕</Text>
@@ -1099,10 +1132,16 @@ const OrderCard = memo(function OrderCard({
             {item.nombreCliente}
           </Text>
           <Text style={styles.cardMeta} numberOfLines={2}>
-            Cola #{queuePosition} • Mesa {item.numeroMesa} • {style.label} • {item.horaRecibido}
+            Cola #{queuePosition} • {getPedidoLocationLabel(item)} • {style.label} •{' '}
+            {item.horaRecibido}
           </Text>
         </View>
         <View style={styles.cardTopBadges}>
+          {item.orderStatus === 'paid' ? (
+            <View style={[styles.badge, {backgroundColor: '#7c3aed'}]}>
+              <Text style={styles.badgeText}>Cobrado</Text>
+            </View>
+          ) : null}
           {fueModificado ? (
             <View style={styles.editBadge} accessibilityLabel="Comanda modificada">
               <Text style={styles.editBadgeIcon}>⚠️</Text>

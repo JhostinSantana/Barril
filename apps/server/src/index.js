@@ -33,12 +33,15 @@ import {
 import { printKitchenTicket } from "./printer.js";
 import {
     calculateOrderTotal,
+    defaultTableForServiceType,
     detectDuplicateOrders,
     getCashClose,
     getDateKey,
     getStats,
     getStatsSummary,
+    isPickupServiceType,
     normalizeOrderExpenses,
+    normalizeServiceType,
     preserveWeightFromCurrentOrder,
     summarizeItems,
 } from "./utils.js";
@@ -247,10 +250,14 @@ app.post("/api/orders", async (req, res, next) => {
     const { clientName, tableNumber, waiterName, items } = req.body;
     const comment = (req.body?.comment ?? "").toString().trim();
     const expenses = normalizeOrderExpenses(req.body?.expenses);
+    const serviceType = normalizeServiceType(req.body?.serviceType);
+    const resolvedTableNumber = isPickupServiceType(serviceType)
+      ? defaultTableForServiceType(serviceType)
+      : `${tableNumber ?? ""}`.trim();
 
     if (
       !clientName ||
-      !tableNumber ||
+      !resolvedTableNumber ||
       !waiterName ||
       !Array.isArray(items) ||
       items.length === 0
@@ -290,7 +297,8 @@ app.post("/api/orders", async (req, res, next) => {
     const order = {
       id: `COM-${nanoid(6).toUpperCase()}`,
       clientName,
-      tableNumber,
+      tableNumber: resolvedTableNumber,
+      serviceType,
       waiterName,
       status: "pending",
       kitchenStatus: "pendiente",
@@ -344,10 +352,16 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
       req.body?.expenses !== undefined
         ? normalizeOrderExpenses(req.body?.expenses)
         : undefined;
+    const serviceType = req.body?.serviceType != null
+      ? normalizeServiceType(req.body.serviceType)
+      : undefined;
+    const resolvedTableNumber = serviceType && isPickupServiceType(serviceType)
+      ? defaultTableForServiceType(serviceType)
+      : `${tableNumber ?? ""}`.trim();
 
     if (
       !clientName ||
-      !tableNumber ||
+      !resolvedTableNumber ||
       !waiterName ||
       !Array.isArray(items) ||
       items.length === 0
@@ -407,7 +421,8 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
     );
     const updatedOrder = await updateOrderWithItems(orderId, {
       clientName,
-      tableNumber,
+      tableNumber: resolvedTableNumber,
+      serviceType,
       waiterName,
       total,
       items: summarizedItems,
@@ -453,7 +468,10 @@ app.patch("/api/orders/:orderId/kitchen-status", async (req, res, next) => {
       return;
     }
 
-    if (currentOrder.status === "paid") {
+    if (
+      currentOrder.status === "paid" &&
+      !isPickupServiceType(currentOrder.serviceType)
+    ) {
       res
         .status(409)
         .json({
@@ -576,6 +594,10 @@ app.patch("/api/orders/:orderId/pay", async (req, res, next) => {
         : 0;
 
     const paidAt = new Date().toISOString();
+    const payServiceType =
+      req.body?.serviceType != null
+        ? normalizeServiceType(req.body.serviceType)
+        : null;
     const updatedOrder = await addOrderPayment(
       orderId,
       paymentMethod,
@@ -584,6 +606,7 @@ app.patch("/api/orders/:orderId/pay", async (req, res, next) => {
       changeGiven,
       paidAt,
       normalizedTransferNumber,
+      payServiceType,
     );
 
     io.emit("order:updated", updatedOrder);
