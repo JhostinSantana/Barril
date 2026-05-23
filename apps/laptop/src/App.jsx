@@ -12,8 +12,10 @@ import {
     CONTAINER_EXPENSE_DESCRIPTION,
     createContainerExpense,
     formatOrderLocation,
+    getServiceTypeLabel,
     inferServiceTypeFromTable,
     isContainerExpense,
+    isPickupServiceType,
     normalizeContainerQuantity,
     normalizeServiceType,
 } from "../../server/src/utils.js";
@@ -28,7 +30,6 @@ const DELETE_ACCOUNT_PIN = "040420";
 const BOGOTA_TIME_ZONE = "America/Bogota";
 const SERVICE_TYPE_OPTIONS = [
   { id: "mesa", label: "Mesa" },
-  { id: "domicilio", label: "Domicilio" },
   { id: "para_llevar", label: "Para llevar" },
 ];
 
@@ -124,6 +125,14 @@ function getKitchenStatusLabel(status) {
   if (status === "completado") return "Lista";
   if (status === "en_preparacion") return "En preparación";
   return "Pendiente";
+}
+
+function isPickupAwaitingDispatch(order) {
+  return (
+    isPickupServiceType(order?.serviceType) &&
+    order?.status === "paid" &&
+    !order?.dispatchedAt
+  );
 }
 
 function describePayment(order) {
@@ -316,6 +325,16 @@ function App() {
         order.tableNumber.toLowerCase().includes(q),
     );
   }, [pendingOrders, query]);
+
+  const pickupAwaitingDispatch = useMemo(
+    () => paidOrders.filter(isPickupAwaitingDispatch),
+    [paidOrders],
+  );
+
+  const paidOrdersForDisplay = useMemo(
+    () => paidOrders.filter((order) => !isPickupAwaitingDispatch(order)),
+    [paidOrders],
+  );
 
   const paymentPreview = useMemo(() => {
     if (!payingOrder) {
@@ -739,7 +758,7 @@ function App() {
 
     if (hasIncompleteExpense || hasInvalidContainer) {
       setExpenseModalError(
-        "Completa la descripciÃ³n y el valor de cada gasto antes de guardar.",
+        "Completa la descripción y el valor de cada gasto antes de guardar.",
       );
       return;
     }
@@ -819,6 +838,29 @@ function App() {
       loadStatsView(),
       loadHistoryView(historyDate),
     ]);
+  }
+
+  async function markOrderDispatched(order) {
+    if (!order?.id) return;
+
+    const confirmed = window.confirm(
+      `Marcar como despachado ${order.id} (${order.clientName})? Desaparecera de esta pantalla.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await getJson(`/api/orders/${order.id}/dispatch`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+      });
+      await Promise.all([
+        loadCashView(),
+        loadStatsView(),
+        loadHistoryView(historyDate),
+      ]);
+    } catch (error) {
+      window.alert(error.message ?? "No se pudo marcar como despachado.");
+    }
   }
 
   async function registerPayment() {
@@ -956,14 +998,14 @@ function App() {
     try {
       payload = JSON.parse(text);
     } catch {
-      setNetworkStatus("Archivo JSON invÃ¡lido.");
+      setNetworkStatus("Archivo JSON inválido.");
       return;
     }
 
     setConfirmModal({
       title: "Restaurar datos desde archivo",
       message:
-        "Esto reemplazarÃ¡ los datos actuales con los contenidos del archivo. Â¿Deseas continuar?",
+        "Esto reemplazará los datos actuales con los contenidos del archivo. ¿Deseas continuar?",
       action: async () => {
         try {
           await getJson("/api/restore/json", {
@@ -971,7 +1013,7 @@ function App() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
-          setNetworkStatus("RestauraciÃ³n completada. Recargando...");
+          setNetworkStatus("Restauración completada. Recargando...");
           await loadCashView();
           await loadStatsView();
           setRestoreFileInputKey(Date.now());
@@ -988,7 +1030,7 @@ function App() {
     setConfirmModal({
       title: "Compactar base de datos",
       message:
-        "Ejecutar VACUUM compactarÃ¡ el archivo SQLite y puede tardar algunos segundos. Â¿Continuar?",
+        "Ejecutar VACUUM compactará el archivo SQLite y puede tardar algunos segundos. ¿Continuar?",
       action: async () => {
         try {
           await getJson("/api/db/vacuum", { method: "POST" });
@@ -1004,8 +1046,8 @@ function App() {
 
   function openCleanupModal() {
     setConfirmModal({
-      title: "âš ï¸ Limpiar base de datos",
-      message: `Se borrarÃ¡n TODOS los pedidos anteriores a: ${cleanupDateInput}. Esta acciÃ³n es irreversible.`,
+      title: "Limpiar base de datos",
+      message: `Se borrarán TODOS los pedidos anteriores a: ${cleanupDateInput}. Esta acción es irreversible.`,
       hasDateInput: true,
       action: async () => {
         if (!cleanupDateInput) {
@@ -1019,12 +1061,12 @@ function App() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ before: cleanupDateInput }),
           });
-          setNetworkStatus("âœ“ Limpieza completada.");
+          setNetworkStatus("Limpieza completada.");
           setConfirmModal(null);
           await loadCashView();
           await loadStatsView();
         } catch (err) {
-          setNetworkStatus(`âœ— Error limpiando: ${err.message}`);
+          setNetworkStatus(`Error limpiando: ${err.message}`);
         } finally {
           setLoading(false);
         }
@@ -1036,9 +1078,9 @@ function App() {
 
   function openCleanupAllModal() {
     setConfirmModal({
-      title: "ðŸ—‘ï¸ LIMPIAR TODO - PUNTO CERO",
+      title: "LIMPIAR TODO - PUNTO CERO",
       message:
-        "âš ï¸ ADVERTENCIA: Se eliminarÃ¡ TODA la base de datos (pedidos, pagos, todo). La aplicaciÃ³n quedarÃ¡ como nueva. Â¿EstÃ¡s seguro?",
+        "ADVERTENCIA: Se eliminará TODA la base de datos (pedidos, pagos, todo). La aplicación quedará como nueva. ¿Estás seguro?",
       action: async () => {
         try {
           setLoading(true);
@@ -1046,18 +1088,18 @@ function App() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
           });
-          setNetworkStatus("âœ“ Base de datos limpiada completamente.");
+          setNetworkStatus("Base de datos limpiada completamente.");
           setConfirmModal(null);
           setDayDetailModal(null);
           await loadCashView();
           await loadStatsView();
         } catch (err) {
-          setNetworkStatus(`âœ— Error limpiando todo: ${err.message}`);
+          setNetworkStatus(`Error limpiando todo: ${err.message}`);
         } finally {
           setLoading(false);
         }
       },
-      confirmText: "SÃ, LIMPIAR TODO",
+      confirmText: "SÍ, LIMPIAR TODO",
       cancelText: "Cancelar",
       isDanger: true,
     });
@@ -1148,7 +1190,7 @@ function App() {
         <p><strong>ID:</strong> ${order.id}</p>
         <p><strong>Cliente:</strong> ${order.clientName}</p>
         <p><strong>Mesero:</strong> ${order.waiterName}</p>
-        <p><strong>UbicaciÃ³n:</strong> ${formatOrderLocation(order)}</p>
+        <p><strong>Ubicación:</strong> ${formatOrderLocation(order)}</p>
         <hr />
         <p><strong>Pedido</strong></p>
         <ul>
@@ -1213,6 +1255,7 @@ function App() {
     socket.on("order:updated", refreshOrderViews);
     socket.on("order:kitchen-updated", refreshOrderViews);
     socket.on("order:paid", refreshOrderViews);
+    socket.on("order:dispatched", refreshOrderViews);
 
     loadCashView();
     loadStatsView();
@@ -1225,6 +1268,7 @@ function App() {
       socket.off("order:updated", refreshOrderViews);
       socket.off("order:kitchen-updated", refreshOrderViews);
       socket.off("order:paid", refreshOrderViews);
+      socket.off("order:dispatched", refreshOrderViews);
       socket.disconnect();
     };
   }, [
@@ -1264,7 +1308,10 @@ function App() {
 
         <div className="sidebar-footer">
           <span>{pendingOrders.length} cuentas pendientes</span>
-          <span>{paidOrders.length} pagadas</span>
+          <span>{paidOrdersForDisplay.length} pagadas</span>
+          {pickupAwaitingDispatch.length > 0 ? (
+            <span>{pickupAwaitingDispatch.length} por despachar</span>
+          ) : null}
           <span>API: {apiBaseUrl}</span>
           <span>IP local: {networkInfo.localIp || "cargando..."}</span>
           <div className="sidebar-actions" style={{ marginTop: 8 }}>
@@ -1293,10 +1340,10 @@ function App() {
               type="button"
               className="danger"
               onClick={openCleanupAllModal}
-              title="âš ï¸ Limpiar TODO - punto cero"
+              title="Limpiar TODO - punto cero"
               style={{ fontSize: "0.75rem" }}
             >
-              ðŸ—‘ï¸ Limpiar todo
+              Limpiar todo
             </button>
             <label className="file-restore-label">
               <input
@@ -1500,7 +1547,7 @@ function App() {
                                 fontSize: "12px",
                               }}
                             >
-                              {comment.author || "Mesero"} Â·{" "}
+                              {comment.author || "Mesero"} ·{" "}
                               {new Date(comment.createdAt).toLocaleString(
                                 "es-CO",
                               )}
@@ -1571,9 +1618,66 @@ function App() {
               })}
             </div>
 
+            {pickupAwaitingDispatch.length > 0 ? (
+              <>
+                <h3 className="group-title">Por despachar</h3>
+                <p className="dispatch-hint">
+                  Pedidos para llevar ya cobrados. Marcalos como despachados
+                  cuando salgan del local.
+                </p>
+                <div className="card-grid">
+                  {pickupAwaitingDispatch.map((order) => (
+                    <article
+                      key={order.id}
+                      className="order-card order-card-dispatch"
+                    >
+                      <div className="order-head">
+                        <span>{order.id}</span>
+                        <span className="dispatch-type-badge">
+                          {getServiceTypeLabel(
+                            normalizeServiceType(order.serviceType),
+                          )}
+                        </span>
+                      </div>
+                      <h4>{order.clientName}</h4>
+                      <p>Mesero: {order.waiterName}</p>
+                      <p>Cocina: {getKitchenStatusLabel(order.kitchenStatus)}</p>
+                      <p className="total">
+                        Total cobrado: {formatCurrency(order.total)}
+                      </p>
+                      <p>{describePayment(order)}</p>
+                      <div className="actions">
+                        <button
+                          type="button"
+                          className="dispatch-button"
+                          onClick={() => markOrderDispatched(order)}
+                        >
+                          Despachado
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => setSelectedPaidOrder(order)}
+                        >
+                          Ver detalle
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => printKitchenTicket(order)}
+                        >
+                          Ticket cocina
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
             <h3 className="group-title">Pagadas hoy</h3>
             <div className="card-grid compact">
-              {paidOrders.slice(0, 12).map((order) => (
+              {paidOrdersForDisplay.slice(0, 12).map((order) => (
                 <article
                   key={order.id}
                   className="paid-card"
@@ -1582,7 +1686,7 @@ function App() {
                 >
                   <p>{order.clientName}</p>
                   <span>
-                    {describePayment(order)} Â· {formatCurrency(order.total)}
+                    {describePayment(order)} · {formatCurrency(order.total)}
                   </span>
                 </article>
               ))}
@@ -1912,16 +2016,16 @@ function App() {
                   Ver fecha
                 </button>
                 <button type="button" onClick={() => loadRecentHistory(7)}>
-                  {loadingHistory ? "Cargando..." : "Ãšltimos 7 dÃ­as"}
+                  {loadingHistory ? "Cargando..." : "�altimos 7 días"}
                 </button>
                 <button
                   type="button"
                   className="ghost"
                   onClick={() =>
                     setConfirmModal({
-                      title: "Â¿Limpiar historial?",
+                      title: "¿Limpiar historial?",
                       message:
-                        "Se borrarÃ¡n todos los datos del historial mostrado. Esta acciÃ³n no tiene vuelta atrÃ¡s.",
+                        "Se borrarán todos los datos del historial mostrado. Esta acción no tiene vuelta atrás.",
                       action: () => {
                         setConfirmModal(null);
                         setHistoryGrouped([]);
@@ -2012,7 +2116,7 @@ function App() {
                             })}
                           </div>
                           <div style={{ color: "#8c7d6f", fontSize: 12 }}>
-                            DÃ­a {group.date}
+                            Día {group.date}
                           </div>
                         </div>
                         <div style={{ display: "flex", gap: 12 }}>
@@ -2073,7 +2177,7 @@ function App() {
                           }}
                         >
                           <strong style={{ color: "#3d3d3d", fontSize: 13 }}>
-                            Caja del dÃ­a
+                            Caja del día
                           </strong>
                           <span style={{ color: "#6f5e4d", fontSize: 12 }}>
                             {formatCurrency(dayPaymentTotal)}
@@ -2162,7 +2266,7 @@ function App() {
                         <div className="card-grid">
                           {group.orders.length === 0 ? (
                             <p className="empty">
-                              No hay comandas para este dÃ­a.
+                              No hay comandas para este día.
                             </p>
                           ) : (
                             group.orders.map((order) => (
@@ -2352,7 +2456,7 @@ function App() {
               </article>
 
               <article className="order-card">
-                <h4>CÃ³digo QR</h4>
+                <h4>Código QR</h4>
                 {networkInfo.localApiUrl ? (
                   <div
                     style={{
@@ -2371,7 +2475,7 @@ function App() {
                       <QRCode value={networkInfo.localApiUrl} />
                     </div>
                     <p style={{ marginTop: 8 }}>
-                      Escanea este cÃ³digo con la app mÃ³vil para conectar
+                      Escanea este código con la app móvil para conectar
                     </p>
                   </div>
                 ) : (
@@ -2435,7 +2539,7 @@ function App() {
           >
             <h3>Cobro por abonos</h3>
             <p>
-              {payingOrder.clientName} Â· {formatOrderLocation(payingOrder)}
+              {payingOrder.clientName} · {formatOrderLocation(payingOrder)}
             </p>
 
             <div className="service-type-row">
@@ -2487,7 +2591,7 @@ function App() {
                         fontSize: "12px",
                       }}
                     >
-                      {comment.author || "Mesero"} Â·{" "}
+                      {comment.author || "Mesero"} ·{" "}
                       {new Date(comment.createdAt).toLocaleString("es-CO")}
                     </p>
                   </div>
@@ -2610,7 +2714,7 @@ function App() {
             {paymentDraft.paymentMethod === "transferencia" ? (
               <div className="field-row">
                 <label htmlFor="payment-transfer-number">
-                  NÃºmero de transferencia
+                  Número de transferencia
                 </label>
                 <input
                   id="payment-transfer-number"
@@ -2668,7 +2772,7 @@ function App() {
             <div className="modal-header">
               <h3>Completar gramaje</h3>
               <p>
-                {weightModalOrder.clientName} Â·{" "}
+                {weightModalOrder.clientName} ·{" "}
                 {formatOrderLocation(weightModalOrder)}
               </p>
               <p style={{ color: "#6f5e4d", marginTop: 6, marginBottom: 0 }}>
@@ -2848,12 +2952,12 @@ function App() {
             <div className="modal-header">
               <h3>Gastos adicionales</h3>
               <p>
-                {expenseModalOrder.clientName} Â·{" "}
+                {expenseModalOrder.clientName} ·{" "}
                 {formatOrderLocation(expenseModalOrder)}
               </p>
               <p style={{ color: "#6f5e4d", marginTop: 6, marginBottom: 0 }}>
-                Registra uno o varios cargos extra y la caja recalcularÃ¡ el
-                total automÃ¡ticamente.
+                Registra uno o varios cargos extra y la caja recalculará el
+                total automáticamente.
               </p>
             </div>
 
@@ -2876,7 +2980,7 @@ function App() {
                   >
                     <div className="field-row">
                       <label htmlFor={`expense-description-${index}`}>
-                        DescripciÃ³n
+                        Descripción
                       </label>
                       <input
                         id={`expense-description-${index}`}
@@ -3003,7 +3107,7 @@ function App() {
                     fontWeight: 700,
                   }}
                 >
-                  Selecciona la fecha lÃ­mite:
+                  Selecciona la fecha límite:
                 </label>
                 <input
                   type="date"
@@ -3056,12 +3160,12 @@ function App() {
             <p className="security-flag">Acceso restringido</p>
             <h3>Eliminar cuenta</h3>
             <p className="security-copy">
-              {deleteOrderModal.order.id} Â· {deleteOrderModal.order.clientName}{" "}
-              Â· {formatOrderLocation(deleteOrderModal.order)}
+              {deleteOrderModal.order.id} · {deleteOrderModal.order.clientName}{" "}
+              · {formatOrderLocation(deleteOrderModal.order)}
             </p>
             <p className="security-note">
-              Ingresa el PIN de seguridad para autorizar esta eliminaciÃ³n. La
-              acciÃ³n no se puede deshacer.
+              Ingresa el PIN de seguridad para autorizar esta eliminación. La
+              acción no se puede deshacer.
             </p>
 
             <form
@@ -3087,7 +3191,7 @@ function App() {
                         : current,
                     )
                   }
-                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢"
+                  placeholder="⬢⬢⬢⬢⬢⬢"
                   disabled={deleteOrderModal.loading}
                 />
               </div>
@@ -3137,7 +3241,7 @@ function App() {
                 <>
                   <h3>Detalles de la comanda pagada</h3>
                   <p>
-                    {selectedPaidOrder.clientName} Â·{" "}
+                    {selectedPaidOrder.clientName} ·{" "}
                     {formatOrderLocation(selectedPaidOrder)}
                   </p>
 
@@ -3243,7 +3347,7 @@ function App() {
                               fontSize: "12px",
                             }}
                           >
-                            {comment.author || "Mesero"} Â·{" "}
+                            {comment.author || "Mesero"} ·{" "}
                             {new Date(comment.createdAt).toLocaleString(
                               "es-CO",
                             )}
@@ -3333,8 +3437,8 @@ function App() {
                         >
                           <p style={{ margin: "0 0 4px 0", fontWeight: "700" }}>
                             {payment.paymentMethod === "efectivo"
-                              ? "ðŸ’µ Efectivo"
-                              : "ðŸ¦ Transferencia"}
+                              ? "Efectivo"
+                              : "Transferencia"}
                           </p>
                           <p style={{ margin: "0 0 2px 0", color: "#2f2319" }}>
                             Monto: {formatCurrency(payment.amount)}
@@ -3456,7 +3560,7 @@ function App() {
                 {dayDetailModal.paymentMethods &&
                 dayDetailModal.paymentMethods.length > 0 ? (
                   <div style={{ marginBottom: 16 }}>
-                    <h4 style={{ margin: "0 0 10px" }}>MÃ©todos de pago</h4>
+                    <h4 style={{ margin: "0 0 10px" }}>Métodos de pago</h4>
                     <div style={{ display: "grid", gap: 8 }}>
                       {dayDetailModal.paymentMethods.map((pm) => (
                         <div
@@ -3476,8 +3580,8 @@ function App() {
                             }}
                           >
                             {pm.method === "efectivo"
-                              ? "ðŸ’µ Efectivo"
-                              : "ðŸ¦ Transferencia"}
+                              ? "Efectivo"
+                              : "Transferencia"}
                           </span>
                           <strong>{formatCurrency(pm.total)}</strong>
                         </div>
@@ -3489,7 +3593,7 @@ function App() {
                 {dayDetailModal.topDishes &&
                 dayDetailModal.topDishes.length > 0 ? (
                   <div style={{ marginBottom: 16 }}>
-                    <h4 style={{ margin: "0 0 10px" }}>Platos mÃ¡s vendidos</h4>
+                    <h4 style={{ margin: "0 0 10px" }}>Platos más vendidos</h4>
                     <div style={{ display: "grid", gap: 8 }}>
                       {dayDetailModal.topDishes.map((dish, idx) => (
                         <div

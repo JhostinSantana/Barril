@@ -131,6 +131,7 @@ function mapOrderRow(row, items, payments) {
     expensesTotal: calculateExpensesTotal(expenses),
     createdAt: row.created_at,
     paidAt: row.paid_at,
+    dispatchedAt: row.dispatched_at ?? null,
     editSummary,
     editedAt: row.edited_at,
     comments,
@@ -377,21 +378,27 @@ export async function initializeDatabase() {
   if (!orderColumnsAfterKitchen.some((column) => column.name === 'service_type')) {
     await run("ALTER TABLE orders ADD COLUMN service_type TEXT NOT NULL DEFAULT 'mesa'");
   }
+  const orderColumnsAfterServiceType = await all('PRAGMA table_info(orders)');
+  if (!orderColumnsAfterServiceType.some((column) => column.name === 'dispatched_at')) {
+    await run('ALTER TABLE orders ADD COLUMN dispatched_at TEXT');
+  }
 
   await run(`
     UPDATE orders
-    SET service_type = 'domicilio'
+    SET service_type = 'para_llevar',
+        table_number = 'PARA LLEVAR'
     WHERE service_type = 'mesa'
-      AND UPPER(TRIM(table_number)) LIKE '%DOMICILIO%'
+      AND (
+        UPPER(TRIM(table_number)) LIKE '%DOMICILIO%'
+        OR UPPER(TRIM(table_number)) LIKE '%PARA LLEVAR%'
+        OR UPPER(TRIM(table_number)) = 'LLEVAR'
+      )
   `);
   await run(`
     UPDATE orders
-    SET service_type = 'para_llevar'
-    WHERE service_type = 'mesa'
-      AND (
-        UPPER(TRIM(table_number)) LIKE '%PARA LLEVAR%'
-        OR UPPER(TRIM(table_number)) = 'LLEVAR'
-      )
+    SET service_type = 'para_llevar',
+        table_number = 'PARA LLEVAR'
+    WHERE service_type = 'domicilio'
   `);
 
   const completedWithoutSnapshot = await all(`
@@ -512,7 +519,33 @@ export async function initializeDatabase() {
   }
 
   await syncMissingMenuItems();
+  await syncMenuItemsFromDefault();
   await repairMispricedOpenOrders();
+}
+
+async function syncMenuItemsFromDefault() {
+  for (const [index, item] of DEFAULT_MENU.entries()) {
+    await run(
+      `UPDATE menu_items
+       SET name = ?, category = ?, price = ?, pricing_mode = ?, weight_formula = ?, sort_order = ?
+       WHERE id = ?`,
+      [
+        item.name,
+        item.category,
+        item.price,
+        item.pricingMode ?? 'fixed',
+        item.weightFormula ?? null,
+        index,
+        item.id
+      ]
+    );
+  }
+
+  await run(
+    `INSERT INTO settings(key, value) VALUES(?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ['menuVersion', DEFAULT_MENU_VERSION]
+  );
 }
 
 async function syncMissingMenuItems() {
@@ -806,6 +839,40 @@ export async function updateOrderWithItems(orderId, order) {
   return getOrderById(orderId);
 }
 
+async function ensureDispatchedAtColumn() {
+  const columns = await all('PRAGMA table_info(orders)');
+  if (!columns.some((column) => column.name === 'dispatched_at')) {
+    await run('ALTER TABLE orders ADD COLUMN dispatched_at TEXT');
+  }
+}
+
+export async function markOrderDispatched(orderId) {
+  await ensureDispatchedAtColumn();
+
+  const order = await getOrderById(orderId);
+  if (!order) return null;
+
+  if (!isPickupServiceType(order.serviceType)) {
+    const error = new Error('Solo pedidos para llevar se pueden despachar.');
+    error.code = 'NOT_PICKUP_ORDER';
+    throw error;
+  }
+
+  if (order.status !== 'paid') {
+    const error = new Error('La cuenta debe estar pagada antes de despachar.');
+    error.code = 'ORDER_NOT_PAID';
+    throw error;
+  }
+
+  if (order.dispatchedAt) {
+    return order;
+  }
+
+  const dispatchedAt = new Date().toISOString();
+  await run('UPDATE orders SET dispatched_at = ? WHERE id = ?', [dispatchedAt, orderId]);
+  return getOrderById(orderId);
+}
+
 export async function updateOrderKitchenStatus(orderId, kitchenStatus) {
   const currentOrder = await getOrderById(orderId);
   if (!currentOrder) return null;
@@ -877,7 +944,7 @@ export async function listOrdersForKitchen() {
     `SELECT * FROM orders
      WHERE (
        status IN ('pending', 'partial')
-       OR (status = 'paid' AND service_type IN ('domicilio', 'para_llevar'))
+       OR (status = 'paid' AND service_type = 'para_llevar')
      )
      ORDER BY created_at ASC`
   );

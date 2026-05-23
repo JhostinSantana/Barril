@@ -272,6 +272,30 @@ button.danger:hover {
   font-weight: 700;
 }
 
+.order-card-dispatch {
+  border-color: #c4b5fd;
+  background: linear-gradient(180deg, #ffffff, #f5f3ff);
+}
+
+.dispatch-hint {
+  margin: -4px 0 12px;
+  color: #6f5e4d;
+  font-size: 0.92rem;
+}
+
+.dispatch-type-badge {
+  font-weight: 800;
+  color: #6d28d9;
+}
+
+button.dispatch-button {
+  background: #6d28d9;
+}
+
+button.dispatch-button:hover {
+  background: #5b21b6;
+}
+
 .paid-card span {
   display: block;
   margin-top: 6px;

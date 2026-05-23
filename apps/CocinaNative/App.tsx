@@ -71,12 +71,16 @@ type Pedido = {
 
 function isPickupServiceType(serviceType: unknown) {
   const value = String(serviceType ?? '').toLowerCase();
-  return value === 'domicilio' || value === 'para_llevar';
+  return (
+    value === 'para_llevar' ||
+    value === 'domicilio' ||
+    value === 'delivery' ||
+    value === 'llevar'
+  );
 }
 
 function getPedidoLocationLabel(pedido: Pick<Pedido, 'serviceType' | 'numeroMesa'>) {
-  if (pedido.serviceType === 'domicilio') return 'Domicilio';
-  if (pedido.serviceType === 'para_llevar') return 'Para llevar';
+  if (isPickupServiceType(pedido.serviceType)) return 'Para llevar';
   return `Mesa ${pedido.numeroMesa}`;
 }
 
@@ -326,8 +330,11 @@ function mapServerOrderToKitchen(order: any): PedidoVista {
   let serviceType = String(order?.serviceType ?? '').toLowerCase();
   if (!serviceType) {
     const tableUpper = tableLabel.toUpperCase();
-    if (tableUpper.includes('DOMICILIO')) serviceType = 'domicilio';
-    else if (tableUpper.includes('PARA LLEVAR') || tableUpper === 'LLEVAR') {
+    if (
+      tableUpper.includes('DOMICILIO') ||
+      tableUpper.includes('PARA LLEVAR') ||
+      tableUpper === 'LLEVAR'
+    ) {
       serviceType = 'para_llevar';
     } else {
       serviceType = 'mesa';

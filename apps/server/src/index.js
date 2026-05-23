@@ -22,6 +22,7 @@ import {
     listOrdersByDate,
     listOrdersForKitchen,
     listWaiters,
+    markOrderDispatched,
     restoreData,
     setSetting,
     setWaiterActive,
@@ -486,6 +487,42 @@ app.patch("/api/orders/:orderId/kitchen-status", async (req, res, next) => {
   } catch (error) {
     if (error?.code === "INVALID_KITCHEN_STATUS") {
       res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.patch("/api/orders/:orderId/dispatch", async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const currentOrder = await getOrderById(orderId);
+    if (!currentOrder) {
+      res.status(404).json({ message: "Cuenta no encontrada." });
+      return;
+    }
+
+    const updatedOrder = await markOrderDispatched(orderId);
+    if (!updatedOrder) {
+      res.status(404).json({ message: "Cuenta no encontrada." });
+      return;
+    }
+
+    io.emit("order:dispatched", updatedOrder);
+    io.emit("order:updated", updatedOrder);
+    res.json(updatedOrder);
+  } catch (error) {
+    if (error?.code === "NOT_PICKUP_ORDER" || error?.code === "ORDER_NOT_PAID") {
+      res.status(409).json({ message: error.message });
+      return;
+    }
+
+    if (`${error?.message ?? ""}`.includes("dispatched_at")) {
+      res.status(500).json({
+        message:
+          "Falta actualizar la base de datos. Reinicia el servidor e intenta de nuevo.",
+      });
       return;
     }
 

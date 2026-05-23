@@ -23,7 +23,6 @@ const ENV_API_URL = typeof globalThis.process !== 'undefined'
 const TABLE_OPTIONS = Array.from({ length: 16 }, (_, index) => String(index + 1));
 const SERVICE_OPTIONS = [
   { id: 'mesa', label: 'Mesa' },
-  { id: 'domicilio', label: 'Domicilio' },
   { id: 'para_llevar', label: 'Para llevar' }
 ];
 
@@ -506,13 +505,11 @@ export default function App() {
 
   function selectServiceType(nextType) {
     const nextTable =
-      nextType === 'domicilio'
-        ? 'DOMICILIO'
-        : nextType === 'para_llevar'
-          ? 'PARA LLEVAR'
-          : TABLE_OPTIONS.includes(tableNumber)
-            ? tableNumber
-            : '';
+      nextType === 'para_llevar'
+        ? 'PARA LLEVAR'
+        : TABLE_OPTIONS.includes(tableNumber)
+          ? tableNumber
+          : '';
     setServiceType(nextType);
     setTableNumber(nextTable);
     saveDraftOrder({ serviceType: nextType, tableNumber: nextTable });
@@ -540,13 +537,14 @@ export default function App() {
       return acc;
     }, {});
 
+    const tableUpper = String(order.tableNumber ?? '').toUpperCase();
     const inferredService =
       order.serviceType ??
-      (String(order.tableNumber ?? '').toUpperCase().includes('DOMICILIO')
-        ? 'domicilio'
-        : String(order.tableNumber ?? '').toUpperCase().includes('PARA LLEVAR')
-          ? 'para_llevar'
-          : 'mesa');
+      (tableUpper.includes('DOMICILIO') ||
+      tableUpper.includes('PARA LLEVAR') ||
+      tableUpper === 'LLEVAR'
+        ? 'para_llevar'
+        : 'mesa');
 
     setSelectedOrderId(order.id);
     setClientName(order.clientName ?? '');
@@ -628,7 +626,7 @@ export default function App() {
         return;
       }
     } else if (!tableNumber.trim()) {
-      setStatus('Selecciona el tipo de pedido (domicilio o para llevar).');
+      setStatus('Selecciona el tipo de pedido para llevar.');
       return;
     }
 
@@ -910,9 +908,7 @@ export default function App() {
               </View>
             </>
           ) : (
-            <Text style={styles.serverBadge}>
-              {serviceType === 'domicilio' ? 'Pedido a domicilio' : 'Pedido para llevar'}
-            </Text>
+            <Text style={styles.serverBadge}>Pedido para llevar</Text>
           )}
 
           <View style={styles.commentCard}>

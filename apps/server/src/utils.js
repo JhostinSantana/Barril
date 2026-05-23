@@ -10,41 +10,43 @@ export {
 } from "./pricing.js";
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
-export const DEFAULT_MENU_VERSION = "2026-05-18-menu-piernitas-fuerte-v2";
+export const DEFAULT_MENU_VERSION = "2026-05-22-menu-cafe-postres-bestia-v1";
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
 
 export function normalizeServiceType(value) {
   const raw = `${value ?? ""}`.trim().toLowerCase();
-  if (raw === "domicilio" || raw === "delivery") return "domicilio";
-  if (raw === "para_llevar" || raw === "llevar" || raw === "takeaway") {
+  if (
+    raw === "domicilio" ||
+    raw === "delivery" ||
+    raw === "para_llevar" ||
+    raw === "llevar" ||
+    raw === "takeaway"
+  ) {
     return "para_llevar";
   }
   return "mesa";
 }
 
 export function isPickupServiceType(serviceType) {
-  return serviceType === "domicilio" || serviceType === "para_llevar";
+  return normalizeServiceType(serviceType) === "para_llevar";
 }
 
 export function getServiceTypeLabel(serviceType) {
-  if (serviceType === "domicilio") return "Domicilio";
-  if (serviceType === "para_llevar") return "Para llevar";
+  if (isPickupServiceType(serviceType)) return "Para llevar";
   return "Mesa";
 }
 
 export function defaultTableForServiceType(serviceType) {
-  if (serviceType === "domicilio") return "DOMICILIO";
-  if (serviceType === "para_llevar") return "PARA LLEVAR";
+  if (isPickupServiceType(serviceType)) return "PARA LLEVAR";
   return "";
 }
 
 export function inferServiceTypeFromTable(tableNumber) {
   const normalized = `${tableNumber ?? ""}`.trim().toUpperCase();
-  if (normalized === "DOMICILIO" || normalized.includes("DOMICILIO")) {
-    return "domicilio";
-  }
   if (
+    normalized === "DOMICILIO" ||
+    normalized.includes("DOMICILIO") ||
     normalized === "PARA LLEVAR" ||
     normalized.includes("PARA LLEVAR") ||
     normalized === "LLEVAR"
@@ -58,7 +60,6 @@ export function formatOrderLocation(order) {
   const serviceType = normalizeServiceType(
     order?.serviceType ?? inferServiceTypeFromTable(order?.tableNumber),
   );
-  if (serviceType === "domicilio") return "Domicilio";
   if (serviceType === "para_llevar") return "Para llevar";
   const table = `${order?.tableNumber ?? ""}`.trim();
   return table ? `Mesa ${table}` : "Mesa";
@@ -125,6 +126,13 @@ export const DEFAULT_MENU = [
     name: "PATACONES",
     category: "PICADITAS CERDO",
     price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "fuerte-bestia",
+    name: "PICADITA ESPECIAL LA BESTIA",
+    category: "PICADITAS CERDO",
+    price: 24.0,
     pricingMode: "fixed",
   },
 
@@ -198,6 +206,21 @@ export const DEFAULT_MENU = [
     price: 10.0,
     pricingMode: "fixed",
   },
+  {
+    id: "bebida-cafe",
+    name: "CAFE",
+    category: "BEBIDAS",
+    price: 0.75,
+    pricingMode: "fixed",
+  },
+
+  {
+    id: "postres-porcion",
+    name: "POSTRES",
+    category: "POSTRES",
+    price: 1.5,
+    pricingMode: "fixed",
+  },
 
   {
     id: "fuerte-taco-taco",
@@ -232,13 +255,6 @@ export const DEFAULT_MENU = [
     name: "PIERNITAS DE POLLO",
     category: "PLATOS FUERTES",
     price: 6.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-bestia",
-    name: "PICADITA ESPECIAL LA BESTIA",
-    category: "PLATOS FUERTES",
-    price: 24.0,
     pricingMode: "fixed",
   },
 
@@ -337,7 +353,7 @@ export const DEFAULT_MENU = [
     id: "extra-papas-fritas",
     name: "PORCION DE PAPAS FRITAS",
     category: "PORCIONES EXTRA",
-    price: 2.0,
+    price: 2.5,
     pricingMode: "fixed",
   },
   {
