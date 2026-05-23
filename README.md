@@ -159,6 +159,7 @@ Antes de desplegar:
 2. Define en GitHub Secrets:
    - `VITE_API_BASE_URL`
    - `VITE_SOCKET_URL`
-3. Ejecuta el workflow de Pages o el build de `apps/laptop`.
+3. En GitHub, entra a `Settings > Pages` y deja la fuente en `GitHub Actions`.
+4. Ejecuta el workflow de Pages o el build de `apps/laptop`.
 
 La URL del sitio en este repositorio queda bajo `/Barril/`.

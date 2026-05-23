@@ -18,6 +18,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
       VITE_SOCKET_URL: ${{ secrets.VITE_SOCKET_URL }}
@@ -28,14 +29,20 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
 
       - name: Install dependencies
         run: npm ci
 
       - name: Build laptop app
         run: npm --workspace apps/laptop run build
+
+      - name: Disable Jekyll
+        run: touch apps/laptop/dist/.nojekyll
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -45,6 +52,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
