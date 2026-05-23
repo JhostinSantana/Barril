@@ -157,8 +157,8 @@ Antes de desplegar:
 
 1. Publica `apps/server` en un host accesible desde internet.
 2. Define en GitHub Secrets:
-	- `VITE_API_BASE_URL`
-	- `VITE_SOCKET_URL`
+   - `VITE_API_BASE_URL`
+   - `VITE_SOCKET_URL`
 3. Ejecuta el workflow de Pages o el build de `apps/laptop`.
 
 La URL del sitio en este repositorio queda bajo `/Barril/`.
