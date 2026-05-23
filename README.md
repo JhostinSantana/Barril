@@ -148,3 +148,17 @@ La laptop funciona como centro de operacion cuando ejecutas el backend en esa mi
 ```bash
 npm run build
 ```
+
+## GitHub Pages
+
+La app de `laptop` se puede publicar en GitHub Pages como sitio estatico, pero sigue necesitando una API publica para funcionar.
+
+Antes de desplegar:
+
+1. Publica `apps/server` en un host accesible desde internet.
+2. Define en GitHub Secrets:
+	- `VITE_API_BASE_URL`
+	- `VITE_SOCKET_URL`
+3. Ejecuta el workflow de Pages o el build de `apps/laptop`.
+
+La URL del sitio en este repositorio queda bajo `/Barril/`.

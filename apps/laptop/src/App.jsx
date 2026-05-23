@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { QRCode } from "react-qr-code";
 import { io } from "socket.io-client";
@@ -19,8 +19,13 @@ import {
 } from "../../server/src/utils.js";
 import "./App.css";
 
-const socket = io("http://localhost:4000", { autoConnect: false });
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:4000";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL?.trim() || API_BASE_URL;
+
+const socket = io(SOCKET_URL, { autoConnect: false });
 const DELETE_ACCOUNT_PIN = "040420";
+const BOGOTA_TIME_ZONE = "America/Bogota";
 const SERVICE_TYPE_OPTIONS = [
   { id: "mesa", label: "Mesa" },
   { id: "domicilio", label: "Domicilio" },
@@ -28,6 +33,7 @@ const SERVICE_TYPE_OPTIONS = [
 ];
 
 const navItems = [
+  { id: "stats", label: "Estadistica" },
   { id: "cash", label: "Cierre de caja" },
   { id: "history", label: "Dias anteriores" },
   { id: "waiters", label: "Meseros" },
@@ -48,6 +54,21 @@ function parseMoneyInput(rawValue) {
   const value = Number(cleaned);
   if (!Number.isFinite(value)) return 0;
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function getCurrentMonthRange() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BOGOTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(now);
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? 0);
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? 0);
+  return {
+    from: new Date(Date.UTC(year, month - 1, 1, 5, 0, 0, 0)).toISOString(),
+    to: new Date(Date.UTC(year, month, 1, 4, 59, 59, 999)).toISOString(),
+  };
 }
 
 function getWeightDraftValues(draftValue, quantity, fallbackWeight) {
@@ -71,6 +92,12 @@ function formatWeightBreakdown(item) {
   return item?.weightGrams != null ? `${item.weightGrams} g` : "";
 }
 
+function getSalesIntensityStyle(value, maxValue) {
+  if (!maxValue) return { "--bar-fill": "0%" };
+  const normalized = Math.max((value / maxValue) * 100, value > 0 ? 8 : 0);
+  return { "--bar-fill": `${Math.min(normalized, 100)}%` };
+}
+
 function formatCalendarDayLabel(dateKey) {
   const [year, month, day] = `${dateKey ?? ""}`.split("-").map(Number);
   if (!year || !month || !day) return dateKey ?? "";
@@ -84,8 +111,7 @@ function formatCalendarDayLabel(dateKey) {
 }
 
 function getApiBaseUrl() {
-  if (typeof window === "undefined") return "http://localhost:4000";
-  return `${window.location.protocol}//${window.location.hostname}:4000`;
+  return API_BASE_URL;
 }
 
 function getStatusLabel(status) {
@@ -212,6 +238,36 @@ function App() {
     tenderedAmount: "",
     transferenceNumber: "",
     serviceType: "mesa",
+  });
+  const [stats, setStats] = useState({
+    totalOrders: 0,
+    totalPaidOrders: 0,
+    totalSales: 0,
+    containerSummary: {
+      quantity: 0,
+      revenue: 0,
+    },
+    monthLabel: "",
+    rangeLabel: "",
+    monthStartWeekday: 0,
+    topDishes: [],
+    bottomDishes: [],
+    categories: [],
+    paymentSummary: [],
+    quincenas: [],
+    calendarDays: [],
+  });
+  const [statsSummary, setStatsSummary] = useState({
+    today: {
+      efectivo: 0,
+      transferencia: 0,
+      total: 0,
+    },
+    historical: {
+      efectivo: 0,
+      transferencia: 0,
+      total: 0,
+    },
   });
   const [cashClose, setCashClose] = useState({
     date: "",
@@ -351,6 +407,21 @@ function App() {
     };
   }, [payingOrder, paymentDraft]);
 
+  const beverageCategories = useMemo(
+    () => stats.categories.filter((category) => category.label === "BEBIDAS"),
+    [stats.categories],
+  );
+
+  const foodCategories = useMemo(
+    () => stats.categories.filter((category) => category.label !== "BEBIDAS"),
+    [stats.categories],
+  );
+
+  const maxPaymentAmount = useMemo(
+    () => Math.max(...stats.paymentSummary.map((item) => item.amount), 0),
+    [stats.paymentSummary],
+  );
+
   const hasPendingWeightValues = useMemo(() => {
     if (!weightModalOrder) return false;
     return weightModalOrder.items.some(
@@ -364,16 +435,16 @@ function App() {
     );
   }, [weightDrafts, weightModalOrder]);
 
-  async function getJson(url, options) {
+  const getJson = useCallback(async (url, options) => {
     const response = await fetch(url, options);
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
       throw new Error(errorBody.message ?? "Error de servidor");
     }
     return response.json();
-  }
+  }, []);
 
-  async function loadCashView() {
+  const loadCashView = useCallback(async () => {
     setLoading(true);
     try {
       const [menuData, pending, paid, close] = await Promise.all([
@@ -390,16 +461,22 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [getJson]);
 
-  async function loadStatsView() {
-    return;
-  }
+  const loadStatsView = useCallback(async () => {
+    const range = getCurrentMonthRange();
+    const [statsResult, summaryResult] = await Promise.all([
+      getJson(`/api/stats?from=${range.from}&to=${range.to}`),
+      getJson("/api/stats-summary"),
+    ]);
+    setStats(statsResult);
+    setStatsSummary(summaryResult);
+  }, [getJson]);
 
-  async function loadWaiters() {
+  const loadWaiters = useCallback(async () => {
     const result = await getJson("/api/waiters");
     setWaiters(Array.isArray(result) ? result : []);
-  }
+  }, [getJson]);
 
   async function saveWaiter() {
     const name = waiterNameDraft.trim().replace(/\s+/g, " ");
@@ -452,10 +529,13 @@ function App() {
     });
   }
 
-  async function loadHistoryView(date) {
-    const result = await getJson(`/api/orders/history?date=${date}`);
-    setHistoryOrders(result);
-  }
+  const loadHistoryView = useCallback(
+    async (date) => {
+      const result = await getJson(`/api/orders/history?date=${date}`);
+      setHistoryOrders(result);
+    },
+    [getJson],
+  );
 
   async function startNewDay() {
     try {
@@ -837,11 +917,11 @@ function App() {
     }
   }
 
-  async function loadNetworkInfo() {
+  const loadNetworkInfo = useCallback(async () => {
     const info = await getJson("/api/network-info");
     setNetworkInfo(info);
     setPublicApiDraft(info.publicApiUrl ?? "");
-  }
+  }, [getJson]);
 
   async function downloadJsonBackup() {
     setLoading(true);
@@ -1030,18 +1110,21 @@ function App() {
     setNetworkStatus(`No fue posible copiar ${label} automaticamente.`);
   }
 
-  async function triggerAutoPrint(order) {
-    try {
-      const result = await getJson(`/api/orders/${order.id}/print`, {
-        method: "POST",
-      });
-      if (!result.printed) {
-        setNetworkStatus(`Pedido ${order.id}: ${result.reason}`);
+  const triggerAutoPrint = useCallback(
+    async (order) => {
+      try {
+        const result = await getJson(`/api/orders/${order.id}/print`, {
+          method: "POST",
+        });
+        if (!result.printed) {
+          setNetworkStatus(`Pedido ${order.id}: ${result.reason}`);
+        }
+      } catch {
+        setNetworkStatus(`Pedido ${order.id}: fallo impresion automatica.`);
       }
-    } catch {
-      setNetworkStatus(`Pedido ${order.id}: fallo impresion automatica.`);
-    }
-  }
+    },
+    [getJson],
+  );
 
   function printKitchenTicket(order) {
     const { summary, editedIds } = getEditSummary(order);
@@ -1144,7 +1227,16 @@ function App() {
       socket.off("order:paid", refreshOrderViews);
       socket.disconnect();
     };
-  }, [historyDate, autoPrintEnabled]);
+  }, [
+    autoPrintEnabled,
+    historyDate,
+    loadCashView,
+    loadHistoryView,
+    loadNetworkInfo,
+    loadStatsView,
+    loadWaiters,
+    triggerAutoPrint,
+  ]);
 
   return (
     <div className="layout">
@@ -1494,6 +1586,311 @@ function App() {
                   </span>
                 </article>
               ))}
+            </div>
+          </section>
+        ) : null}
+
+        {activeView === "stats" ? (
+          <section>
+            <header className="section-header">
+              <div>
+                <h2>Estadistica mensual</h2>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  {stats.monthLabel || "Resumen del mes"} · {stats.rangeLabel || "Rango activo"}
+                </p>
+              </div>
+            </header>
+
+            <div className="stats-hero">
+              <article className="stats-banner">
+                <p className="eyebrow">Ventas y control</p>
+                <h3>Resumen coherente desde cobros reales, ranking y categorías</h3>
+                <p>
+                  Esta vista usa los datos del backend sin calendario ni fórmulas duplicadas.
+                </p>
+              </article>
+
+              <div className="kpi-grid stats-kpi-grid">
+                <article className="kpi-card">
+                  <h3>Comandas del mes</h3>
+                  <strong>{stats.totalOrders}</strong>
+                </article>
+                <article className="kpi-card">
+                  <h3>Comandas pagadas</h3>
+                  <strong>{stats.totalPaidOrders}</strong>
+                </article>
+                <article className="kpi-card">
+                  <h3>Ganancia total</h3>
+                  <strong>{formatCurrency(stats.totalSales)}</strong>
+                </article>
+                <article className="kpi-card">
+                  <h3>Contenedores vendidos</h3>
+                  <strong>{stats.containerSummary.quantity}</strong>
+                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                    {formatCurrency(stats.containerSummary.revenue)} ganados
+                  </p>
+                </article>
+              </div>
+            </div>
+
+            <section className="stats-panel" style={{ marginTop: 18 }}>
+              <div className="section-header stats-panel-head">
+                <h3>Cobros reales por método</h3>
+                <span className="stats-chip">Hoy vs histórico</span>
+              </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: 13,
+                  }}
+                >
+                  <thead>
+                    <tr style={{ background: "#f5ede3", borderBottom: "2px solid #e8d8c5" }}>
+                      <th style={{ padding: 12, textAlign: "left", fontWeight: 700, color: "#6f5e4d" }}>Método</th>
+                      <th style={{ padding: 12, textAlign: "center", fontWeight: 700, color: "#2f8f73" }}>Hoy</th>
+                      <th style={{ padding: 12, textAlign: "center", fontWeight: 700, color: "#2f8f73" }}>Histórico</th>
+                      <th style={{ padding: 12, textAlign: "center", fontWeight: 700, color: "#2f8f73" }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: "1px solid #f0e8e0" }}>
+                      <td style={{ padding: 12, fontWeight: 600 }}>Efectivo</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.efectivo)}</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.historical.efectivo)}</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.efectivo + statsSummary.historical.efectivo)}</td>
+                    </tr>
+                    <tr style={{ background: "#fafaf7" }}>
+                      <td style={{ padding: 12, fontWeight: 600 }}>Transferencia</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.transferencia)}</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.historical.transferencia)}</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.transferencia + statsSummary.historical.transferencia)}</td>
+                    </tr>
+                    <tr style={{ borderTop: "1px solid #f0e8e0" }}>
+                      <td style={{ padding: 12, fontWeight: 700 }}>Total</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.total)}</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.historical.total)}</td>
+                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.total + statsSummary.historical.total)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <div className="stats-split-grid" style={{ marginTop: 18 }}>
+              <section className="stats-panel">
+                <div className="section-header stats-panel-head">
+                  <h3>Comida y bebidas separadas</h3>
+                  <span className="stats-chip">Ranking por categoría</span>
+                </div>
+
+                <div className="stats-category-grid">
+                  <article className="stats-category-block stats-drink-block">
+                    <div className="stats-block-head">
+                      <div>
+                        <p className="stats-block-label">Bebidas</p>
+                        <h4>Bebidas vendidas</h4>
+                      </div>
+                      <span>{beverageCategories.length} categorías</span>
+                    </div>
+
+                    {beverageCategories.length > 0 ? (
+                      beverageCategories.map((category) => {
+                        const topItems = category.items.slice(0, 5);
+                        const maxItemQuantity = Math.max(...topItems.map((item) => item.quantity), 0);
+                        return (
+                          <article className="stats-chart-card" key={category.label}>
+                            <div className="stats-chart-head">
+                              <div>
+                                <h5>{category.label}</h5>
+                                <p>{category.quantity} vendidos</p>
+                              </div>
+                              <strong>{formatCurrency(category.revenue)}</strong>
+                            </div>
+                            <div className="stats-bar-list">
+                              {topItems.map((item) => (
+                                <div className="stats-bar-row" key={`${category.label}-${item.name}`}>
+                                  <div className="stats-bar-meta">
+                                    <span>{item.name}</span>
+                                    <small>{item.quantity} uds · {formatCurrency(item.revenue)}</small>
+                                  </div>
+                                  <div className="stats-bar-track">
+                                    <div className="stats-bar-fill" style={getSalesIntensityStyle(item.quantity, maxItemQuantity)} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </article>
+                        );
+                      })
+                    ) : (
+                      <p className="empty">Aun no hay ventas de bebidas en este periodo.</p>
+                    )}
+                  </article>
+
+                  <article className="stats-category-block stats-food-block">
+                    <div className="stats-block-head">
+                      <div>
+                        <p className="stats-block-label">Comida</p>
+                        <h4>Platos y complementos</h4>
+                      </div>
+                      <span>{foodCategories.length} categorías</span>
+                    </div>
+
+                    {foodCategories.length > 0 ? (
+                      foodCategories.map((category) => {
+                        const topItems = category.items.slice(0, 5);
+                        const maxItemQuantity = Math.max(...topItems.map((item) => item.quantity), 0);
+                        return (
+                          <article className="stats-chart-card" key={category.label}>
+                            <div className="stats-chart-head">
+                              <div>
+                                <h5>{category.label}</h5>
+                                <p>{category.quantity} vendidos</p>
+                              </div>
+                              <strong>{formatCurrency(category.revenue)}</strong>
+                            </div>
+                            <div className="stats-bar-list">
+                              {topItems.map((item) => (
+                                <div className="stats-bar-row" key={`${category.label}-${item.name}`}>
+                                  <div className="stats-bar-meta">
+                                    <span>{item.name}</span>
+                                    <small>{item.quantity} uds · {formatCurrency(item.revenue)}</small>
+                                  </div>
+                                  <div className="stats-bar-track">
+                                    <div className="stats-bar-fill" style={getSalesIntensityStyle(item.quantity, maxItemQuantity)} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </article>
+                        );
+                      })
+                    ) : (
+                      <p className="empty">Aun no hay ventas de comida en este periodo.</p>
+                    )}
+                  </article>
+                </div>
+              </section>
+
+              <section className="stats-panel">
+                <div className="section-header stats-panel-head">
+                  <h3>Ranking general y quincenal</h3>
+                  <span className="stats-chip">Más vendidos y menos vendidos</span>
+                </div>
+
+                <div className="ranking-grid">
+                  <article className="ranking-card">
+                    <h4>Ranking general</h4>
+                    <div className="rank-columns">
+                      <div>
+                        <p className="rank-column-label">Top vendidos</p>
+                        <ol className="rank-list">
+                          {stats.topDishes.map((dish, index) => (
+                            <li key={`${dish.name}-${index}`}>
+                              <span>{dish.name}</span>
+                              <div style={{ textAlign: "right" }}>
+                                <strong>{dish.quantity}</strong>
+                                <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                                  {formatCurrency(dish.revenue)}
+                                </small>
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                      <div>
+                        <p className="rank-column-label">Menos vendidos</p>
+                        <ol className="rank-list muted">
+                          {stats.bottomDishes.map((dish, index) => (
+                            <li key={`${dish.name}-${index}`}>
+                              <span>{dish.name}</span>
+                              <div style={{ textAlign: "right" }}>
+                                <strong>{dish.quantity}</strong>
+                                <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                                  {formatCurrency(dish.revenue)}
+                                </small>
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    </div>
+                  </article>
+
+                  {stats.quincenas.map((period) => (
+                    <article className="ranking-card" key={period.id}>
+                      <h4>{period.label}</h4>
+                      <div className="quincena-kpis">
+                        <div>
+                          <span>Pedidos</span>
+                          <strong>{period.orders}</strong>
+                        </div>
+                        <div>
+                          <span>Ganancia</span>
+                          <strong>{formatCurrency(period.totalSales)}</strong>
+                        </div>
+                      </div>
+                      <div className="rank-columns">
+                        <div>
+                          <p className="rank-column-label">Más vendidos</p>
+                          <ol className="rank-list">
+                            {period.topDishes.map((dish, index) => (
+                              <li key={`${period.id}-${dish.name}-top-${index}`}>
+                                <span>{dish.name}</span>
+                                <div style={{ textAlign: "right" }}>
+                                  <strong>{dish.quantity}</strong>
+                                  <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                                    {formatCurrency(dish.revenue)}
+                                  </small>
+                                </div>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                        <div>
+                          <p className="rank-column-label">Menos vendidos</p>
+                          <ol className="rank-list muted">
+                            {period.bottomDishes.map((dish, index) => (
+                              <li key={`${period.id}-${dish.name}-bottom-${index}`}>
+                                <span>{dish.name}</span>
+                                <div style={{ textAlign: "right" }}>
+                                  <strong>{dish.quantity}</strong>
+                                  <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                                    {formatCurrency(dish.revenue)}
+                                  </small>
+                                </div>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="payment-grid" style={{ marginTop: 18 }}>
+                  {stats.paymentSummary.map((method) => (
+                    <article className="payment-card" key={method.method}>
+                      <div className="payment-card-head">
+                        <div>
+                          <p>{method.label}</p>
+                          <span>{method.method === "efectivo" ? "Caja" : "Bancos"}</span>
+                        </div>
+                        <strong>{formatCurrency(method.amount)}</strong>
+                      </div>
+                      <div className="stats-bar-track payment-track">
+                        <div
+                          className="stats-bar-fill"
+                          style={getSalesIntensityStyle(method.amount, maxPaymentAmount)}
+                        />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
             </div>
           </section>
         ) : null}
