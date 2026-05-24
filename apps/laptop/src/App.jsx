@@ -33,6 +33,15 @@ const SERVICE_TYPE_OPTIONS = [
   { id: "para_llevar", label: "Para llevar" },
 ];
 
+function isPublicPagesView() {
+  if (typeof window === "undefined") return false;
+
+  return (
+    window.location.hostname.includes("github.io") ||
+    window.location.pathname.includes("/Casa-Rosa/")
+  );
+}
+
 const navItems = [
   { id: "stats", label: "Estadistica" },
   { id: "cash", label: "Cierre de caja" },
@@ -314,6 +323,7 @@ function App() {
   const [restoreFileInputKey, setRestoreFileInputKey] = useState(Date.now());
   const [dayDetailModal, setDayDetailModal] = useState(null);
   const [cleanupDateInput, setCleanupDateInput] = useState("2026-01-01");
+  const publicPagesView = isPublicPagesView();
 
   const filteredPending = useMemo(() => {
     if (!query.trim()) return pendingOrders;
@@ -1281,6 +1291,246 @@ function App() {
     loadWaiters,
     triggerAutoPrint,
   ]);
+
+  if (publicPagesView) {
+    const topPaidOrders = paidOrdersForDisplay.slice(0, 4);
+    const topDishes = stats.topDishes.slice(0, 5);
+    const bottomDishes = stats.bottomDishes.slice(0, 5);
+    const paymentTotal = stats.paymentSummary.reduce(
+      (acc, item) => acc + Number(item.amount ?? 0),
+      0,
+    );
+
+    return (
+      <main className="public-shell">
+        <header className="public-header">
+          <div>
+            <p className="eyebrow">Casa Rosa · dashboard público</p>
+            <h1 className="public-title">Ventas y ganancias en vivo</h1>
+            <p className="public-lead">
+              Esta página lee el estado sincronizado del servidor y muestra el
+              resumen público de pedidos, cobros y ranking.
+            </p>
+          </div>
+
+          <div className="public-status">
+            <span className={loading ? "public-status-dot loading" : "public-status-dot"} />
+            <span>{loading ? "Sincronizando" : "Conectado"}</span>
+          </div>
+        </header>
+
+        <div className="stats-hero">
+          <article className="stats-banner">
+            <p className="eyebrow">Resumen del día</p>
+            <h3>{formatCurrency(statsSummary.today.total)} en ventas hoy</h3>
+            <p>
+              Pedidos pagos, ranking histórico y métodos de cobro actualizados
+              desde el backend.
+            </p>
+          </article>
+
+          <div className="kpi-grid stats-kpi-grid">
+            <article className="kpi-card">
+              <h3>Ganancias</h3>
+              <strong>{formatCurrency(statsSummary.today.total)}</strong>
+              <p>Ventas cobradas hoy</p>
+            </article>
+            <article className="kpi-card">
+              <h3>Pendientes</h3>
+              <strong>{pendingOrders.length}</strong>
+              <p>Pedidos sin cobrar</p>
+            </article>
+            <article className="kpi-card">
+              <h3>Pagados</h3>
+              <strong>{paidOrdersForDisplay.length}</strong>
+              <p>Pedidos cerrados</p>
+            </article>
+            <article className="kpi-card">
+              <h3>Contenedores</h3>
+              <strong>{formatCurrency(stats.containerSummary.revenue)}</strong>
+              <p>{stats.containerSummary.quantity} unidades</p>
+            </article>
+          </div>
+        </div>
+
+        <div className="stats-split-grid" style={{ marginTop: 18 }}>
+          <section className="stats-panel">
+            <div className="section-header stats-panel-head">
+              <div>
+                <h3>Pedidos sincronizados (detalle)</h3>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  {topPaidOrders.length > 0
+                    ? "Ultimos pedidos cobrados"
+                    : "No hay pedidos pagados para mostrar"}
+                </p>
+              </div>
+              <span className="stats-chip">{topPaidOrders.length} visibles</span>
+            </div>
+
+            <div className="stats-item-list">
+              {topPaidOrders.map((order) => {
+                const previewItems = Array.isArray(order.items)
+                  ? order.items.slice(0, 2)
+                  : [];
+
+                return (
+                  <article className="stats-item-row public-order-row" key={order.id}>
+                    <div>
+                      <strong>{order.clientName}</strong>
+                      <p>
+                        {formatOrderLocation(order)} · {order.waiterName}
+                      </p>
+                      {previewItems.length > 0 ? (
+                        <p>
+                          {previewItems
+                            .map((item) => `${item.quantity} x ${item.name}`)
+                            .join(" · ")}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <strong>{formatCurrency(order.total)}</strong>
+                      <p>{getStatusLabel(order.status)}</p>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="stats-panel">
+            <div className="section-header stats-panel-head">
+              <div>
+                <h3>Ranking histórico de platos</h3>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  {stats.monthLabel || "Resumen del mes"}
+                </p>
+              </div>
+              <span className="stats-chip">Histórico</span>
+            </div>
+
+            <div className="ranking-grid">
+              <article className="ranking-card">
+                <h4>Más vendidos</h4>
+                <ol className="rank-list">
+                  {topDishes.map((dish, index) => (
+                    <li key={`${dish.name}-${index}`}>
+                      <span>{dish.name}</span>
+                      <div style={{ textAlign: "right" }}>
+                        <strong>{dish.quantity}</strong>
+                        <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                          {formatCurrency(dish.revenue)}
+                        </small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </article>
+
+              <article className="ranking-card">
+                <h4>Menos vendidos</h4>
+                <ol className="rank-list muted">
+                  {bottomDishes.map((dish, index) => (
+                    <li key={`${dish.name}-${index}`}>
+                      <span>{dish.name}</span>
+                      <div style={{ textAlign: "right" }}>
+                        <strong>{dish.quantity}</strong>
+                        <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                          {formatCurrency(dish.revenue)}
+                        </small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <div className="stats-split-grid" style={{ marginTop: 18 }}>
+          <section className="stats-panel">
+            <div className="section-header stats-panel-head">
+              <div>
+                <h3>Ventas por método de pago</h3>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  Cobro actual y acumulado
+                </p>
+              </div>
+              <span className="stats-chip">{formatCurrency(paymentTotal)}</span>
+            </div>
+
+            <div className="payment-grid">
+              {stats.paymentSummary.map((method) => (
+                <article className="payment-card" key={method.method}>
+                  <div className="payment-card-head">
+                    <div>
+                      <p>{method.label}</p>
+                      <span>{method.method === "efectivo" ? "Caja" : "Bancos"}</span>
+                    </div>
+                    <strong>{formatCurrency(method.amount)}</strong>
+                  </div>
+                  <div className="stats-bar-track payment-track">
+                    <div
+                      className="stats-bar-fill"
+                      style={getSalesIntensityStyle(method.amount, Math.max(paymentTotal, 0))}
+                    />
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="stats-panel">
+            <div className="section-header stats-panel-head">
+              <div>
+                <h3>Resumen del día e histórico</h3>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  {stats.rangeLabel || "Rango activo"}
+                </p>
+              </div>
+              <span className="stats-chip">Nuevo Día</span>
+            </div>
+
+            <div className="stats-item-list">
+              <div className="stats-item-row">
+                <div>
+                  <strong>Ganancia del día actual</strong>
+                  <p>Ventas cerradas hoy</p>
+                </div>
+                <span>{formatCurrency(statsSummary.today.total)}</span>
+              </div>
+              <div className="stats-item-row">
+                <div>
+                  <strong>Ganancias históricas cerradas</strong>
+                  <p>Acumulado que no se reinicia</p>
+                </div>
+                <span>{formatCurrency(statsSummary.historical.total)}</span>
+              </div>
+              <div className="stats-item-row">
+                <div>
+                  <strong>Ganancia acumulada total</strong>
+                  <p>Suma de hoy + histórico</p>
+                </div>
+                <span>{formatCurrency(statsSummary.today.total + statsSummary.historical.total)}</span>
+              </div>
+              <div className="stats-item-row">
+                <div>
+                  <strong>Pedidos visibles</strong>
+                  <p>Resumen sincronizado en pantalla</p>
+                </div>
+                <span>{paidOrdersForDisplay.length}</span>
+              </div>
+            </div>
+
+            <p className="public-lead" style={{ marginTop: 16 }}>
+              El tablero de hoy puede reiniciarse con Nuevo Día sin borrar el
+              histórico acumulado.
+            </p>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <div className="layout">
