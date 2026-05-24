@@ -28,7 +28,43 @@ const PUBLIC_API_BASE_URL_STORAGE_KEY = "barril.publicApiBaseUrl";
 const PUBLIC_SOCKET_URL_STORAGE_KEY = "barril.publicSocketUrl";
 const PUBLIC_DASHBOARD_SNAPSHOT_KEY = "barril.publicDashboardSnapshot";
 
-const socket = io(getSocketBaseUrl(), { autoConnect: false });
+const socketRef = { instance: null, url: "" };
+
+function getSocket() {
+  const url = getSocketBaseUrl();
+  if (!socketRef.instance || socketRef.url !== url) {
+    socketRef.instance?.removeAllListeners();
+    socketRef.instance?.disconnect();
+    socketRef.instance = io(url, {
+      autoConnect: false,
+      transports: ["websocket", "polling"],
+    });
+    socketRef.url = url;
+  }
+  return socketRef.instance;
+}
+
+function isDashboardSnapshot(value) {
+  return Boolean(
+    value &&
+      (Array.isArray(value.pendingOrders) ||
+        Array.isArray(value.paidOrders) ||
+        value.dailyStats ||
+        value.allTimeStats ||
+        value.statsSummary),
+  );
+}
+
+function isLocalhostBackendUrl(value) {
+  const normalized = `${value ?? ""}`.trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized.includes("localhost") ||
+    normalized.includes("127.0.0.1") ||
+    normalized.includes("10.0.2.2")
+  );
+}
+
 const DELETE_ACCOUNT_PIN = "040420";
 const BOGOTA_TIME_ZONE = "America/Bogota";
 const SERVICE_TYPE_OPTIONS = [
@@ -541,6 +577,10 @@ function App() {
   const [restoreFileInputKey, setRestoreFileInputKey] = useState(Date.now());
   const [dayDetailModal, setDayDetailModal] = useState(null);
   const [cleanupDateInput, setCleanupDateInput] = useState("2026-01-01");
+  const [publicBackendDraft, setPublicBackendDraft] = useState(() =>
+    readStoredPublicApiBaseUrl(),
+  );
+  const [publicBackendConnected, setPublicBackendConnected] = useState(false);
   const publicPagesView = isPublicPagesView();
   const stats = publicPagesView ? allTimeStats : dailyStats;
 
@@ -584,7 +624,7 @@ function App() {
   }
 
   function applyDashboardSnapshot(snapshot) {
-    if (!snapshot) return;
+    if (!isDashboardSnapshot(snapshot)) return;
 
     if (snapshot.restaurantName) {
       setRestaurantName(snapshot.restaurantName);
@@ -750,6 +790,40 @@ function App() {
     }
     return response.json();
   }, [apiBaseUrl]);
+
+  const loadPublicDashboardSnapshot = useCallback(async () => {
+    const baseUrl = getApiBaseUrl();
+    const requestUrl = new URL(
+      "/api/dashboard/snapshot",
+      baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
+    ).toString();
+    const response = await fetch(requestUrl);
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody.message ?? "No se pudo leer el dashboard.");
+    }
+    const snapshot = await response.json();
+    applyDashboardSnapshot(snapshot);
+    setPublicBackendConnected(true);
+    setNetworkStatus("");
+    return snapshot;
+  }, []);
+
+  function savePublicBackendUrl() {
+    const nextUrl = publicBackendDraft.trim().replace(/\/+$/, "");
+    if (!nextUrl) {
+      setNetworkStatus("Debes pegar la URL HTTPS del servidor.");
+      return;
+    }
+    if (!/^https:\/\//i.test(nextUrl)) {
+      setNetworkStatus("La URL publica debe iniciar con https://.");
+      return;
+    }
+    writeStoredPublicApiBaseUrl(nextUrl);
+    writeStoredPublicSocketUrl(nextUrl);
+    setApiBaseUrl(nextUrl);
+    window.location.href = `${window.location.pathname}?api=${encodeURIComponent(nextUrl)}&socket=${encodeURIComponent(nextUrl)}`;
+  }
 
   const loadCashView = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -1627,28 +1701,50 @@ function App() {
     if (publicPagesView) {
       hydratePublicDashboardSnapshot();
     }
-    socket.connect();
+
+    const socket = getSocket();
 
     const handleConnect = () => {
+      setPublicBackendConnected(true);
       if (publicPagesView) {
         setNetworkStatus("");
       }
     };
 
     const handleDisconnect = () => {
+      setPublicBackendConnected(false);
       if (publicPagesView) {
+        if (hydratePublicDashboardSnapshot()) {
+          setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
+          return;
+        }
         setNetworkStatus("Sin conexion con el backend publico.");
       }
     };
 
     const handleConnectError = () => {
+      setPublicBackendConnected(false);
       if (publicPagesView) {
+        if (hydratePublicDashboardSnapshot()) {
+          setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
+          return;
+        }
         setNetworkStatus("Sin conexion con el backend publico.");
       }
     };
 
     const handleDashboardSnapshot = (snapshot) => {
       applyDashboardSnapshot(snapshot);
+      setPublicBackendConnected(true);
+    };
+
+    const handleOrderChange = () => {
+      if (publicPagesView) {
+        loadPublicDashboardSnapshot().catch(() => {});
+        return;
+      }
+      loadCashView({ silent: true });
+      loadStatsView();
     };
 
     socket.on("connect", handleConnect);
@@ -1660,12 +1756,23 @@ function App() {
         triggerAutoPrint(incomingOrder);
       }
     });
-    socket.on("order:updated", handleDashboardSnapshot);
-    socket.on("order:kitchen-updated", handleDashboardSnapshot);
-    socket.on("order:paid", handleDashboardSnapshot);
-    socket.on("order:dispatched", handleDashboardSnapshot);
+    socket.on("order:updated", handleOrderChange);
+    socket.on("order:kitchen-updated", handleOrderChange);
+    socket.on("order:paid", handleOrderChange);
+    socket.on("order:dispatched", handleOrderChange);
 
-    if (!publicPagesView) {
+    socket.connect();
+
+    if (publicPagesView) {
+      loadPublicDashboardSnapshot().catch(() => {
+        setPublicBackendConnected(false);
+        if (hydratePublicDashboardSnapshot()) {
+          setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
+          return;
+        }
+        setNetworkStatus("Sin conexion con el backend publico.");
+      });
+    } else {
       loadCashView();
       loadStatsView();
       loadHistoryView(historyDate);
@@ -1674,12 +1781,15 @@ function App() {
     }
 
     return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
       socket.off("dashboard:snapshot", handleDashboardSnapshot);
       socket.off("order:new");
-      socket.off("order:updated", handleDashboardSnapshot);
-      socket.off("order:kitchen-updated", handleDashboardSnapshot);
-      socket.off("order:paid", handleDashboardSnapshot);
-      socket.off("order:dispatched", handleDashboardSnapshot);
+      socket.off("order:updated", handleOrderChange);
+      socket.off("order:kitchen-updated", handleOrderChange);
+      socket.off("order:paid", handleOrderChange);
+      socket.off("order:dispatched", handleOrderChange);
       socket.disconnect();
     };
   }, [
@@ -1688,6 +1798,7 @@ function App() {
     loadCashView,
     loadHistoryView,
     loadNetworkInfo,
+    loadPublicDashboardSnapshot,
     loadStatsView,
     loadWaiters,
     publicPagesView,
@@ -1702,6 +1813,13 @@ function App() {
       (acc, item) => acc + Number(item.amount ?? 0),
       0,
     );
+    const needsBackendSetup =
+      isLocalhostBackendUrl(getApiBaseUrl()) && !publicBackendConnected;
+    const statusLabel = networkStatus
+      ? networkStatus
+      : publicBackendConnected
+        ? "Conectado al servidor"
+        : "Esperando datos del servidor";
 
     return (
       <main className="public-shell">
@@ -1710,20 +1828,55 @@ function App() {
             <p className="eyebrow">Barril · dashboard público</p>
             <h1 className="public-title">Ventas y ganancias en vivo</h1>
             <p className="public-lead">
-              Esta página lee el estado sincronizado del servidor y muestra el
-              resumen público de pedidos, cobros y ranking.
+              Esta página lee el estado sincronizado del servidor SQLite y
+              muestra pedidos, cobros y ranking en tiempo real.
             </p>
           </div>
 
           <div className="public-status">
             <span
               className={
-                networkStatus ? "public-status-dot loading" : "public-status-dot"
+                publicBackendConnected
+                  ? "public-status-dot"
+                  : "public-status-dot loading"
               }
             />
-            <span>{networkStatus || "Conectado"}</span>
+            <span>{statusLabel}</span>
           </div>
         </header>
+
+        {needsBackendSetup || networkStatus.includes("Sin conexion") ? (
+          <section className="public-setup-panel">
+            <h2>Conecta esta pagina con tu servidor</h2>
+            <p>
+              GitHub Pages solo muestra la interfaz. Los datos viven en tu
+              laptop con el servidor Barril y la base SQLite. Debes exponer ese
+              servidor con HTTPS (por ejemplo con{" "}
+              <code>npm run tunnel:server</code>) y pegar aqui la URL publica.
+            </p>
+            <ol className="public-setup-steps">
+              <li>En la laptop: ejecuta <strong>npm run dev:server</strong>.</li>
+              <li>En otra consola: ejecuta <strong>npm run tunnel:server</strong>.</li>
+              <li>Copia la URL HTTPS del tunel (ej. <code>https://xxxx.trycloudflare.com</code>).</li>
+              <li>Pegala abajo y pulsa <strong>Conectar</strong>.</li>
+            </ol>
+            <div className="public-setup-form">
+              <input
+                type="url"
+                placeholder="https://tu-tunel.trycloudflare.com"
+                value={publicBackendDraft}
+                onChange={(event) => setPublicBackendDraft(event.target.value)}
+              />
+              <button type="button" onClick={savePublicBackendUrl}>
+                Conectar
+              </button>
+            </div>
+            <p className="public-setup-note">
+              Tambien puedes abrir la pagina con{" "}
+              <code>?api=URL&socket=URL</code> en la barra de direccion.
+            </p>
+          </section>
+        ) : null}
 
         <div className="stats-hero">
           <article className="stats-banner">

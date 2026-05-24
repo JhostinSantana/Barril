@@ -120,6 +120,14 @@ function resolveLocalIp() {
   return "127.0.0.1";
 }
 
+app.get("/api/dashboard/snapshot", async (_, res, next) => {
+  try {
+    res.json(await buildDashboardSnapshot());
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/network-info", async (_, res, next) => {
   try {
     const localIp = resolveLocalIp();
