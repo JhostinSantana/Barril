@@ -25,9 +25,10 @@ const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:4000";
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL?.trim() || API_BASE_URL;
 const PUBLIC_API_BASE_URL_STORAGE_KEY = "barril.publicApiBaseUrl";
+const PUBLIC_SOCKET_URL_STORAGE_KEY = "barril.publicSocketUrl";
 const PUBLIC_DASHBOARD_SNAPSHOT_KEY = "barril.publicDashboardSnapshot";
 
-const socket = io(SOCKET_URL, { autoConnect: false });
+const socket = io(getSocketBaseUrl(), { autoConnect: false });
 const DELETE_ACCOUNT_PIN = "040420";
 const BOGOTA_TIME_ZONE = "America/Bogota";
 const SERVICE_TYPE_OPTIONS = [
@@ -55,6 +56,20 @@ function writeStoredPublicApiBaseUrl(value) {
     window.localStorage.setItem(PUBLIC_API_BASE_URL_STORAGE_KEY, value);
   } else {
     window.localStorage.removeItem(PUBLIC_API_BASE_URL_STORAGE_KEY);
+  }
+}
+
+function readStoredPublicSocketUrl() {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(PUBLIC_SOCKET_URL_STORAGE_KEY) ?? "";
+}
+
+function writeStoredPublicSocketUrl(value) {
+  if (typeof window === "undefined") return;
+  if (value) {
+    window.localStorage.setItem(PUBLIC_SOCKET_URL_STORAGE_KEY, value);
+  } else {
+    window.localStorage.removeItem(PUBLIC_SOCKET_URL_STORAGE_KEY);
   }
 }
 
@@ -177,6 +192,24 @@ function getApiBaseUrl() {
   }
 
   return API_BASE_URL;
+}
+
+function getSocketBaseUrl() {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    const socketFromQuery = params.get("socket")?.trim();
+    if (socketFromQuery) {
+      writeStoredPublicSocketUrl(socketFromQuery);
+      return socketFromQuery;
+    }
+  }
+
+  const storedPublicUrl = readStoredPublicSocketUrl();
+  if (storedPublicUrl) {
+    return storedPublicUrl;
+  }
+
+  return SOCKET_URL;
 }
 
 function getStatusLabel(status) {
@@ -718,8 +751,10 @@ function App() {
     return response.json();
   }, [apiBaseUrl]);
 
-  const loadCashView = useCallback(async () => {
-    setLoading(true);
+  const loadCashView = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const [menuData, pending, paid, close] = await Promise.all([
         getJson("/api/menu"),
@@ -762,7 +797,9 @@ function App() {
       }
       throw error;
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [cashSessionCutoff, getJson, publicPagesView]);
 
@@ -1592,35 +1629,41 @@ function App() {
     }
     socket.connect();
 
-    const handleDashboardSnapshot = (snapshot) => {
-      if (!publicPagesView) return;
-      applyDashboardSnapshot(snapshot);
-    };
-
-    const refreshOrderViews = () => {
-      loadCashView();
-      loadStatsView();
-      loadHistoryView(historyDate);
-    };
-    const handleOrderMutation = () => {
-      if (!publicPagesView) {
-        refreshOrderViews();
+    const handleConnect = () => {
+      if (publicPagesView) {
+        setNetworkStatus("");
       }
     };
 
+    const handleDisconnect = () => {
+      if (publicPagesView) {
+        setNetworkStatus("Sin conexion con el backend publico.");
+      }
+    };
+
+    const handleConnectError = () => {
+      if (publicPagesView) {
+        setNetworkStatus("Sin conexion con el backend publico.");
+      }
+    };
+
+    const handleDashboardSnapshot = (snapshot) => {
+      applyDashboardSnapshot(snapshot);
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
     socket.on("dashboard:snapshot", handleDashboardSnapshot);
     socket.on("order:new", (incomingOrder) => {
       if (!publicPagesView && autoPrintEnabled) {
         triggerAutoPrint(incomingOrder);
       }
-      if (!publicPagesView) {
-        refreshOrderViews();
-      }
     });
-    socket.on("order:updated", handleOrderMutation);
-    socket.on("order:kitchen-updated", handleOrderMutation);
-    socket.on("order:paid", handleOrderMutation);
-    socket.on("order:dispatched", handleOrderMutation);
+    socket.on("order:updated", handleDashboardSnapshot);
+    socket.on("order:kitchen-updated", handleDashboardSnapshot);
+    socket.on("order:paid", handleDashboardSnapshot);
+    socket.on("order:dispatched", handleDashboardSnapshot);
 
     if (!publicPagesView) {
       loadCashView();
@@ -1633,10 +1676,10 @@ function App() {
     return () => {
       socket.off("dashboard:snapshot", handleDashboardSnapshot);
       socket.off("order:new");
-      socket.off("order:updated", handleOrderMutation);
-      socket.off("order:kitchen-updated", handleOrderMutation);
-      socket.off("order:paid", handleOrderMutation);
-      socket.off("order:dispatched", handleOrderMutation);
+      socket.off("order:updated", handleDashboardSnapshot);
+      socket.off("order:kitchen-updated", handleDashboardSnapshot);
+      socket.off("order:paid", handleDashboardSnapshot);
+      socket.off("order:dispatched", handleDashboardSnapshot);
       socket.disconnect();
     };
   }, [
@@ -1673,8 +1716,12 @@ function App() {
           </div>
 
           <div className="public-status">
-            <span className={loading ? "public-status-dot loading" : "public-status-dot"} />
-            <span>{loading ? "Sincronizando" : "Conectado"}</span>
+            <span
+              className={
+                networkStatus ? "public-status-dot loading" : "public-status-dot"
+              }
+            />
+            <span>{networkStatus || "Conectado"}</span>
           </div>
         </header>
 
