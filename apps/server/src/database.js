@@ -864,6 +864,12 @@ export async function markOrderDispatched(orderId) {
     throw error;
   }
 
+  if (orderHasPendingKitchenWork(order)) {
+    const error = new Error('La cocina aun no ha terminado este pedido.');
+    error.code = 'KITCHEN_NOT_READY';
+    throw error;
+  }
+
   if (order.dispatchedAt) {
     return order;
   }

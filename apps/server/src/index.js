@@ -513,7 +513,11 @@ app.patch("/api/orders/:orderId/dispatch", async (req, res, next) => {
     io.emit("order:updated", updatedOrder);
     res.json(updatedOrder);
   } catch (error) {
-    if (error?.code === "NOT_PICKUP_ORDER" || error?.code === "ORDER_NOT_PAID") {
+    if (
+      error?.code === "NOT_PICKUP_ORDER" ||
+      error?.code === "ORDER_NOT_PAID" ||
+      error?.code === "KITCHEN_NOT_READY"
+    ) {
       res.status(409).json({ message: error.message });
       return;
     }

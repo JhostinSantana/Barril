@@ -562,6 +562,13 @@ function resolveOrderItemDetails(item, menuItem) {
 
 const BOGOTA_TIME_ZONE = "America/Bogota";
 
+function toDateOnlyKey(dateValue) {
+  if (!dateValue) return null;
+  const value = String(dateValue).trim();
+  if (!value) return null;
+  return value.includes("T") ? value.slice(0, 10) : value;
+}
+
 function getBogotaDateParts(isoDate) {
   const date = new Date(isoDate);
   if (Number.isNaN(date.getTime())) return null;
@@ -825,7 +832,10 @@ function getMonthDateRange(dateValue) {
 }
 
 function getMonthLabel(dateValue) {
-  const date = new Date(`${dateValue}T12:00:00.000Z`);
+  const dayKey = toDateOnlyKey(dateValue);
+  if (!dayKey) return "";
+  const date = new Date(`${dayKey}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return dayKey.slice(0, 7);
   return new Intl.DateTimeFormat("es-CO", {
     month: "long",
     year: "numeric",
@@ -834,11 +844,15 @@ function getMonthLabel(dateValue) {
 }
 
 function getDayLabel(dateValue) {
+  const dayKey = toDateOnlyKey(dateValue);
+  if (!dayKey) return "";
+  const date = new Date(`${dayKey}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return dayKey;
   return new Intl.DateTimeFormat("es-CO", {
     weekday: "short",
     day: "2-digit",
     timeZone: BOGOTA_TIME_ZONE,
-  }).format(new Date(`${dateValue}T12:00:00.000Z`));
+  }).format(date);
 }
 
 function finalizeSectionBuckets(sectionMap) {

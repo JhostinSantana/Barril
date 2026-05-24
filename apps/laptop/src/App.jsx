@@ -132,8 +132,25 @@ function getStatusLabel(status) {
 
 function getKitchenStatusLabel(status) {
   if (status === "completado") return "Lista";
-  if (status === "en_preparacion") return "En preparación";
+  if (status === "en_preparacion") return "Preparando";
   return "Pendiente";
+}
+
+function getKitchenStatusClass(status) {
+  if (status === "completado") return "kitchen-status-lista";
+  if (status === "en_preparacion") return "kitchen-status-preparando";
+  return "kitchen-status-pendiente";
+}
+
+function KitchenStatusLine({ status }) {
+  return (
+    <p className="kitchen-status-line">
+      Cocina:{" "}
+      <span className={`kitchen-status-badge ${getKitchenStatusClass(status)}`}>
+        {getKitchenStatusLabel(status)}
+      </span>
+    </p>
+  );
 }
 
 function isPickupAwaitingDispatch(order) {
@@ -142,6 +159,10 @@ function isPickupAwaitingDispatch(order) {
     order?.status === "paid" &&
     !order?.dispatchedAt
   );
+}
+
+function isKitchenReadyForDispatch(order) {
+  return order?.kitchenStatus === "completado";
 }
 
 function describePayment(order) {
@@ -853,23 +874,44 @@ function App() {
   async function markOrderDispatched(order) {
     if (!order?.id) return;
 
+    if (!isKitchenReadyForDispatch(order)) {
+      window.alert(
+        "La cocina aun no ha terminado este pedido. Espera a que la marquen como lista.",
+      );
+      return;
+    }
+
     const confirmed = window.confirm(
       `Marcar como despachado ${order.id} (${order.clientName})? Desaparecera de esta pantalla.`,
     );
     if (!confirmed) return;
 
     try {
-      await getJson(`/api/orders/${order.id}/dispatch`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-      });
+      await getJson(
+        `/api/orders/${encodeURIComponent(order.id)}/dispatch`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    } catch (error) {
+      window.alert(
+        error.message ?? "No se pudo marcar la comanda como despachada.",
+      );
+      return;
+    }
+
+    try {
       await Promise.all([
         loadCashView(),
         loadStatsView(),
         loadHistoryView(historyDate),
       ]);
     } catch (error) {
-      window.alert(error.message ?? "No se pudo marcar como despachado.");
+      await loadCashView().catch(() => {});
+      window.alert(
+        "Comanda despachada, pero fallo al refrescar algunas vistas. Recarga con F5.",
+      );
     }
   }
 
@@ -1686,7 +1728,7 @@ function App() {
                     <p>Mesero: {order.waiterName}</p>
                     <p>Pedido: {formatOrderLocation(order)}</p>
                     <p>Estado: {getStatusLabel(order.status)}</p>
-                    <p>Cocina: {getKitchenStatusLabel(order.kitchenStatus)}</p>
+                    <KitchenStatusLine status={order.kitchenStatus} />
                     <ul>
                       {order.items.map((item) => (
                         <li
@@ -1872,11 +1914,13 @@ function App() {
               <>
                 <h3 className="group-title">Por despachar</h3>
                 <p className="dispatch-hint">
-                  Pedidos para llevar ya cobrados. Marcalos como despachados
-                  cuando salgan del local.
+                  Pedidos para llevar ya cobrados. Solo despacha cuando cocina
+                  los marque como lista y salgan del local.
                 </p>
                 <div className="card-grid">
-                  {pickupAwaitingDispatch.map((order) => (
+                  {pickupAwaitingDispatch.map((order) => {
+                    const kitchenReady = isKitchenReadyForDispatch(order);
+                    return (
                     <article
                       key={order.id}
                       className="order-card order-card-dispatch"
@@ -1891,7 +1935,12 @@ function App() {
                       </div>
                       <h4>{order.clientName}</h4>
                       <p>Mesero: {order.waiterName}</p>
-                      <p>Cocina: {getKitchenStatusLabel(order.kitchenStatus)}</p>
+                      <KitchenStatusLine status={order.kitchenStatus} />
+                      {!kitchenReady ? (
+                        <p className="dispatch-warning">
+                          Espera a que cocina marque este pedido como lista.
+                        </p>
+                      ) : null}
                       <p className="total">
                         Total cobrado: {formatCurrency(order.total)}
                       </p>
@@ -1900,6 +1949,7 @@ function App() {
                         <button
                           type="button"
                           className="dispatch-button"
+                          disabled={!kitchenReady}
                           onClick={() => markOrderDispatched(order)}
                         >
                           Despachado
@@ -1920,7 +1970,8 @@ function App() {
                         </button>
                       </div>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             ) : null}
@@ -2266,27 +2317,7 @@ function App() {
                   Ver fecha
                 </button>
                 <button type="button" onClick={() => loadRecentHistory(7)}>
-                  {loadingHistory ? "Cargando..." : "�altimos 7 días"}
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() =>
-                    setConfirmModal({
-                      title: "¿Limpiar historial?",
-                      message:
-                        "Se borrarán todos los datos del historial mostrado. Esta acción no tiene vuelta atrás.",
-                      action: () => {
-                        setConfirmModal(null);
-                        setHistoryGrouped([]);
-                        setHistoryOrders([]);
-                      },
-                      confirmText: "Limpiar",
-                      cancelText: "Cancelar",
-                    })
-                  }
-                >
-                  Limpiar
+                  {loadingHistory ? "Cargando..." : "Últimos 7 días"}
                 </button>
               </div>
             </header>
