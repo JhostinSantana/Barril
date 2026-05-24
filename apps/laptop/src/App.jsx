@@ -24,6 +24,8 @@ import "./App.css";
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:4000";
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL?.trim() || API_BASE_URL;
+const PUBLIC_API_BASE_URL_STORAGE_KEY = "barril.publicApiBaseUrl";
+const PUBLIC_DASHBOARD_SNAPSHOT_KEY = "barril.publicDashboardSnapshot";
 
 const socket = io(SOCKET_URL, { autoConnect: false });
 const DELETE_ACCOUNT_PIN = "040420";
@@ -40,6 +42,45 @@ function isPublicPagesView() {
     window.location.hostname.includes("github.io") &&
     window.location.pathname.includes("/Barril/")
   );
+}
+
+function readStoredPublicApiBaseUrl() {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(PUBLIC_API_BASE_URL_STORAGE_KEY) ?? "";
+}
+
+function writeStoredPublicApiBaseUrl(value) {
+  if (typeof window === "undefined") return;
+  if (value) {
+    window.localStorage.setItem(PUBLIC_API_BASE_URL_STORAGE_KEY, value);
+  } else {
+    window.localStorage.removeItem(PUBLIC_API_BASE_URL_STORAGE_KEY);
+  }
+}
+
+function readPublicDashboardSnapshot() {
+  if (typeof window === "undefined") return null;
+
+  const raw = window.localStorage.getItem(PUBLIC_DASHBOARD_SNAPSHOT_KEY);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writePublicDashboardSnapshot(snapshot) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      PUBLIC_DASHBOARD_SNAPSHOT_KEY,
+      JSON.stringify(snapshot),
+    );
+  } catch {
+    // Ignore storage errors.
+  }
 }
 
 const navItems = [
@@ -121,6 +162,20 @@ function formatCalendarDayLabel(dateKey) {
 }
 
 function getApiBaseUrl() {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    const apiFromQuery = params.get("api")?.trim();
+    if (apiFromQuery) {
+      writeStoredPublicApiBaseUrl(apiFromQuery);
+      return apiFromQuery;
+    }
+  }
+
+  const storedPublicUrl = readStoredPublicApiBaseUrl();
+  if (storedPublicUrl) {
+    return storedPublicUrl;
+  }
+
   return API_BASE_URL;
 }
 
@@ -456,6 +511,45 @@ function App() {
   const publicPagesView = isPublicPagesView();
   const stats = publicPagesView ? allTimeStats : dailyStats;
 
+  function resolveApiRequestUrl(url) {
+    if (/^https?:\/\//i.test(url)) {
+      return url;
+    }
+
+    return new URL(url, apiBaseUrl.endsWith("/") ? apiBaseUrl : `${apiBaseUrl}/`).toString();
+  }
+
+  function persistPublicDashboardSnapshot(snapshot) {
+    if (!publicPagesView) return;
+
+    writePublicDashboardSnapshot({
+      savedAt: new Date().toISOString(),
+      ...snapshot,
+    });
+  }
+
+  function hydratePublicDashboardSnapshot() {
+    if (!publicPagesView) return false;
+
+    const snapshot = readPublicDashboardSnapshot();
+    if (!snapshot) return false;
+
+    if (Array.isArray(snapshot.pendingOrders)) setPendingOrders(snapshot.pendingOrders);
+    if (Array.isArray(snapshot.paidOrders)) setPaidOrders(snapshot.paidOrders);
+    if (snapshot.cashClose) setCashClose(snapshot.cashClose);
+    if (snapshot.dailyStats) setDailyStats(snapshot.dailyStats);
+    if (snapshot.allTimeStats) setAllTimeStats(snapshot.allTimeStats);
+    if (snapshot.statsSummary) setStatsSummary(snapshot.statsSummary);
+    if (Array.isArray(snapshot.historyOrders)) setHistoryOrders(snapshot.historyOrders);
+    if (Array.isArray(snapshot.historyGrouped)) setHistoryGrouped(snapshot.historyGrouped);
+    if (snapshot.restaurantName) {
+      setRestaurantName(snapshot.restaurantName);
+      setRestaurantNameDraft(snapshot.restaurantName);
+    }
+    if (snapshot.networkInfo) setNetworkInfo(snapshot.networkInfo);
+    return true;
+  }
+
   const filteredPending = useMemo(() => {
     if (!query.trim()) return pendingOrders;
     const q = query.toLowerCase();
@@ -596,13 +690,13 @@ function App() {
   }, [weightDrafts, weightModalOrder]);
 
   const getJson = useCallback(async (url, options) => {
-    const response = await fetch(url, options);
+    const response = await fetch(resolveApiRequestUrl(url), options);
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
       throw new Error(errorBody.message ?? "Error de servidor");
     }
     return response.json();
-  }, []);
+  }, [apiBaseUrl]);
 
   const loadCashView = useCallback(async () => {
     setLoading(true);
@@ -629,33 +723,83 @@ function App() {
       setPendingOrders(filteredPending);
       setPaidOrders(filteredPaid);
       setCashClose(filteredClose);
+      persistPublicDashboardSnapshot({
+        pendingOrders: filteredPending,
+        paidOrders: filteredPaid,
+        cashClose: filteredClose,
+        dailyStats,
+        allTimeStats,
+        statsSummary,
+        historyOrders,
+        historyGrouped,
+        restaurantName: menuData.restaurantName,
+        networkInfo,
+      });
+    } catch (error) {
+      if (publicPagesView && hydratePublicDashboardSnapshot()) {
+        setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
+        return;
+      }
+      throw error;
     } finally {
       setLoading(false);
     }
-  }, [cashSessionCutoff, getJson]);
+  }, [cashSessionCutoff, getJson, publicPagesView]);
 
   const loadStatsView = useCallback(async () => {
     const todayRange = getBogotaDayRange();
     const historicalRange = getHistoricalRange();
-    const [dailyResult, historicalResult, summaryResult] = await Promise.all([
-      getJson(`/api/stats?from=${todayRange.from}&to=${todayRange.to}`),
-      getJson(
-        `/api/stats?from=${historicalRange.from}&to=${historicalRange.to}`,
-      ),
-      getJson("/api/stats-summary"),
-    ]);
-    setDailyStats({
-      ...dailyResult,
-      monthLabel: "Hoy",
-      rangeLabel: formatCalendarDayLabel(todayRange.key),
-    });
-    setAllTimeStats({
-      ...historicalResult,
-      monthLabel: "Histórico completo",
-      rangeLabel: "Todo el historial",
-    });
-    setStatsSummary(summaryResult);
-  }, [getJson]);
+    try {
+      const [dailyResult, historicalResult, summaryResult] = await Promise.all([
+        getJson(`/api/stats?from=${todayRange.from}&to=${todayRange.to}`),
+        getJson(
+          `/api/stats?from=${historicalRange.from}&to=${historicalRange.to}`,
+        ),
+        getJson("/api/stats-summary"),
+      ]);
+      const nextDailyStats = {
+        ...dailyResult,
+        monthLabel: "Hoy",
+        rangeLabel: formatCalendarDayLabel(todayRange.key),
+      };
+      const nextAllTimeStats = {
+        ...historicalResult,
+        monthLabel: "Histórico completo",
+        rangeLabel: "Todo el historial",
+      };
+      setDailyStats(nextDailyStats);
+      setAllTimeStats(nextAllTimeStats);
+      setStatsSummary(summaryResult);
+      persistPublicDashboardSnapshot({
+        pendingOrders,
+        paidOrders,
+        cashClose,
+        dailyStats: nextDailyStats,
+        allTimeStats: nextAllTimeStats,
+        statsSummary: summaryResult,
+        historyOrders,
+        historyGrouped,
+        restaurantName,
+        networkInfo,
+      });
+    } catch (error) {
+      if (publicPagesView && hydratePublicDashboardSnapshot()) {
+        setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
+        return;
+      }
+      throw error;
+    }
+  }, [
+    cashClose,
+    getJson,
+    historyGrouped,
+    historyOrders,
+    networkInfo,
+    pendingOrders,
+    paidOrders,
+    publicPagesView,
+    restaurantName,
+  ]);
 
   const loadWaiters = useCallback(async () => {
     const result = await getJson("/api/waiters");
@@ -1423,6 +1567,9 @@ function App() {
 
   useEffect(() => {
     setApiBaseUrl(getApiBaseUrl());
+    if (publicPagesView) {
+      hydratePublicDashboardSnapshot();
+    }
     socket.connect();
 
     const refreshOrderViews = () => {
