@@ -550,6 +550,26 @@ function App() {
     return true;
   }
 
+  function applyDashboardSnapshot(snapshot) {
+    if (!snapshot) return;
+
+    if (snapshot.restaurantName) {
+      setRestaurantName(snapshot.restaurantName);
+      setRestaurantNameDraft(snapshot.restaurantName);
+    }
+    if (Array.isArray(snapshot.pendingOrders)) setPendingOrders(snapshot.pendingOrders);
+    if (Array.isArray(snapshot.paidOrders)) setPaidOrders(snapshot.paidOrders);
+    if (snapshot.cashClose) setCashClose(snapshot.cashClose);
+    if (snapshot.dailyStats) setDailyStats(snapshot.dailyStats);
+    if (snapshot.allTimeStats) setAllTimeStats(snapshot.allTimeStats);
+    if (snapshot.statsSummary) setStatsSummary(snapshot.statsSummary);
+    if (Array.isArray(snapshot.historyOrders)) setHistoryOrders(snapshot.historyOrders);
+    if (Array.isArray(snapshot.historyGrouped)) setHistoryGrouped(snapshot.historyGrouped);
+    if (snapshot.networkInfo) setNetworkInfo(snapshot.networkInfo);
+    persistPublicDashboardSnapshot(snapshot);
+    setLoading(false);
+  }
+
   const filteredPending = useMemo(() => {
     if (!query.trim()) return pendingOrders;
     const q = query.toLowerCase();
@@ -1572,35 +1592,51 @@ function App() {
     }
     socket.connect();
 
+    const handleDashboardSnapshot = (snapshot) => {
+      if (!publicPagesView) return;
+      applyDashboardSnapshot(snapshot);
+    };
+
     const refreshOrderViews = () => {
       loadCashView();
       loadStatsView();
       loadHistoryView(historyDate);
     };
+    const handleOrderMutation = () => {
+      if (!publicPagesView) {
+        refreshOrderViews();
+      }
+    };
 
+    socket.on("dashboard:snapshot", handleDashboardSnapshot);
     socket.on("order:new", (incomingOrder) => {
-      if (autoPrintEnabled) {
+      if (!publicPagesView && autoPrintEnabled) {
         triggerAutoPrint(incomingOrder);
       }
-      refreshOrderViews();
+      if (!publicPagesView) {
+        refreshOrderViews();
+      }
     });
-    socket.on("order:updated", refreshOrderViews);
-    socket.on("order:kitchen-updated", refreshOrderViews);
-    socket.on("order:paid", refreshOrderViews);
-    socket.on("order:dispatched", refreshOrderViews);
+    socket.on("order:updated", handleOrderMutation);
+    socket.on("order:kitchen-updated", handleOrderMutation);
+    socket.on("order:paid", handleOrderMutation);
+    socket.on("order:dispatched", handleOrderMutation);
 
-    loadCashView();
-    loadStatsView();
-    loadHistoryView(historyDate);
-    loadWaiters();
-    loadNetworkInfo();
+    if (!publicPagesView) {
+      loadCashView();
+      loadStatsView();
+      loadHistoryView(historyDate);
+      loadWaiters();
+      loadNetworkInfo();
+    }
 
     return () => {
+      socket.off("dashboard:snapshot", handleDashboardSnapshot);
       socket.off("order:new");
-      socket.off("order:updated", refreshOrderViews);
-      socket.off("order:kitchen-updated", refreshOrderViews);
-      socket.off("order:paid", refreshOrderViews);
-      socket.off("order:dispatched", refreshOrderViews);
+      socket.off("order:updated", handleOrderMutation);
+      socket.off("order:kitchen-updated", handleOrderMutation);
+      socket.off("order:paid", handleOrderMutation);
+      socket.off("order:dispatched", handleOrderMutation);
       socket.disconnect();
     };
   }, [
@@ -1611,6 +1647,7 @@ function App() {
     loadNetworkInfo,
     loadStatsView,
     loadWaiters,
+    publicPagesView,
     triggerAutoPrint,
   ]);
 

@@ -58,6 +58,39 @@ const io = new Server(httpServer, {
 app.use(cors());
 app.use(express.json());
 
+async function buildDashboardSnapshot() {
+  const [menu, orders, restaurantName] = await Promise.all([
+    getMenu(),
+    listOrders(),
+    getRestaurantName(),
+  ]);
+
+  const todayKey = getDateKey(new Date().toISOString());
+  const todayStart = `${todayKey}T00:00:00.000Z`;
+  const todayEnd = `${todayKey}T23:59:59.999Z`;
+
+  return {
+    restaurantName,
+    pendingOrders: orders.filter(
+      (order) => order.status === "pending" || order.status === "partial",
+    ),
+    paidOrders: orders.filter((order) => order.status === "paid"),
+    cashClose: getCashClose(orders, todayKey),
+    dailyStats: getStats(orders, menu, todayStart, todayEnd),
+    allTimeStats: getStats(
+      orders,
+      menu,
+      "2000-01-01T00:00:00.000Z",
+      "2100-01-01T00:00:00.000Z",
+    ),
+    statsSummary: getStatsSummary(orders, menu),
+  };
+}
+
+async function publishDashboardSnapshot() {
+  io.emit("dashboard:snapshot", await buildDashboardSnapshot());
+}
+
 app.get("/health", (_, res) => {
   res.json({ ok: true, service: "asados-en-el-barril-server" });
 });
@@ -321,7 +354,8 @@ app.post("/api/orders", async (req, res, next) => {
         : [],
     };
 
-    await createOrder(order);
+      await createOrder(order);
+      await publishDashboardSnapshot();
     io.emit("order:new", order);
     res
       .status(201)
@@ -435,6 +469,7 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
     if (updatedOrder.status === "paid") {
       io.emit("order:paid", updatedOrder);
     }
+      await publishDashboardSnapshot();
     res.json(updatedOrder);
   } catch (error) {
     if (error?.code === "ORDER_LOCKED") {
@@ -483,6 +518,7 @@ app.patch("/api/orders/:orderId/kitchen-status", async (req, res, next) => {
 
     const updatedOrder = await updateOrderKitchenStatus(orderId, kitchenStatus);
     io.emit("order:kitchen-updated", updatedOrder);
+      await publishDashboardSnapshot();
     res.json(updatedOrder);
   } catch (error) {
     if (error?.code === "INVALID_KITCHEN_STATUS") {
@@ -511,6 +547,7 @@ app.patch("/api/orders/:orderId/dispatch", async (req, res, next) => {
 
     io.emit("order:dispatched", updatedOrder);
     io.emit("order:updated", updatedOrder);
+      await publishDashboardSnapshot();
     res.json(updatedOrder);
   } catch (error) {
     if (
@@ -661,6 +698,7 @@ app.patch("/api/orders/:orderId/pay", async (req, res, next) => {
   }
 });
 
+          await publishDashboardSnapshot();
 app.delete("/api/orders/:orderId", async (req, res, next) => {
   try {
     const { orderId } = req.params;
@@ -720,6 +758,7 @@ app.get("/api/stats-summary", async (req, res, next) => {
   try {
     const menu = await getMenu();
     const orders = await listOrders();
+        await publishDashboardSnapshot();
     res.json(getStatsSummary(orders, menu));
   } catch (error) {
     next(error);
@@ -769,6 +808,7 @@ app.post("/api/restore/json", async (req, res, next) => {
 
     await restoreData(payload);
     io.emit("data:restored");
+      await publishDashboardSnapshot();
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -795,6 +835,7 @@ app.post("/api/cleanup", async (req, res, next) => {
     }
 
     await deleteOrdersOlderThan(`${before}T00:00:00.000Z`);
+      await publishDashboardSnapshot();
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -804,6 +845,7 @@ app.post("/api/cleanup", async (req, res, next) => {
 app.post("/api/cleanup/all", async (req, res, next) => {
   try {
     await deleteAllOrders();
+      await publishDashboardSnapshot();
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -816,8 +858,13 @@ app.use((error, _, res, __) => {
   res.status(500).json({ message: "Error interno del servidor." });
 });
 
-io.on("connection", () => {
-  // Connection intentionally kept simple for POS usage.
+io.on("connection", async (socket) => {
+  try {
+    socket.emit("dashboard:snapshot", await buildDashboardSnapshot());
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Failed to send dashboard snapshot", error);
+  }
 });
 
 const PORT = process.env.PORT || 4000;
