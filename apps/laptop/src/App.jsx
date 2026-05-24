@@ -37,8 +37,8 @@ function isPublicPagesView() {
   if (typeof window === "undefined") return false;
 
   return (
-    window.location.hostname.includes("github.io") ||
-    window.location.pathname.includes("/Casa-Rosa/")
+    window.location.hostname.includes("github.io") &&
+    window.location.pathname.includes("/Barril/")
   );
 }
 
@@ -1305,7 +1305,7 @@ function App() {
       <main className="public-shell">
         <header className="public-header">
           <div>
-            <p className="eyebrow">Casa Rosa · dashboard público</p>
+            <p className="eyebrow">Barril · dashboard público</p>
             <h1 className="public-title">Ventas y ganancias en vivo</h1>
             <p className="public-lead">
               Esta página lee el estado sincronizado del servidor y muestra el
