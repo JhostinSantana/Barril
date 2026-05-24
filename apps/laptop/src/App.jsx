@@ -261,6 +261,94 @@ function getOrderPaymentTotals(order) {
   };
 }
 
+function getBogotaDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: BOGOTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getBogotaDayRange(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BOGOTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? 0);
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? 0);
+  const day = Number(parts.find((part) => part.type === "day")?.value ?? 0);
+
+  return {
+    from: new Date(Date.UTC(year, month - 1, day, 5, 0, 0, 0)).toISOString(),
+    to: new Date(Date.UTC(year, month - 1, day + 1, 4, 59, 59, 999)).toISOString(),
+    key: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+  };
+}
+
+function getHistoricalRange() {
+  return {
+    from: "2000-01-01T00:00:00.000Z",
+    to: "2100-01-01T00:00:00.000Z",
+  };
+}
+
+const CASH_SESSION_CUTOFF_STORAGE_KEY = "barril.cashSessionCutoff";
+
+function loadCashSessionCutoff() {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(CASH_SESSION_CUTOFF_STORAGE_KEY) ?? "";
+}
+
+function saveCashSessionCutoff(value) {
+  if (typeof window === "undefined") return;
+  if (value) {
+    window.localStorage.setItem(CASH_SESSION_CUTOFF_STORAGE_KEY, value);
+  } else {
+    window.localStorage.removeItem(CASH_SESSION_CUTOFF_STORAGE_KEY);
+  }
+}
+
+function filterOrdersByCashSession(orders, cutoff) {
+  if (!cutoff) return Array.isArray(orders) ? orders : [];
+  return (Array.isArray(orders) ? orders : []).filter(
+    (order) => !order?.createdAt || order.createdAt >= cutoff,
+  );
+}
+
+function buildCashCloseFromOrders(orders, date) {
+  const uniqueOrders = new Set();
+
+  const summary = (Array.isArray(orders) ? orders : []).reduce(
+    (acc, order) => {
+      const totals = getOrderPaymentTotals(order);
+      const orderTotal = totals.efectivo + totals.transferencia;
+
+      if (orderTotal <= 0) {
+        return acc;
+      }
+
+      uniqueOrders.add(order.id);
+      acc.total += orderTotal;
+      acc.efectivo += totals.efectivo;
+      acc.transferencia += totals.transferencia;
+      return acc;
+    },
+    { total: 0, efectivo: 0, transferencia: 0 },
+  );
+
+  return {
+    date,
+    total: summary.total,
+    efectivo: summary.efectivo,
+    transferencia: summary.transferencia,
+    orders: uniqueOrders.size,
+  };
+}
+
 function App() {
   const [activeView, setActiveView] = useState("cash");
   const [restaurantName, setRestaurantName] = useState("Ahumados Al Barril");
@@ -278,7 +366,25 @@ function App() {
     transferenceNumber: "",
     serviceType: "mesa",
   });
-  const [stats, setStats] = useState({
+  const [dailyStats, setDailyStats] = useState({
+    totalOrders: 0,
+    totalPaidOrders: 0,
+    totalSales: 0,
+    containerSummary: {
+      quantity: 0,
+      revenue: 0,
+    },
+    monthLabel: "",
+    rangeLabel: "",
+    monthStartWeekday: 0,
+    topDishes: [],
+    bottomDishes: [],
+    categories: [],
+    paymentSummary: [],
+    quincenas: [],
+    calendarDays: [],
+  });
+  const [allTimeStats, setAllTimeStats] = useState({
     totalOrders: 0,
     totalPaidOrders: 0,
     totalSales: 0,
@@ -315,6 +421,9 @@ function App() {
     transferencia: 0,
     orders: 0,
   });
+  const [cashSessionCutoff, setCashSessionCutoff] = useState(() =>
+    loadCashSessionCutoff(),
+  );
   const [historyDate, setHistoryDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
@@ -345,6 +454,7 @@ function App() {
   const [dayDetailModal, setDayDetailModal] = useState(null);
   const [cleanupDateInput, setCleanupDateInput] = useState("2026-01-01");
   const publicPagesView = isPublicPagesView();
+  const stats = publicPagesView ? allTimeStats : dailyStats;
 
   const filteredPending = useMemo(() => {
     if (!query.trim()) return pendingOrders;
@@ -503,23 +613,47 @@ function App() {
         getJson("/api/orders?status=paid"),
         getJson("/api/cash-close"),
       ]);
+      const filteredPending = filterOrdersByCashSession(
+        pending,
+        cashSessionCutoff,
+      );
+      const filteredPaid = filterOrdersByCashSession(paid, cashSessionCutoff);
+      const filteredClose = cashSessionCutoff
+        ? buildCashCloseFromOrders(
+            [...filteredPending, ...filteredPaid],
+            cashSessionCutoff,
+          )
+        : close;
       setRestaurantName(menuData.restaurantName);
       setRestaurantNameDraft(menuData.restaurantName ?? "");
-      setPendingOrders(pending);
-      setPaidOrders(paid);
-      setCashClose(close);
+      setPendingOrders(filteredPending);
+      setPaidOrders(filteredPaid);
+      setCashClose(filteredClose);
     } finally {
       setLoading(false);
     }
-  }, [getJson]);
+  }, [cashSessionCutoff, getJson]);
 
   const loadStatsView = useCallback(async () => {
-    const range = getCurrentMonthRange();
-    const [statsResult, summaryResult] = await Promise.all([
-      getJson(`/api/stats?from=${range.from}&to=${range.to}`),
+    const todayRange = getBogotaDayRange();
+    const historicalRange = getHistoricalRange();
+    const [dailyResult, historicalResult, summaryResult] = await Promise.all([
+      getJson(`/api/stats?from=${todayRange.from}&to=${todayRange.to}`),
+      getJson(
+        `/api/stats?from=${historicalRange.from}&to=${historicalRange.to}`,
+      ),
       getJson("/api/stats-summary"),
     ]);
-    setStats(statsResult);
+    setDailyStats({
+      ...dailyResult,
+      monthLabel: "Hoy",
+      rangeLabel: formatCalendarDayLabel(todayRange.key),
+    });
+    setAllTimeStats({
+      ...historicalResult,
+      monthLabel: "Histórico completo",
+      rangeLabel: "Todo el historial",
+    });
     setStatsSummary(summaryResult);
   }, [getJson]);
 
@@ -590,16 +724,15 @@ function App() {
   async function startNewDay() {
     try {
       setLoading(true);
-      await getJson("/api/cleanup/all", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
+      const newCutoff = new Date().toISOString();
+      setCashSessionCutoff(newCutoff);
+      saveCashSessionCutoff(newCutoff);
       setConfirmModal(null);
       setActiveView("cash");
       setPendingOrders([]);
       setPaidOrders([]);
       setCashClose({
-        date: "",
+        date: newCutoff,
         total: 0,
         efectivo: 0,
         transferencia: 0,
@@ -1999,9 +2132,9 @@ function App() {
           <section>
             <header className="section-header">
               <div>
-                <h2>Estadistica mensual</h2>
+                <h2>Estadistica del dia</h2>
                 <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  {stats.monthLabel || "Resumen del mes"} · {stats.rangeLabel || "Rango activo"}
+                  {stats.monthLabel || "Hoy"} · {stats.rangeLabel || "Corte operativo"}
                 </p>
               </div>
             </header>
@@ -2009,30 +2142,30 @@ function App() {
             <div className="stats-hero">
               <article className="stats-banner">
                 <p className="eyebrow">Ventas y control</p>
-                <h3>Resumen coherente desde cobros reales, ranking y categorías</h3>
+                <h3>Resumen diario desde cobros reales, ranking y categorías</h3>
                 <p>
-                  Esta vista usa los datos del backend sin calendario ni fórmulas duplicadas.
+                  Esta vista muestra solo el corte de hoy para comparar con cocina y caja sin mezclar históricos.
                 </p>
               </article>
 
               <div className="kpi-grid stats-kpi-grid">
                 <article className="kpi-card">
-                  <h3>Comandas del mes</h3>
+                  <h3>Comandas del dia</h3>
                   <strong>{stats.totalOrders}</strong>
                 </article>
                 <article className="kpi-card">
-                  <h3>Comandas pagadas</h3>
+                  <h3>Comandas pagadas hoy</h3>
                   <strong>{stats.totalPaidOrders}</strong>
                 </article>
                 <article className="kpi-card">
-                  <h3>Ganancia total</h3>
+                  <h3>Ganancia del dia</h3>
                   <strong>{formatCurrency(stats.totalSales)}</strong>
                 </article>
                 <article className="kpi-card">
-                  <h3>Contenedores vendidos</h3>
+                  <h3>Contenedores hoy</h3>
                   <strong>{stats.containerSummary.quantity}</strong>
                   <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                    {formatCurrency(stats.containerSummary.revenue)} ganados
+                    {formatCurrency(stats.containerSummary.revenue)} ganados hoy
                   </p>
                 </article>
               </div>
@@ -2131,7 +2264,7 @@ function App() {
                         );
                       })
                     ) : (
-                      <p className="empty">Aun no hay ventas de bebidas en este periodo.</p>
+                      <p className="empty">Aun no hay ventas de bebidas hoy.</p>
                     )}
                   </article>
 
@@ -2174,7 +2307,7 @@ function App() {
                         );
                       })
                     ) : (
-                      <p className="empty">Aun no hay ventas de comida en este periodo.</p>
+                      <p className="empty">Aun no hay ventas de comida hoy.</p>
                     )}
                   </article>
                 </div>
@@ -2182,7 +2315,7 @@ function App() {
 
               <section className="stats-panel">
                 <div className="section-header stats-panel-head">
-                  <h3>Ranking general y quincenal</h3>
+                  <h3>Ranking general del dia</h3>
                   <span className="stats-chip">Más vendidos y menos vendidos</span>
                 </div>
 
@@ -2225,55 +2358,57 @@ function App() {
                     </div>
                   </article>
 
-                  {stats.quincenas.map((period) => (
-                    <article className="ranking-card" key={period.id}>
-                      <h4>{period.label}</h4>
-                      <div className="quincena-kpis">
-                        <div>
-                          <span>Pedidos</span>
-                          <strong>{period.orders}</strong>
-                        </div>
-                        <div>
-                          <span>Ganancia</span>
-                          <strong>{formatCurrency(period.totalSales)}</strong>
-                        </div>
-                      </div>
-                      <div className="rank-columns">
-                        <div>
-                          <p className="rank-column-label">Más vendidos</p>
-                          <ol className="rank-list">
-                            {period.topDishes.map((dish, index) => (
-                              <li key={`${period.id}-${dish.name}-top-${index}`}>
-                                <span>{dish.name}</span>
-                                <div style={{ textAlign: "right" }}>
-                                  <strong>{dish.quantity}</strong>
-                                  <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                                    {formatCurrency(dish.revenue)}
-                                  </small>
-                                </div>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                        <div>
-                          <p className="rank-column-label">Menos vendidos</p>
-                          <ol className="rank-list muted">
-                            {period.bottomDishes.map((dish, index) => (
-                              <li key={`${period.id}-${dish.name}-bottom-${index}`}>
-                                <span>{dish.name}</span>
-                                <div style={{ textAlign: "right" }}>
-                                  <strong>{dish.quantity}</strong>
-                                  <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                                    {formatCurrency(dish.revenue)}
-                                  </small>
-                                </div>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
+                  {publicPagesView
+                    ? stats.quincenas.map((period) => (
+                        <article className="ranking-card" key={period.id}>
+                          <h4>{period.label}</h4>
+                          <div className="quincena-kpis">
+                            <div>
+                              <span>Pedidos</span>
+                              <strong>{period.orders}</strong>
+                            </div>
+                            <div>
+                              <span>Ganancia</span>
+                              <strong>{formatCurrency(period.totalSales)}</strong>
+                            </div>
+                          </div>
+                          <div className="rank-columns">
+                            <div>
+                              <p className="rank-column-label">Más vendidos</p>
+                              <ol className="rank-list">
+                                {period.topDishes.map((dish, index) => (
+                                  <li key={`${period.id}-${dish.name}-top-${index}`}>
+                                    <span>{dish.name}</span>
+                                    <div style={{ textAlign: "right" }}>
+                                      <strong>{dish.quantity}</strong>
+                                      <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                                        {formatCurrency(dish.revenue)}
+                                      </small>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ol>
+                            </div>
+                            <div>
+                              <p className="rank-column-label">Menos vendidos</p>
+                              <ol className="rank-list muted">
+                                {period.bottomDishes.map((dish, index) => (
+                                  <li key={`${period.id}-${dish.name}-bottom-${index}`}>
+                                    <span>{dish.name}</span>
+                                    <div style={{ textAlign: "right" }}>
+                                      <strong>{dish.quantity}</strong>
+                                      <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                                        {formatCurrency(dish.revenue)}
+                                      </small>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ol>
+                            </div>
+                          </div>
+                        </article>
+                      ))
+                    : null}
                 </div>
 
                 <div className="payment-grid" style={{ marginTop: 18 }}>
