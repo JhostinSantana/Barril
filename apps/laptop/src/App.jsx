@@ -73,6 +73,7 @@ const SERVICE_TYPE_OPTIONS = [
   { id: "mesa", label: "Mesa" },
   { id: "para_llevar", label: "Para llevar" },
 ];
+const PUBLIC_DASHBOARD_URL = "https://jhostinsantana.github.io/Barril/";
 
 function isPublicPagesView() {
   if (typeof window === "undefined") return false;
@@ -81,6 +82,20 @@ function isPublicPagesView() {
     window.location.hostname.includes("github.io") &&
     window.location.pathname.includes("/Barril/")
   );
+}
+
+function normalizePublicBackendUrl(value) {
+  return `${value ?? ""}`.trim().replace(/\/+$/, "");
+}
+
+function buildPublicDashboardUrl(backendUrl) {
+  const normalizedUrl = normalizePublicBackendUrl(backendUrl);
+  if (!normalizedUrl) return "";
+
+  const url = new URL(PUBLIC_DASHBOARD_URL);
+  url.searchParams.set("api", normalizedUrl);
+  url.searchParams.set("socket", normalizedUrl);
+  return url.toString();
 }
 
 function readStoredPublicApiBaseUrl() {
@@ -117,6 +132,7 @@ function normalizeCashSession(value) {
   return {
     openingCash: Number.isFinite(openingCash) ? openingCash : 0,
     openingConfirmed: Boolean(value?.openingConfirmed),
+    sessionKey: typeof value?.sessionKey === "string" ? value.sessionKey : null,
     closingReport:
       closingReport && typeof closingReport === "object"
         ? {
@@ -602,7 +618,9 @@ function App() {
   });
   const [cashSession, setCashSession] = useState({
     openingCash: 0,
+    openingConfirmed: false,
     closingReport: null,
+    sessionKey: null,
   });
   const [cashSessionCutoff, setCashSessionCutoff] = useState(() =>
     loadCashSessionCutoff(),
@@ -648,6 +666,10 @@ function App() {
   const openingCashPromptedRef = useRef(false);
   const publicPagesView = isPublicPagesView();
   const stats = publicPagesView ? allTimeStats : dailyStats;
+  const publicBackendUrl = normalizePublicBackendUrl(
+    publicApiDraft || networkInfo.publicApiUrl,
+  );
+  const publicDashboardUrl = buildPublicDashboardUrl(publicBackendUrl);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1170,7 +1192,7 @@ function App() {
         setLoading(false);
       }
     }
-  }, [cashSessionCutoff, dailyStats, allTimeStats, getJson, historyGrouped, historyOrders, networkInfo, publicPagesView, restaurantName, statsSummary]);
+  }, [cashSessionCutoff, getJson, publicPagesView]);
 
   const loadStatsView = useCallback(async () => {
     const todayRange = getBogotaDayRange();
@@ -1216,18 +1238,7 @@ function App() {
       }
       throw error;
     }
-  }, [
-    cashClose,
-    getJson,
-    historyGrouped,
-    historyOrders,
-    networkInfo,
-    pendingOrders,
-    paidOrders,
-    cashSession,
-    publicPagesView,
-    restaurantName,
-  ]);
+  }, [getJson, publicPagesView]);
 
   const loadWaiters = useCallback(async () => {
     const result = await getJson("/api/waiters");
@@ -1562,24 +1573,29 @@ function App() {
       };
     });
 
-    const updatedOrder = await getJson(`/api/orders/${weightModalOrder.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientName: weightModalOrder.clientName,
-        tableNumber: weightModalOrder.tableNumber,
-        waiterName: weightModalOrder.waiterName,
-        items: nextItems,
-      }),
-    });
+    try {
+      const updatedOrder = await getJson(`/api/orders/${weightModalOrder.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientName: weightModalOrder.clientName,
+          tableNumber: weightModalOrder.tableNumber,
+          serviceType: weightModalOrder.serviceType,
+          waiterName: weightModalOrder.waiterName,
+          items: nextItems,
+        }),
+      });
 
-    setWeightModalOrder(updatedOrder);
-    closeWeightModal();
-    await Promise.all([
-      loadCashView(),
-      loadStatsView(),
-      loadHistoryView(historyDate),
-    ]);
+      setWeightModalOrder(updatedOrder);
+      closeWeightModal();
+      await Promise.all([
+        loadCashView(),
+        loadStatsView(),
+        loadHistoryView(historyDate),
+      ]);
+    } catch (error) {
+      window.alert(error.message ?? "No se pudo guardar el gramaje.");
+    }
   }
 
   async function markOrderDispatched(order) {
@@ -1869,15 +1885,17 @@ function App() {
   }
 
   async function savePublicUrl() {
+    const nextPublicApiUrl = normalizePublicBackendUrl(publicApiDraft);
     const payload = await getJson("/api/network-info/public-url", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ publicApiUrl: publicApiDraft }),
+      body: JSON.stringify({ publicApiUrl: nextPublicApiUrl }),
     });
     setNetworkInfo((current) => ({
       ...current,
       publicApiUrl: payload.publicApiUrl,
     }));
+    setPublicApiDraft(payload.publicApiUrl);
     setNetworkStatus("URL publica guardada.");
   }
 
@@ -2015,24 +2033,16 @@ function App() {
     };
 
     const handleDisconnect = () => {
-      setPublicBackendConnected(false);
       if (publicPagesView) {
-        if (hydratePublicDashboardSnapshot()) {
-          setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
-          return;
-        }
-        setNetworkStatus("Sin conexion con el backend publico.");
+        // Quick Cloudflare tunnels can briefly drop the socket while HTTP still works.
+        // Keep the last good dashboard visible and let the HTTP fallback decide if it is offline.
+        return;
       }
     };
 
     const handleConnectError = () => {
-      setPublicBackendConnected(false);
       if (publicPagesView) {
-        if (hydratePublicDashboardSnapshot()) {
-          setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
-          return;
-        }
-        setNetworkStatus("Sin conexion con el backend publico.");
+        return;
       }
     };
 
@@ -2043,7 +2053,6 @@ function App() {
 
     const handleOrderChange = () => {
       if (publicPagesView) {
-        loadPublicDashboardSnapshot().catch(() => {});
         return;
       }
       loadCashView({ silent: true });
@@ -2054,18 +2063,23 @@ function App() {
     socket.on("disconnect", handleDisconnect);
     socket.on("connect_error", handleConnectError);
     socket.on("dashboard:snapshot", handleDashboardSnapshot);
-    socket.on("order:new", (incomingOrder) => {
-      if (!publicPagesView && autoPrintEnabled) {
+    const handleNewOrder = (incomingOrder) => {
+      if (autoPrintEnabled) {
         triggerAutoPrint(incomingOrder);
       }
-    });
-    socket.on("order:updated", handleOrderChange);
-    socket.on("order:kitchen-updated", handleOrderChange);
-    socket.on("order:paid", handleOrderChange);
-    socket.on("order:dispatched", handleOrderChange);
+    };
+
+    if (!publicPagesView) {
+      socket.on("order:new", handleNewOrder);
+      socket.on("order:updated", handleOrderChange);
+      socket.on("order:kitchen-updated", handleOrderChange);
+      socket.on("order:paid", handleOrderChange);
+      socket.on("order:dispatched", handleOrderChange);
+    }
 
     socket.connect();
 
+    let publicFallbackTimer = null;
     if (publicPagesView) {
       loadPublicDashboardSnapshot().catch(() => {
         setPublicBackendConnected(false);
@@ -2075,6 +2089,14 @@ function App() {
         }
         setNetworkStatus("Sin conexion con el backend publico.");
       });
+      publicFallbackTimer = window.setInterval(() => {
+        loadPublicDashboardSnapshot().catch(() => {
+          if (!hydratePublicDashboardSnapshot()) {
+            setPublicBackendConnected(false);
+            setNetworkStatus("Sin conexion con el backend publico.");
+          }
+        });
+      }, 30000);
     } else {
       loadCashView();
       loadStatsView();
@@ -2088,11 +2110,14 @@ function App() {
       socket.off("disconnect", handleDisconnect);
       socket.off("connect_error", handleConnectError);
       socket.off("dashboard:snapshot", handleDashboardSnapshot);
-      socket.off("order:new");
+      socket.off("order:new", handleNewOrder);
       socket.off("order:updated", handleOrderChange);
       socket.off("order:kitchen-updated", handleOrderChange);
       socket.off("order:paid", handleOrderChange);
       socket.off("order:dispatched", handleOrderChange);
+      if (publicFallbackTimer) {
+        window.clearInterval(publicFallbackTimer);
+      }
       socket.disconnect();
     };
   }, [
@@ -2453,7 +2478,7 @@ function App() {
                 activeView === item.id ? "nav-button active" : "nav-button"
               }
               onClick={() => {
-                if (item.id === "stats" || item.id === "history") {
+                if (item.id === "stats") {
                   requestProtectedView(item.id);
                   return;
                 }
@@ -3513,7 +3538,10 @@ function App() {
                   onChange={(event) => setPublicApiDraft(event.target.value)}
                   placeholder="https://tu-subdominio.trycloudflare.com"
                 />
-                <p>Ejecuta npm run tunnel:server y pega aqui la URL HTTPS.</p>
+                <p>
+                  Ejecuta <strong>npm run tunnel:server</strong>, copia la URL
+                  HTTPS que aparece en la terminal y pegala aqui.
+                </p>
                 <div className="actions">
                   <button type="button" onClick={savePublicUrl}>
                     Guardar URL publica
@@ -3528,6 +3556,74 @@ function App() {
                     Copiar URL publica
                   </button>
                 </div>
+              </article>
+
+              <article className="order-card">
+                <h4>Dashboard publico para clientes</h4>
+                {publicDashboardUrl ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <p style={{ wordBreak: "break-all" }}>
+                      {publicDashboardUrl}
+                    </p>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: "#fff",
+                          padding: 12,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <QRCode value={publicDashboardUrl} />
+                      </div>
+                    </div>
+                    <p>
+                      Comparte este QR o enlace. El cliente no necesita pegar
+                      IP ni configurar nada.
+                    </p>
+                    <div className="actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyToClipboard(
+                            publicDashboardUrl,
+                            "enlace publico del dashboard",
+                          )
+                        }
+                      >
+                        Copiar enlace
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() =>
+                          window.open(
+                            publicDashboardUrl,
+                            "_blank",
+                            "noopener,noreferrer",
+                          )
+                        }
+                      >
+                        Abrir dashboard
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p>
+                    Pega y guarda primero la URL HTTPS del tunel para generar
+                    el enlace y QR del cliente.
+                  </p>
+                )}
               </article>
 
               <article className="order-card">
@@ -4332,9 +4428,9 @@ function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <p className="security-flag">Acceso restringido</p>
-            <h3>Estadisticas y dias anteriores</h3>
+            <h3>Dashboard administrativo</h3>
             <p className="security-note">
-              Ingresa el PIN para acceder a esta pantalla.
+              Ingresa el PIN de administrador para abrir el dashboard.
             </p>
 
             <form

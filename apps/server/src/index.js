@@ -4,6 +4,8 @@ import { nanoid } from "nanoid";
 import fs from "node:fs";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import {
     addOrderPayment,
@@ -133,6 +135,15 @@ async function publishDashboardSnapshot() {
 
 app.get("/health", (_, res) => {
   res.json({ ok: true, service: "asados-en-el-barril-server" });
+});
+
+app.get("/", (_, res) => {
+  res.json({
+    ok: true,
+    service: "asados-en-el-barril-server",
+    message:
+      "Servidor Barril activo. Usa /health para probar o /api/dashboard/snapshot para el dashboard publico.",
+  });
 });
 
 app.get("/api/menu", async (_, res, next) => {
@@ -415,9 +426,13 @@ app.post("/api/orders", async (req, res, next) => {
       menuItemId: item.menuItemId,
       quantity: Number(item.quantity) || 1,
       weightGrams: item.weightGrams != null ? Number(item.weightGrams) : null,
+      weightBreakdown: Array.isArray(item.weightBreakdown)
+        ? item.weightBreakdown.map((grams) => Number(grams))
+        : null,
       unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
       subtotal: item.subtotal != null ? Number(item.subtotal) : null,
       pricingMode: item.pricingMode ?? null,
+      weightFormula: item.weightFormula ?? null,
       notes: typeof item.notes === "string" ? item.notes : "",
     }));
 
@@ -533,9 +548,13 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
       menuItemId: item.menuItemId,
       quantity: Number(item.quantity) || 1,
       weightGrams: item.weightGrams != null ? Number(item.weightGrams) : null,
+      weightBreakdown: Array.isArray(item.weightBreakdown)
+        ? item.weightBreakdown.map((grams) => Number(grams))
+        : null,
       unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
       subtotal: item.subtotal != null ? Number(item.subtotal) : null,
       pricingMode: item.pricingMode ?? null,
+      weightFormula: item.weightFormula ?? null,
       notes: typeof item.notes === "string" ? item.notes : "",
     }));
 
@@ -787,13 +806,13 @@ app.patch("/api/orders/:orderId/pay", async (req, res, next) => {
       io.emit("order:paid", updatedOrder);
     }
 
+    await publishDashboardSnapshot();
     res.json(updatedOrder);
   } catch (error) {
     next(error);
   }
 });
 
-          await publishDashboardSnapshot();
 app.delete("/api/orders/:orderId", async (req, res, next) => {
   try {
     const { orderId } = req.params;
@@ -967,11 +986,8 @@ const PORT = process.env.PORT || 4000;
 await initializeDatabase();
 
 // Ensure backups directory exists and schedule periodic copies of the DB file.
-const DATA_DIR = new URL("../data", import.meta.url).pathname.replace(
-  /^\/?([A-Za-z]:)?/,
-  "",
-);
-const BACKUPS_DIR = `${DATA_DIR.replace(/\\/g, "/")}/backups`;
+const DATA_DIR = fileURLToPath(new URL("../data/", import.meta.url));
+const BACKUPS_DIR = path.join(DATA_DIR, "backups");
 try {
   // Create backups dir if missing
   // eslint-disable-next-line no-console
@@ -982,10 +998,12 @@ try {
 
 function performPeriodicBackup() {
   try {
-    const src = `${DATA_DIR.replace(/\\/g, "/")}/barril.sqlite`;
-    const dest = `${BACKUPS_DIR.replace(/\\/g, "/")}/barril-${new Date()
+    const src = path.join(DATA_DIR, "barril.sqlite");
+    if (!fs.existsSync(src)) return;
+
+    const dest = path.join(BACKUPS_DIR, `barril-${new Date()
       .toISOString()
-      .replace(/[:.]/g, "-")}.sqlite`;
+      .replace(/[:.]/g, "-")}.sqlite`);
     fs.copyFileSync(src, dest);
     // eslint-disable-next-line no-console
     console.log("Backup saved to", dest);
