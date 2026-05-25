@@ -68,6 +68,22 @@ function isLocalhostBackendUrl(value) {
 
 const DELETE_ACCOUNT_PIN = "040420";
 const STATS_ACCESS_PIN = "040420";
+const ADMIN_DASHBOARD_LINK_TARGET = "__admin-dashboard-link__";
+const PROTECTED_NAV_VIEW_IDS = new Set(["stats", "history"]);
+const PROTECTED_VIEW_COPY = {
+  stats: {
+    title: "Dashboard administrativo",
+    note: "Ingresa el PIN de administrador para abrir el dashboard.",
+  },
+  history: {
+    title: "Dias anteriores",
+    note: "Ingresa el PIN de administrador para revisar las comandas anteriores.",
+  },
+  [ADMIN_DASHBOARD_LINK_TARGET]: {
+    title: "Enlace del dashboard administrativo",
+    note: "Ingresa el PIN de administrador para ver el QR y el enlace remoto.",
+  },
+};
 const BOGOTA_TIME_ZONE = "America/Bogota";
 const SERVICE_TYPE_OPTIONS = [
   { id: "mesa", label: "Mesa" },
@@ -501,7 +517,10 @@ function saveCashSessionCutoff(value) {
 function filterOrdersByCashSession(orders, cutoff) {
   if (!cutoff) return Array.isArray(orders) ? orders : [];
   return (Array.isArray(orders) ? orders : []).filter(
-    (order) => !order?.createdAt || order.createdAt >= cutoff,
+    (order) => {
+      const movementAt = order?.paidAt ?? order?.createdAt;
+      return !movementAt || movementAt >= cutoff;
+    },
   );
 }
 
@@ -625,9 +644,7 @@ function App() {
   const [cashSessionCutoff, setCashSessionCutoff] = useState(() =>
     loadCashSessionCutoff(),
   );
-  const [historyDate, setHistoryDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [historyDate, setHistoryDate] = useState(() => getBogotaDateKey());
   const [historyOrders, setHistoryOrders] = useState([]);
   const [historyGrouped, setHistoryGrouped] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -640,6 +657,12 @@ function App() {
     localApiUrl: "",
     publicApiUrl: "",
   });
+  const [tunnelStatus, setTunnelStatus] = useState({
+    status: "stopped",
+    publicUrl: "",
+    error: "",
+    startedAt: null,
+  });
   const [publicApiDraft, setPublicApiDraft] = useState("");
   const [restaurantNameDraft, setRestaurantNameDraft] = useState("");
   const [networkStatus, setNetworkStatus] = useState("");
@@ -647,6 +670,7 @@ function App() {
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
   const [confirmModal, setConfirmModal] = useState(null);
   const [protectedViewModal, setProtectedViewModal] = useState(null);
+  const [dashboardLinkUnlocked, setDashboardLinkUnlocked] = useState(false);
   const [openingCashModal, setOpeningCashModal] = useState(null);
   const [closingCashModal, setClosingCashModal] = useState(null);
   const [deleteOrderModal, setDeleteOrderModal] = useState(null);
@@ -735,6 +759,24 @@ function App() {
     });
   }
 
+  function requestDashboardLinkAccess() {
+    setProtectedViewModal({
+      targetView: ADMIN_DASHBOARD_LINK_TARGET,
+      pin: "",
+      error: "",
+      loading: false,
+    });
+  }
+
+  function getProtectedViewCopy(targetView) {
+    return (
+      PROTECTED_VIEW_COPY[targetView] ?? {
+        title: "Acceso administrativo",
+        note: "Ingresa el PIN de administrador para continuar.",
+      }
+    );
+  }
+
   function confirmProtectedView() {
     if (!protectedViewModal) return;
 
@@ -745,6 +787,12 @@ function App() {
           ? { ...current, error: "PIN incorrecto. Vuelve a intentarlo." }
           : current,
       );
+      return;
+    }
+
+    if (protectedViewModal.targetView === ADMIN_DASHBOARD_LINK_TARGET) {
+      setDashboardLinkUnlocked(true);
+      setProtectedViewModal(null);
       return;
     }
 
@@ -1122,7 +1170,7 @@ function App() {
     window.location.href = `${window.location.pathname}?api=${encodeURIComponent(nextUrl)}&socket=${encodeURIComponent(nextUrl)}`;
   }
 
-  const loadCashView = useCallback(async ({ silent = false } = {}) => {
+  const loadCashView = useCallback(async ({ silent = false, cutoff = cashSessionCutoff } = {}) => {
     if (!silent) {
       setLoading(true);
     }
@@ -1136,16 +1184,16 @@ function App() {
       ]);
       const filteredPending = filterOrdersByCashSession(
         pending,
-        cashSessionCutoff,
+        cutoff,
       );
-      const filteredPaid = filterOrdersByCashSession(paid, cashSessionCutoff);
+      const filteredPaid = filterOrdersByCashSession(paid, cutoff);
       const normalizedCashSession = normalizeCashSession(cashSessionResult);
       const closingReport = normalizedCashSession.closingReport;
       const openingCash = normalizedCashSession.openingCash;
-      const filteredClose = cashSessionCutoff
+      const filteredClose = cutoff
         ? buildCashCloseFromOrders(
             [...filteredPending, ...filteredPaid],
-            cashSessionCutoff,
+            cutoff,
             openingCash,
           )
         : close;
@@ -1326,14 +1374,18 @@ function App() {
         openingConfirmed: false,
       }));
       setConfirmModal(null);
-      setActiveView("history");
+      requestProtectedView("history");
       setPendingOrders([]);
       setPaidOrders([]);
       setQuery("");
       setPayingOrder(null);
       setSelectedPaidOrder(null);
       setDayDetailModal(null);
-      await Promise.all([loadStatsView(), loadRecentHistory(7)]);
+      await Promise.all([
+        loadCashView({ silent: true, cutoff: newCutoff }),
+        loadStatsView(),
+        loadRecentHistory(7),
+      ]);
       setNetworkStatus("Cierre de caja realizado. Moviendo a dias anteriores.");
     } catch (error) {
       setNetworkStatus(`Error cerrando caja: ${error.message}`);
@@ -1349,7 +1401,7 @@ function App() {
       for (let i = 0; i < days; i++) {
         const d = new Date();
         d.setDate(d.getDate() - i);
-        const iso = d.toISOString().slice(0, 10);
+        const iso = getBogotaDateKey(d);
         try {
           const orders = await getJson(`/api/orders/history?date=${iso}`);
           list.push({ date: iso, orders });
@@ -1742,7 +1794,56 @@ function App() {
     const info = await getJson("/api/network-info");
     setNetworkInfo(info);
     setPublicApiDraft(info.publicApiUrl ?? "");
+    if (info.tunnel) {
+      setTunnelStatus(info.tunnel);
+    }
   }, [getJson]);
+
+  async function startTunnelFromLaptop() {
+    setNetworkStatus("Iniciando tunel publico...");
+    setTunnelStatus((current) => ({
+      ...current,
+      status: "starting",
+      error: "",
+    }));
+
+    try {
+      const status = await getJson("/api/tunnel/start", { method: "POST" });
+      const publicUrl = normalizePublicBackendUrl(status.publicUrl);
+      setTunnelStatus(status);
+      setPublicApiDraft(publicUrl);
+      setNetworkInfo((current) => ({
+        ...current,
+        publicApiUrl: publicUrl,
+        tunnel: status,
+      }));
+      setNetworkStatus("Tunel publico activo. Ya puedes mostrar el QR del administrador.");
+    } catch (error) {
+      setTunnelStatus((current) => ({
+        ...current,
+        status: "error",
+        error: error.message,
+      }));
+      setNetworkStatus(`Error iniciando tunel: ${error.message}`);
+    }
+  }
+
+  async function stopTunnelFromLaptop() {
+    setNetworkStatus("Deteniendo tunel publico...");
+    try {
+      const status = await getJson("/api/tunnel/stop", { method: "POST" });
+      setTunnelStatus(status);
+      setPublicApiDraft("");
+      setNetworkInfo((current) => ({
+        ...current,
+        publicApiUrl: "",
+        tunnel: status,
+      }));
+      setNetworkStatus("Tunel publico detenido.");
+    } catch (error) {
+      setNetworkStatus(`Error deteniendo tunel: ${error.message}`);
+    }
+  }
 
   async function downloadJsonBackup() {
     setLoading(true);
@@ -2059,6 +2160,26 @@ function App() {
       loadStatsView();
     };
 
+    const handleTunnelUpdated = (status) => {
+      if (publicPagesView || !status) return;
+      setTunnelStatus(status);
+      if (status.publicUrl) {
+        setPublicApiDraft(status.publicUrl);
+        setNetworkInfo((current) => ({
+          ...current,
+          publicApiUrl: status.publicUrl,
+          tunnel: status,
+        }));
+      } else if (status.status === "stopped") {
+        setPublicApiDraft("");
+        setNetworkInfo((current) => ({
+          ...current,
+          publicApiUrl: "",
+          tunnel: status,
+        }));
+      }
+    };
+
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("connect_error", handleConnectError);
@@ -2075,6 +2196,7 @@ function App() {
       socket.on("order:kitchen-updated", handleOrderChange);
       socket.on("order:paid", handleOrderChange);
       socket.on("order:dispatched", handleOrderChange);
+      socket.on("tunnel:updated", handleTunnelUpdated);
     }
 
     socket.connect();
@@ -2115,6 +2237,7 @@ function App() {
       socket.off("order:kitchen-updated", handleOrderChange);
       socket.off("order:paid", handleOrderChange);
       socket.off("order:dispatched", handleOrderChange);
+      socket.off("tunnel:updated", handleTunnelUpdated);
       if (publicFallbackTimer) {
         window.clearInterval(publicFallbackTimer);
       }
@@ -2478,7 +2601,7 @@ function App() {
                 activeView === item.id ? "nav-button active" : "nav-button"
               }
               onClick={() => {
-                if (item.id === "stats") {
+                if (PROTECTED_NAV_VIEW_IDS.has(item.id)) {
                   requestProtectedView(item.id);
                   return;
                 }
@@ -3539,10 +3662,45 @@ function App() {
                   placeholder="https://tu-subdominio.trycloudflare.com"
                 />
                 <p>
-                  Ejecuta <strong>npm run tunnel:server</strong>, copia la URL
-                  HTTPS que aparece en la terminal y pegala aqui.
+                  Puedes iniciar el tunel automaticamente desde aqui. Si ya lo
+                  abriste por terminal, pega manualmente la URL HTTPS.
                 </p>
+                <p>
+                  Estado:{" "}
+                  <strong>
+                    {tunnelStatus.status === "running"
+                      ? "Activo"
+                      : tunnelStatus.status === "starting"
+                        ? "Iniciando..."
+                        : tunnelStatus.status === "error"
+                          ? "Error"
+                          : "Detenido"}
+                  </strong>
+                  {tunnelStatus.publicUrl ? ` · ${tunnelStatus.publicUrl}` : ""}
+                </p>
+                {tunnelStatus.error ? (
+                  <p style={{ color: "#b42318", fontWeight: 700 }}>
+                    {tunnelStatus.error}
+                  </p>
+                ) : null}
                 <div className="actions">
+                  <button
+                    type="button"
+                    onClick={startTunnelFromLaptop}
+                    disabled={tunnelStatus.status === "starting"}
+                  >
+                    {tunnelStatus.status === "starting"
+                      ? "Iniciando..."
+                      : "Iniciar tunel"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={stopTunnelFromLaptop}
+                    disabled={tunnelStatus.status === "starting"}
+                  >
+                    Detener tunel
+                  </button>
                   <button type="button" onClick={savePublicUrl}>
                     Guardar URL publica
                   </button>
@@ -3559,8 +3717,26 @@ function App() {
               </article>
 
               <article className="order-card">
-                <h4>Dashboard publico para clientes</h4>
-                {publicDashboardUrl ? (
+                <h4>Dashboard administrativo remoto</h4>
+                {!dashboardLinkUnlocked ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <p>
+                      El enlace y el QR del dashboard estan protegidos. Solo el
+                      administrador puede mostrarlos.
+                    </p>
+                    <div className="actions">
+                      <button type="button" onClick={requestDashboardLinkAccess}>
+                        Mostrar con PIN admin
+                      </button>
+                    </div>
+                  </div>
+                ) : publicDashboardUrl ? (
                   <div
                     style={{
                       display: "flex",
@@ -3588,8 +3764,8 @@ function App() {
                       </div>
                     </div>
                     <p>
-                      Comparte este QR o enlace. El cliente no necesita pegar
-                      IP ni configurar nada.
+                      Comparte este QR o enlace solo con el administrador. No
+                      necesita pegar IP ni configurar nada.
                     </p>
                     <div className="actions">
                       <button
@@ -3597,7 +3773,7 @@ function App() {
                         onClick={() =>
                           copyToClipboard(
                             publicDashboardUrl,
-                            "enlace publico del dashboard",
+                            "enlace administrativo del dashboard",
                           )
                         }
                       >
@@ -3621,7 +3797,7 @@ function App() {
                 ) : (
                   <p>
                     Pega y guarda primero la URL HTTPS del tunel para generar
-                    el enlace y QR del cliente.
+                    el enlace y QR del administrador.
                   </p>
                 )}
               </article>
@@ -4428,9 +4604,9 @@ function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <p className="security-flag">Acceso restringido</p>
-            <h3>Dashboard administrativo</h3>
+            <h3>{getProtectedViewCopy(protectedViewModal.targetView).title}</h3>
             <p className="security-note">
-              Ingresa el PIN de administrador para abrir el dashboard.
+              {getProtectedViewCopy(protectedViewModal.targetView).note}
             </p>
 
             <form

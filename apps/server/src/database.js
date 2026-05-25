@@ -991,7 +991,7 @@ export async function listOrders({ status, query } = {}) {
 
 export async function listOrdersByDate(dateKey) {
   const rows = await all(
-    "SELECT * FROM orders WHERE substr(datetime(created_at, '-5 hours'), 1, 10) = ? ORDER BY created_at DESC",
+    "SELECT * FROM orders WHERE substr(datetime(COALESCE(paid_at, created_at), '-5 hours'), 1, 10) = ? ORDER BY COALESCE(paid_at, created_at) DESC",
     [dateKey]
   );
 
