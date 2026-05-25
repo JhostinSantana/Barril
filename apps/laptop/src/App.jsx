@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { QRCode } from "react-qr-code";
 import { io } from "socket.io-client";
@@ -53,16 +53,6 @@ function isDashboardSnapshot(value) {
         value.allTimeStats ||
         value.statsSummary ||
         value.cashSession),
-  );
-}
-
-function isLocalhostBackendUrl(value) {
-  const normalized = `${value ?? ""}`.trim().toLowerCase();
-  return (
-    !normalized ||
-    normalized.includes("localhost") ||
-    normalized.includes("127.0.0.1") ||
-    normalized.includes("10.0.2.2")
   );
 }
 
@@ -142,44 +132,93 @@ function writeStoredPublicSocketUrl(value) {
   }
 }
 
+function normalizeClosingReport(value) {
+  if (!value || typeof value !== "object") return null;
+
+  const efectivo = value.efectivo != null ? Number(value.efectivo) : 0;
+  const transferencia =
+    value.transferencia != null ? Number(value.transferencia) : 0;
+  const totalSold =
+    value.totalSold != null
+      ? Number(value.totalSold)
+      : roundMoney(efectivo + transferencia);
+  const expectedCash =
+    value.efectivo != null
+      ? efectivo
+      : value.expectedCash != null
+        ? Number(value.expectedCash)
+        : null;
+  const expectedTransfer =
+    value.transferencia != null
+      ? transferencia
+      : value.expectedTransfer != null
+        ? Number(value.expectedTransfer)
+        : null;
+  const expectedTotal =
+    value.totalSold != null
+      ? totalSold
+      : value.expectedTotal != null
+        ? Number(value.expectedTotal)
+        : roundMoney(Number(expectedCash ?? 0) + Number(expectedTransfer ?? 0));
+  const countedTotal =
+    value.countedTotal != null
+      ? Number(value.countedTotal)
+      : roundMoney(Number(value.countedCash ?? 0) + Number(value.countedTransfer ?? 0));
+  const differenceTotal = roundMoney(countedTotal - expectedTotal);
+
+  return {
+    id: value.id ?? value.closedAt ?? null,
+    date: value.date ?? null,
+    openingCash:
+      value.openingCash != null ? Number(value.openingCash) : 0,
+    efectivo,
+    transferencia,
+    totalSold,
+    countedCash:
+      value.countedCash != null ? Number(value.countedCash) : null,
+    countedTransfer:
+      value.countedTransfer != null ? Number(value.countedTransfer) : null,
+    expectedCash,
+    expectedTransfer,
+    expectedTotal,
+    countedTotal,
+    differenceCash:
+      value.differenceCash != null ? Number(value.differenceCash) : null,
+    differenceTransfer:
+      value.differenceTransfer != null ? Number(value.differenceTransfer) : null,
+    differenceTotal,
+    matches: differenceTotal === 0,
+    adminConfirmed: Boolean(value.adminConfirmed),
+    confirmedAt: value.confirmedAt ?? null,
+    reviewPaidOrders: Array.isArray(value.reviewPaidOrders)
+      ? value.reviewPaidOrders
+      : [],
+    status:
+      differenceTotal === 0
+        ? "matched"
+        : differenceTotal > 0
+          ? "surplus"
+          : "short",
+    closedAt: value.closedAt ?? null,
+  };
+}
+
 function normalizeCashSession(value) {
   const openingCash = Number(value?.openingCash ?? 0);
-  const closingReport = value?.closingReport ?? null;
+  const closingReport = normalizeClosingReport(value?.closingReport);
+  const closingHistory = (Array.isArray(value?.closingHistory)
+    ? value.closingHistory
+    : []
+  )
+    .map(normalizeClosingReport)
+    .filter(Boolean);
+
   return {
     openingCash: Number.isFinite(openingCash) ? openingCash : 0,
     openingConfirmed: Boolean(value?.openingConfirmed),
     sessionKey: typeof value?.sessionKey === "string" ? value.sessionKey : null,
-    closingReport:
-      closingReport && typeof closingReport === "object"
-        ? {
-            countedCash:
-              closingReport.countedCash != null
-                ? Number(closingReport.countedCash)
-                : null,
-            countedTransfer:
-              closingReport.countedTransfer != null
-                ? Number(closingReport.countedTransfer)
-                : null,
-            expectedCash:
-              closingReport.expectedCash != null
-                ? Number(closingReport.expectedCash)
-                : null,
-            expectedTransfer:
-              closingReport.expectedTransfer != null
-                ? Number(closingReport.expectedTransfer)
-                : null,
-            differenceCash:
-              closingReport.differenceCash != null
-                ? Number(closingReport.differenceCash)
-                : null,
-            differenceTransfer:
-              closingReport.differenceTransfer != null
-                ? Number(closingReport.differenceTransfer)
-                : null,
-            matches: Boolean(closingReport.matches),
-            closedAt: closingReport.closedAt ?? null,
-          }
-        : null,
+    closingReport,
+    closingHistory,
   };
 }
 
@@ -215,6 +254,14 @@ const navItems = [
   { id: "waiters", label: "Meseros" },
   { id: "network", label: "Conectividad" },
 ];
+const STATS_RANGE_OPTIONS = [
+  { id: "hoy", label: "Hoy" },
+  { id: "ayer", label: "Ayer" },
+  { id: "semana", label: "Semana" },
+  { id: "mes", label: "Mes" },
+  { id: "año", label: "Año" },
+  { id: "personalizado", label: "Personalizado" },
+];
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", {
@@ -236,19 +283,13 @@ function roundMoney(value) {
   return Math.round((Number(value ?? 0) + Number.EPSILON) * 100) / 100;
 }
 
-function getCurrentMonthRange() {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: BOGOTA_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-  }).formatToParts(now);
-  const year = Number(parts.find((part) => part.type === "year")?.value ?? 0);
-  const month = Number(parts.find((part) => part.type === "month")?.value ?? 0);
-  return {
-    from: new Date(Date.UTC(year, month - 1, 1, 5, 0, 0, 0)).toISOString(),
-    to: new Date(Date.UTC(year, month, 1, 4, 59, 59, 999)).toISOString(),
-  };
+function normalizeDateForFormatting(value = new Date()) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? new Date() : value;
+  }
+
+  const parsedDate = new Date(value ?? Date.now());
+  return Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
 }
 
 function getWeightDraftValues(draftValue, quantity, fallbackWeight) {
@@ -463,22 +504,438 @@ function getOrderPaymentTotals(order) {
   };
 }
 
+function normalizeStatsPaymentMethod(value) {
+  const normalized = `${value ?? ""}`.trim().toLowerCase();
+  if (normalized === "efectivo") return "efectivo";
+  if (normalized === "transferencia") return "transferencia";
+  return null;
+}
+
+function getDashboardPaymentMovements(order) {
+  const payments = Array.isArray(order?.payments) ? order.payments : [];
+
+  if (payments.length > 0) {
+    return payments
+      .map((payment) => {
+        const paymentMethod = normalizeStatsPaymentMethod(payment.paymentMethod);
+        if (!paymentMethod) return null;
+
+        return {
+          orderId: order.id,
+          paymentMethod,
+          amount: roundMoney(payment.amount ?? 0),
+          createdAt: payment.createdAt ?? order.paidAt ?? order.createdAt ?? null,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  if (order?.status !== "paid") return [];
+
+  const paymentTotals = getOrderPaymentTotals(order);
+  const summaryMovements = [
+    ["efectivo", paymentTotals.efectivo],
+    ["transferencia", paymentTotals.transferencia],
+  ]
+    .filter(([, amount]) => Number(amount) > 0)
+    .map(([paymentMethod, amount]) => ({
+      orderId: order.id,
+      paymentMethod,
+      amount: roundMoney(amount),
+      createdAt: order.paidAt ?? order.createdAt ?? null,
+    }));
+
+  if (summaryMovements.length > 0) return summaryMovements;
+
+  const fallbackPaymentMethod = normalizeStatsPaymentMethod(order.paymentMethod);
+  if (!fallbackPaymentMethod) return [];
+
+  return [
+    {
+      orderId: order.id,
+      paymentMethod: fallbackPaymentMethod,
+      amount: roundMoney(order.total ?? 0),
+      createdAt: order.paidAt ?? order.createdAt ?? null,
+    },
+  ];
+}
+
+function getDashboardItemKey(item) {
+  return `${item?.menuItemId ?? ""}|${item?.name ?? ""}|${item?.category ?? ""}`;
+}
+
+function isBeverageDashboardItem(item) {
+  const category = `${item?.category ?? ""}`
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const menuItemId = `${item?.menuItemId ?? ""}`.trim().toLowerCase();
+  const name = `${item?.name ?? ""}`
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (category === "bebidas" || menuItemId.startsWith("bebida-")) {
+    return true;
+  }
+
+  return /^(agua natural|agua|jugo frozen|jugo|gaseosa personal|gaseosa de 1l|gaseosa|fuze te|del valle|cerveza sol|cerveza club|solveza|jarra de sangria|cafe)$/.test(name);
+}
+
+function getCashCloseStatus(difference) {
+  const rounded = roundMoney(difference);
+  if (rounded === 0) return "matched";
+  return rounded > 0 ? "surplus" : "short";
+}
+
+function getCashCloseStatusLabel(status) {
+  if (status === "matched") return "Coincide";
+  if (status === "surplus") return "Sobra";
+  return "Falta";
+}
+
+function formatSignedCurrency(value) {
+  const normalized = roundMoney(value);
+  return `${normalized > 0 ? "+" : ""}${formatCurrency(normalized)}`;
+}
+
+function buildDashboardMetrics({
+  paidOrders,
+  historyGrouped,
+  historyOrders,
+  dailyStats,
+  allTimeStats,
+  cashClose,
+  cashSession,
+  historyDate,
+  statsRange,
+}) {
+  const todayKey = getBogotaDateKey();
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayKey = getBogotaDateKey(yesterdayDate);
+
+  const paymentMap = new Map([
+    ["efectivo", { method: "efectivo", label: "Efectivo", count: 0, total: 0 }],
+    ["transferencia", { method: "transferencia", label: "Transferencia", count: 0, total: 0 }],
+  ]);
+  const topDishMap = new Map();
+  const weightedCutMap = new Map();
+  const beverageMap = new Map();
+  const containerMap = new Map();
+  const extraMap = new Map();
+  const paidByDate = new Map();
+  const containerHistoryMap = new Map();
+  const pendingClosingReport =
+    cashSession?.closingReport && !cashSession.closingReport.adminConfirmed
+      ? cashSession.closingReport
+      : null;
+  const paidOrdersList =
+    Array.isArray(pendingClosingReport?.reviewPaidOrders) &&
+    pendingClosingReport.reviewPaidOrders.length > 0
+      ? pendingClosingReport.reviewPaidOrders
+      : Array.isArray(paidOrders)
+        ? paidOrders
+        : [];
+
+  const addBucket = (map, key, label) => {
+    if (!map.has(key)) {
+      map.set(key, { key, label, quantity: 0, total: 0 });
+    }
+    return map.get(key);
+  };
+
+  let totalSales = 0;
+  let todaySales = 0;
+  let totalKgSold = 0;
+  let totalContainersSold = 0;
+  let totalBeveragesSold = 0;
+
+  for (const order of paidOrdersList) {
+    const orderDateKey = getBogotaDateKey(order.paidAt ?? order.createdAt);
+    const movements = getDashboardPaymentMovements(order);
+    const orderSales = movements.reduce((acc, movement) => acc + Number(movement.amount ?? 0), 0);
+    const dailyRow = paidByDate.get(orderDateKey) ?? {
+      date: orderDateKey,
+      label: orderDateKey === todayKey ? "Hoy" : orderDateKey === yesterdayKey ? "Ayer" : formatCalendarDayLabel(orderDateKey),
+      sales: 0,
+      orders: 0,
+    };
+
+    dailyRow.orders += 1;
+    dailyRow.sales = roundMoney(dailyRow.sales + orderSales);
+    paidByDate.set(orderDateKey, dailyRow);
+
+    if (orderDateKey === todayKey) {
+      todaySales = roundMoney(todaySales + orderSales);
+    }
+
+    totalSales = roundMoney(totalSales + orderSales);
+
+    for (const movement of movements) {
+      const methodKey = normalizeStatsPaymentMethod(movement.paymentMethod);
+      if (!methodKey) continue;
+
+      const paymentBucket = paymentMap.get(methodKey);
+      paymentBucket.count += 1;
+      paymentBucket.total = roundMoney(paymentBucket.total + Number(movement.amount ?? 0));
+    }
+
+    for (const item of Array.isArray(order.items) ? order.items : []) {
+      const quantity = Math.max(1, Number(item.quantity ?? 0));
+      const subtotal = Number(item.subtotal ?? 0);
+      const revenue = roundMoney(subtotal > 0 ? subtotal : Number(item.unitPrice ?? 0) * quantity);
+      const key = getDashboardItemKey(item);
+      const itemLabel = item.name ?? item.category ?? "Producto";
+      const beverageItem = isBeverageDashboardItem(item);
+
+      if (!beverageItem) {
+        const topBucket = addBucket(topDishMap, key, itemLabel);
+        topBucket.quantity += quantity;
+        topBucket.total = roundMoney(topBucket.total + revenue);
+      }
+
+      if (isWeightedItem(item) || Number(item.weightGrams ?? 0) > 0) {
+        const grams = Number(item.weightGrams ?? 0);
+        const kg = grams / 1000;
+        const weightedBucket = addBucket(weightedCutMap, key, itemLabel);
+        weightedBucket.quantity = roundMoney(weightedBucket.quantity + kg);
+        weightedBucket.total = roundMoney(weightedBucket.total + revenue);
+        totalKgSold = roundMoney(totalKgSold + kg);
+      }
+
+      if (beverageItem) {
+        const beverageBucket = addBucket(beverageMap, key, itemLabel);
+        beverageBucket.quantity += quantity;
+        beverageBucket.total = roundMoney(beverageBucket.total + revenue);
+        totalBeveragesSold += quantity;
+      }
+    }
+
+    for (const expense of getOrderExpenses(order)) {
+      if (isContainerExpense(expense)) {
+        const quantity = normalizeContainerQuantity(expense.quantity);
+        const containerBucket = addBucket(containerMap, expense.description ?? CONTAINER_EXPENSE_DESCRIPTION, CONTAINER_EXPENSE_DESCRIPTION);
+        containerBucket.quantity += quantity;
+        containerBucket.total = roundMoney(containerBucket.total + Number(expense.amount ?? 0));
+        totalContainersSold += quantity;
+        const containerDay = containerHistoryMap.get(orderDateKey) ?? {
+          date: orderDateKey,
+          label: orderDateKey === todayKey ? "Hoy" : formatCalendarDayLabel(orderDateKey),
+          quantity: 0,
+          total: 0,
+        };
+        containerDay.quantity += quantity;
+        containerDay.total = roundMoney(containerDay.total + Number(expense.amount ?? 0));
+        containerHistoryMap.set(orderDateKey, containerDay);
+        continue;
+      }
+
+      const label = `${expense?.description ?? ""}`.trim() || "Producto adicional";
+      const extraBucket = addBucket(extraMap, label, label);
+      extraBucket.quantity += 1;
+      extraBucket.total = roundMoney(extraBucket.total + Number(expense.amount ?? 0));
+    }
+  }
+
+  const paidTodayRows = [...paidByDate.values()]
+    .sort((left, right) => right.date.localeCompare(left.date));
+
+  const historyRowsByRange = (() => {
+    if (statsRange === "hoy") {
+      return paidTodayRows.filter((row) => row.date === todayKey).slice(0, 1);
+    }
+
+    if (statsRange === "ayer") {
+      return paidTodayRows.filter((row) => row.date === yesterdayKey).slice(0, 1);
+    }
+
+    if (statsRange === "semana") {
+      const fromHistory = (Array.isArray(historyGrouped) ? historyGrouped : []).map((entry) => {
+        const orders = (Array.isArray(entry.orders) ? entry.orders : []).filter((order) => order.status === "paid");
+        const sales = orders.reduce((acc, order) => acc + getDashboardPaymentMovements(order).reduce((sum, movement) => sum + Number(movement.amount ?? 0), 0), 0);
+        return {
+          date: entry.date,
+          label: entry.date === todayKey ? "Hoy" : entry.date === yesterdayKey ? "Ayer" : formatCalendarDayLabel(entry.date),
+          sales: roundMoney(sales),
+          orders: orders.length,
+        };
+      });
+      return fromHistory.length > 0 ? fromHistory : paidTodayRows;
+    }
+
+    if (statsRange === "mes") {
+      return (Array.isArray(dailyStats?.calendarDays) ? dailyStats.calendarDays : []).map((day) => ({
+        date: day.date,
+        label: day.date === todayKey ? "Hoy" : day.label,
+        sales: roundMoney(day.totalSales ?? 0),
+        orders: Number(day.paidOrders ?? 0),
+      }));
+    }
+
+    if (statsRange === "año") {
+      return (Array.isArray(allTimeStats?.quincenas) ? allTimeStats.quincenas : []).map((bucket) => ({
+        date: bucket.id,
+        label: bucket.label,
+        sales: roundMoney(bucket.totalSales ?? 0),
+        orders: Number(bucket.orders ?? 0),
+      }));
+    }
+
+    if (statsRange === "personalizado") {
+      const customOrders = (Array.isArray(historyOrders) ? historyOrders : []).filter((order) => order.status === "paid");
+      const sales = customOrders.reduce((acc, order) => acc + getDashboardPaymentMovements(order).reduce((sum, movement) => sum + Number(movement.amount ?? 0), 0), 0);
+      return [
+        {
+          date: historyDate,
+          label: formatCalendarDayLabel(historyDate),
+          sales: roundMoney(sales),
+          orders: customOrders.length,
+        },
+      ].filter((row) => row.orders > 0 || row.sales > 0);
+    }
+
+    return paidTodayRows;
+  })();
+
+  const historyComparisonRows = historyRowsByRange.length > 0 ? historyRowsByRange : paidTodayRows.slice(0, 6);
+  const paymentRows = [...paymentMap.values()].sort((left, right) => right.total - left.total);
+
+  const allDishes = [...topDishMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total);
+  const topDishes = allDishes.slice(0, 5);
+  const topDishes10 = allDishes.slice(0, 10);
+  const weightedCuts = [...weightedCutMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
+  const beverages = [...beverageMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
+  const containers = [...containerMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
+  const extras = [...extraMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
+
+  const totalPaidOrders = paidOrdersList.length;
+  const totalSalesToday = roundMoney(todaySales);
+  const efectivoToday = roundMoney(paymentMap.get("efectivo")?.total ?? 0);
+  const transferenciaToday = roundMoney(paymentMap.get("transferencia")?.total ?? 0);
+  const paymentTotal = roundMoney(paymentRows.reduce((acc, row) => acc + Number(row.total ?? 0), 0));
+  const containerRevenue = roundMoney(containers.reduce((acc, row) => acc + Number(row.total ?? 0), 0));
+  const beverageRevenue = roundMoney(beverages.reduce((acc, row) => acc + Number(row.total ?? 0), 0));
+  const hasClosedReport = Boolean(cashClose?.closedAt);
+  const registeredTotal = hasClosedReport
+    ? roundMoney(cashClose?.total ?? 0)
+    : paymentTotal;
+  const openingCash = Number(cashClose?.openingCash ?? cashSession?.openingCash ?? 0);
+  const expectedCash = hasClosedReport
+    ? roundMoney(cashClose?.expectedCash ?? 0)
+    : roundMoney(efectivoToday);
+  const expectedTransfer = hasClosedReport
+    ? roundMoney(cashClose?.expectedTransfer ?? 0)
+    : roundMoney(transferenciaToday);
+  const expectedTotal = hasClosedReport
+    ? roundMoney(cashClose?.expectedTotal ?? expectedCash + expectedTransfer)
+    : roundMoney(expectedCash + expectedTransfer);
+  const countedCash = cashClose?.countedCash ?? null;
+  const countedTransfer = cashClose?.countedTransfer ?? null;
+  const countedTotal =
+    countedCash != null || countedTransfer != null
+      ? roundMoney(Number(countedCash ?? 0) + Number(countedTransfer ?? 0))
+      : null;
+  const differenceTotal =
+    cashClose?.differenceTotal ??
+    (countedTotal != null ? roundMoney(countedTotal - expectedTotal) : null);
+  const cashStatus =
+    cashClose?.status ??
+    (differenceTotal != null ? getCashCloseStatus(differenceTotal) : null);
+  const effectivePendingClosingReport =
+    pendingClosingReport ??
+    (cashClose?.closedAt && paidOrdersList.length > 0
+        ? {
+            ...cashClose,
+            openingCash,
+            efectivo: Number(cashClose?.efectivo ?? efectivoToday),
+            transferencia: Number(cashClose?.transferencia ?? transferenciaToday),
+            totalSold: registeredTotal,
+            expectedCash,
+            expectedTransfer,
+            expectedTotal,
+            countedCash,
+            countedTransfer,
+            countedTotal,
+            differenceTotal,
+            status: cashStatus,
+            adminConfirmed: false,
+            closedAt: cashClose.closedAt,
+          }
+        : null);
+  const closingHistory = Array.isArray(cashSession?.closingHistory)
+    ? cashSession.closingHistory
+    : [];
+
+  return {
+    hasData: paidOrdersList.length > 0 || historyComparisonRows.length > 0,
+    summaryCards: [
+      { icon: "💰", label: "Ventas Jornada", value: totalSalesToday, hint: `${totalPaidOrders} pedidos pagados desde el último cierre`, tone: "warm" },
+      { icon: "💵", label: "Efectivo", value: efectivoToday, hint: "Cobros reales en caja", tone: "cash" },
+      { icon: "🏦", label: "Transferencia", value: transferenciaToday, hint: "Cobros por transferencia", tone: "transfer" },
+      { icon: "🧾", label: "Total Pedidos", value: totalPaidOrders, hint: "Solo pagados en la jornada", tone: "muted", plain: true },
+      { icon: "📦", label: "Contenedores", value: totalContainersSold, hint: `${formatCurrency(containerRevenue)} cobrados`, tone: "muted", plain: true, suffix: "vendidos" },
+      { icon: "🥤", label: "Bebidas", value: totalBeveragesSold, hint: `${formatCurrency(beverageRevenue)} cobrados`, tone: "muted", plain: true, suffix: "vendidas" },
+    ],
+    paymentRows,
+    paymentTotal,
+    topDishes,
+    topDishes10,
+    allDishes,
+    weightedCuts,
+    totalKgSold,
+    beverages,
+    containers,
+    containerHistoryRows: [...containerHistoryMap.values()].sort((left, right) => right.date.localeCompare(left.date)),
+    extras,
+    historyComparisonRows,
+    totalSalesToday,
+    efectivoToday,
+    transferenciaToday,
+    totalPaidOrders,
+    cashSummary: {
+      openingCash,
+      expectedCash,
+      expectedTransfer,
+      expectedTotal,
+      registeredTotal,
+      countedCash,
+      countedTransfer,
+      countedTotal,
+      matches: cashClose?.matches ?? (differenceTotal != null ? differenceTotal === 0 : null),
+      differenceCash: cashClose?.differenceCash ?? null,
+      differenceTransfer: cashClose?.differenceTransfer ?? null,
+      differenceTotal,
+      status: cashStatus,
+      closedAt: cashClose?.closedAt ?? null,
+      pendingClosingReport: effectivePendingClosingReport,
+      pendingAdminConfirmation: Boolean(effectivePendingClosingReport),
+      closingHistory,
+    },
+    paidTodayRows,
+  };
+}
+
 function getBogotaDateKey(date = new Date()) {
+  const safeDate = normalizeDateForFormatting(date);
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: BOGOTA_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(date);
+  }).format(safeDate);
 }
 
 function getBogotaDayRange(date = new Date()) {
+  const safeDate = normalizeDateForFormatting(date);
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: BOGOTA_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(date);
+  }).formatToParts(safeDate);
 
   const year = Number(parts.find((part) => part.type === "year")?.value ?? 0);
   const month = Number(parts.find((part) => part.type === "month")?.value ?? 0);
@@ -522,6 +979,28 @@ function filterOrdersByCashSession(orders, cutoff) {
       return !movementAt || movementAt >= cutoff;
     },
   );
+}
+
+function filterOrdersForPendingClosing(orders, cashSession) {
+  const report = cashSession?.closingReport;
+  if (!report || report.adminConfirmed || !report.closedAt) {
+    return filterOrdersByCashSession(orders, loadCashSessionCutoff());
+  }
+
+  const previousCloseAt = (Array.isArray(cashSession.closingHistory)
+    ? cashSession.closingHistory
+    : []
+  ).reduce((latest, entry) => {
+    if (!entry?.adminConfirmed || !entry.closedAt) return latest;
+    return !latest || entry.closedAt > latest ? entry.closedAt : latest;
+  }, "");
+
+  return (Array.isArray(orders) ? orders : []).filter((order) => {
+    if (order?.status !== "paid") return false;
+    const movementAt = order?.paidAt ?? order?.createdAt;
+    if (!movementAt) return false;
+    return movementAt <= report.closedAt && (!previousCloseAt || movementAt > previousCloseAt);
+  });
 }
 
 function buildCashCloseFromOrders(orders, date, openingCash = 0) {
@@ -639,6 +1118,7 @@ function App() {
     openingCash: 0,
     openingConfirmed: false,
     closingReport: null,
+    closingHistory: [],
     sessionKey: null,
   });
   const [cashSessionCutoff, setCashSessionCutoff] = useState(() =>
@@ -647,6 +1127,7 @@ function App() {
   const [historyDate, setHistoryDate] = useState(() => getBogotaDateKey());
   const [historyOrders, setHistoryOrders] = useState([]);
   const [historyGrouped, setHistoryGrouped] = useState([]);
+  const [statsRange, setStatsRange] = useState("semana");
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loading, setLoading] = useState(false);
   const [expandedDays, setExpandedDays] = useState({});
@@ -683,11 +1164,7 @@ function App() {
   const [dayDetailModal, setDayDetailModal] = useState(null);
   const [cleanupDateInput, setCleanupDateInput] = useState("2026-01-01");
   const [cashSessionHydrated, setCashSessionHydrated] = useState(false);
-  const [publicBackendDraft, setPublicBackendDraft] = useState(() =>
-    readStoredPublicApiBaseUrl(),
-  );
   const [publicBackendConnected, setPublicBackendConnected] = useState(false);
-  const openingCashPromptedRef = useRef(false);
   const publicPagesView = isPublicPagesView();
   const stats = publicPagesView ? allTimeStats : dailyStats;
   const publicBackendUrl = normalizePublicBackendUrl(
@@ -708,7 +1185,6 @@ function App() {
     if (!cashSessionHydrated) return;
 
     if (cashSession.sessionKey !== bogotaDayKey) {
-      openingCashPromptedRef.current = false;
       setCashSession((current) =>
         current.sessionKey === bogotaDayKey
           ? current
@@ -720,30 +1196,8 @@ function App() {
               sessionKey: bogotaDayKey,
             },
       );
-      if (activeView === "cash" && !openingCashModal) {
-        setOpeningCashModal({
-          amount: "0",
-          error: "",
-          loading: false,
-        });
-      }
-      return;
     }
-
-    if (activeView !== "cash") {
-      openingCashPromptedRef.current = false;
-      return;
-    }
-
-    if (!cashSession.openingConfirmed && !openingCashModal && !openingCashPromptedRef.current) {
-      openingCashPromptedRef.current = true;
-      setOpeningCashModal({
-        amount: `${cashSession.openingCash ?? 0}`,
-        error: "",
-        loading: false,
-      });
-    }
-  }, [activeView, bogotaDayKey, cashSession.openingConfirmed, cashSession.sessionKey, cashSessionHydrated, openingCashModal, publicPagesView]);
+  }, [bogotaDayKey, cashSession.sessionKey, cashSessionHydrated, publicPagesView]);
 
   function requestProtectedView(view) {
     if (publicPagesView) {
@@ -800,14 +1254,6 @@ function App() {
     setProtectedViewModal(null);
   }
 
-  function openOpeningCashModal() {
-    setOpeningCashModal({
-      amount: `${cashSession.openingCash ?? 0}`,
-      error: "",
-      loading: false,
-    });
-  }
-
   async function confirmOpeningCash() {
     if (!openingCashModal) return;
 
@@ -853,6 +1299,7 @@ function App() {
 
   function openClosingCashModal() {
     setClosingCashModal({
+      openingCash: `${cashSession.openingCash ?? cashClose.openingCash ?? 0}`,
       countedCash: "",
       countedTransfer: "",
       error: "",
@@ -864,36 +1311,74 @@ function App() {
     if (!closingCashModal) return;
 
     if (
+      `${closingCashModal.openingCash ?? ""}`.trim() === "" ||
       `${closingCashModal.countedCash ?? ""}`.trim() === "" ||
       `${closingCashModal.countedTransfer ?? ""}`.trim() === ""
     ) {
       setClosingCashModal((current) =>
-        current ? { ...current, loading: false, error: "Completa efectivo y transferencia." } : current,
+        current ? { ...current, loading: false, error: "Completa caja inicial, efectivo y transferencia." } : current,
       );
       return;
     }
 
     const countedCash = parseMoneyInput(closingCashModal.countedCash);
     const countedTransfer = parseMoneyInput(closingCashModal.countedTransfer);
-    const openingCash = Number(cashSession.openingCash ?? cashClose.openingCash ?? 0);
-    const expectedCash = roundMoney(openingCash + Number(cashClose.efectivo ?? 0));
-    const expectedTransfer = roundMoney(Number(cashClose.transferencia ?? 0));
+    const closedAt = new Date().toISOString();
+    setClosingCashModal((current) =>
+      current ? { ...current, loading: true, error: "" } : current,
+    );
+
+    const allPaidOrders = await getJson("/api/orders?status=paid").catch(() => paidOrdersForStats);
+    const reviewPaidOrders = filterOrdersForPendingClosing(allPaidOrders, {
+      closingReport: { closedAt, adminConfirmed: false },
+      closingHistory: cashSession.closingHistory,
+    });
+    const reviewPayments = reviewPaidOrders.reduce(
+      (acc, order) => {
+        for (const movement of getDashboardPaymentMovements(order)) {
+          if (movement.paymentMethod === "efectivo") {
+            acc.efectivo = roundMoney(acc.efectivo + Number(movement.amount ?? 0));
+          }
+          if (movement.paymentMethod === "transferencia") {
+            acc.transferencia = roundMoney(acc.transferencia + Number(movement.amount ?? 0));
+          }
+        }
+        return acc;
+      },
+      { efectivo: 0, transferencia: 0 },
+    );
+    const efectivo = reviewPaidOrders.length > 0 ? reviewPayments.efectivo : closingPreview.efectivo;
+    const transferencia = reviewPaidOrders.length > 0 ? reviewPayments.transferencia : closingPreview.transferencia;
+    const expectedCash = roundMoney(efectivo);
+    const expectedTransfer = roundMoney(transferencia);
+    const expectedTotal = roundMoney(expectedCash + expectedTransfer);
+    const countedTotal = roundMoney(countedCash + countedTransfer);
+    const differenceCash = roundMoney(countedCash - expectedCash);
+    const differenceTransfer = roundMoney(countedTransfer - expectedTransfer);
+    const differenceTotal = roundMoney(countedTotal - expectedTotal);
     const closingReport = {
+      id: `close-${Date.now()}`,
+      date: bogotaDayKey,
+      openingCash: closingPreview.openingCash,
+      efectivo,
+      transferencia,
+      totalSold: expectedTotal,
       countedCash,
       countedTransfer,
       expectedCash,
       expectedTransfer,
-      differenceCash: roundMoney(countedCash - expectedCash),
-      differenceTransfer: roundMoney(countedTransfer - expectedTransfer),
-      matches:
-        roundMoney(countedCash - expectedCash) === 0 &&
-        roundMoney(countedTransfer - expectedTransfer) === 0,
-      closedAt: new Date().toISOString(),
+      expectedTotal,
+      countedTotal,
+      differenceCash,
+      differenceTransfer,
+      differenceTotal,
+      matches: differenceTotal === 0,
+      adminConfirmed: false,
+      confirmedAt: null,
+      reviewPaidOrders,
+      status: getCashCloseStatus(differenceTotal),
+      closedAt,
     };
-
-    setClosingCashModal((current) =>
-      current ? { ...current, loading: true, error: "" } : current,
-    );
 
     try {
       const nextSession = await getJson("/api/settings/cash-session", {
@@ -902,24 +1387,30 @@ function App() {
         body: JSON.stringify({
           closingReport,
           openingConfirmed: false,
-          openingCash: 0,
+          openingCash: closingReport.openingCash,
+          sessionKey: bogotaDayKey,
         }),
       });
       const normalizedSession = normalizeCashSession(nextSession);
       setCashSession(normalizedSession);
       setCashClose((current) => ({
         ...current,
-        openingCash,
-        expectedCash,
+        openingCash: closingReport.openingCash,
+        expectedCash: closingReport.expectedCash,
+        expectedTransfer: closingReport.expectedTransfer,
         countedCash,
         countedTransfer,
         matches: closingReport.matches,
         differenceCash: closingReport.differenceCash,
         differenceTransfer: closingReport.differenceTransfer,
+        differenceTotal: closingReport.differenceTotal,
+        countedTotal: closingReport.countedTotal,
+        expectedTotal: closingReport.expectedTotal,
+        status: closingReport.status,
         closedAt: closingReport.closedAt,
       }));
       setClosingCashModal(null);
-      await startNewDay();
+      setNetworkStatus("Cierre registrado. Pendiente de confirmación en Estadísticas.");
     } catch (error) {
       setClosingCashModal((current) =>
         current ? { ...current, loading: false, error: error.message } : current,
@@ -949,11 +1440,29 @@ function App() {
 
     const snapshot = readPublicDashboardSnapshot();
     if (!snapshot) return false;
+    const normalizedSnapshotSession = snapshot.cashSession
+      ? normalizeCashSession(snapshot.cashSession)
+      : null;
 
-    if (Array.isArray(snapshot.pendingOrders)) setPendingOrders(snapshot.pendingOrders);
-    if (Array.isArray(snapshot.paidOrders)) setPaidOrders(snapshot.paidOrders);
+    if (Array.isArray(snapshot.pendingOrders)) {
+      setPendingOrders(
+        publicPagesView
+          ? snapshot.pendingOrders
+          : filterOrdersByCashSession(snapshot.pendingOrders, cashSessionCutoff),
+      );
+    }
+    if (Array.isArray(snapshot.paidOrders)) {
+      setPaidOrders(
+        publicPagesView
+          ? snapshot.paidOrders
+          : normalizedSnapshotSession?.closingReport &&
+              !normalizedSnapshotSession.closingReport.adminConfirmed
+            ? filterOrdersForPendingClosing(snapshot.paidOrders, normalizedSnapshotSession)
+            : filterOrdersByCashSession(snapshot.paidOrders, cashSessionCutoff),
+      );
+    }
     if (snapshot.cashClose) setCashClose(snapshot.cashClose);
-    if (snapshot.cashSession) setCashSession(normalizeCashSession(snapshot.cashSession));
+    if (normalizedSnapshotSession) setCashSession(normalizedSnapshotSession);
     if (snapshot.dailyStats) setDailyStats(snapshot.dailyStats);
     if (snapshot.allTimeStats) setAllTimeStats(snapshot.allTimeStats);
     if (snapshot.statsSummary) setStatsSummary(snapshot.statsSummary);
@@ -970,14 +1479,64 @@ function App() {
   function applyDashboardSnapshot(snapshot) {
     if (!isDashboardSnapshot(snapshot)) return;
 
+    const normalizedSnapshotSession = snapshot.cashSession
+      ? normalizeCashSession(snapshot.cashSession)
+      : null;
+
     if (snapshot.restaurantName) {
       setRestaurantName(snapshot.restaurantName);
       setRestaurantNameDraft(snapshot.restaurantName);
     }
-    if (Array.isArray(snapshot.pendingOrders)) setPendingOrders(snapshot.pendingOrders);
-    if (Array.isArray(snapshot.paidOrders)) setPaidOrders(snapshot.paidOrders);
-    if (snapshot.cashClose) setCashClose(snapshot.cashClose);
-    if (snapshot.cashSession) setCashSession(normalizeCashSession(snapshot.cashSession));
+    if (Array.isArray(snapshot.pendingOrders)) {
+      setPendingOrders(
+        publicPagesView
+          ? snapshot.pendingOrders
+          : filterOrdersByCashSession(snapshot.pendingOrders, cashSessionCutoff),
+      );
+    }
+    if (Array.isArray(snapshot.paidOrders)) {
+      setPaidOrders(
+        publicPagesView
+          ? snapshot.paidOrders
+          : normalizedSnapshotSession?.closingReport &&
+              !normalizedSnapshotSession.closingReport.adminConfirmed
+            ? filterOrdersForPendingClosing(snapshot.paidOrders, normalizedSnapshotSession)
+            : filterOrdersByCashSession(snapshot.paidOrders, cashSessionCutoff),
+      );
+    }
+    if (snapshot.cashClose) {
+      const closingReport = normalizedSnapshotSession?.closingReport;
+      setCashClose({
+        ...snapshot.cashClose,
+        openingCash:
+          closingReport?.openingCash ??
+          normalizedSnapshotSession?.openingCash ??
+          snapshot.cashClose.openingCash ??
+          0,
+        expectedCash:
+          closingReport?.expectedCash ??
+          roundMoney(Number(snapshot.cashClose.efectivo ?? 0)),
+        expectedTransfer:
+          closingReport?.expectedTransfer ??
+          roundMoney(Number(snapshot.cashClose.transferencia ?? 0)),
+        expectedTotal:
+          closingReport?.expectedTotal ??
+          roundMoney(
+            Number(snapshot.cashClose.efectivo ?? 0) +
+              Number(snapshot.cashClose.transferencia ?? 0),
+          ),
+        countedCash: closingReport?.countedCash ?? null,
+        countedTransfer: closingReport?.countedTransfer ?? null,
+        countedTotal: closingReport?.countedTotal ?? null,
+        matches: closingReport?.matches ?? null,
+        differenceCash: closingReport?.differenceCash ?? null,
+        differenceTransfer: closingReport?.differenceTransfer ?? null,
+        differenceTotal: closingReport?.differenceTotal ?? null,
+        status: closingReport?.status ?? null,
+        closedAt: closingReport?.closedAt ?? null,
+      });
+    }
+    if (normalizedSnapshotSession) setCashSession(normalizedSnapshotSession);
     if (snapshot.dailyStats) setDailyStats(snapshot.dailyStats);
     if (snapshot.allTimeStats) setAllTimeStats(snapshot.allTimeStats);
     if (snapshot.statsSummary) setStatsSummary(snapshot.statsSummary);
@@ -1008,6 +1567,85 @@ function App() {
     () => paidOrders.filter((order) => !isPickupAwaitingDispatch(order)),
     [paidOrders],
   );
+
+  const paidOrdersForStats = useMemo(
+    () => paidOrders.filter((order) => order.status === "paid"),
+    [paidOrders],
+  );
+
+  const dashboardStats = useMemo(
+    () =>
+      buildDashboardMetrics({
+        paidOrders: paidOrdersForStats,
+        historyGrouped,
+        historyOrders,
+        dailyStats,
+        allTimeStats,
+        cashClose,
+        cashSession,
+        historyDate,
+        statsRange,
+      }),
+    [
+      allTimeStats,
+      cashClose,
+      cashSession,
+      dailyStats,
+      historyDate,
+      historyGrouped,
+      historyOrders,
+      paidOrdersForStats,
+      statsRange,
+    ],
+  );
+
+  const closingPreview = useMemo(() => {
+    const openingCash =
+      closingCashModal?.openingCash != null
+        ? parseMoneyInput(closingCashModal.openingCash)
+        : Number(cashSession.openingCash ?? cashClose.openingCash ?? 0);
+    const efectivo = Number(dashboardStats.efectivoToday ?? 0);
+    const transferencia = Number(dashboardStats.transferenciaToday ?? 0);
+    const countedCash =
+      closingCashModal?.countedCash != null
+        ? parseMoneyInput(closingCashModal.countedCash)
+        : 0;
+    const countedTransfer =
+      closingCashModal?.countedTransfer != null
+        ? parseMoneyInput(closingCashModal.countedTransfer)
+        : 0;
+    const expectedCash = roundMoney(efectivo);
+    const expectedTransfer = roundMoney(transferencia);
+    const expectedTotal = roundMoney(expectedCash + expectedTransfer);
+    const countedTotal = roundMoney(countedCash + countedTransfer);
+    const differenceTotal = roundMoney(countedTotal - expectedTotal);
+    const status = getCashCloseStatus(differenceTotal);
+
+    return {
+      openingCash,
+      efectivo,
+      transferencia,
+      totalSold: roundMoney(efectivo + transferencia),
+      countedCash,
+      countedTransfer,
+      expectedCash,
+      expectedTransfer,
+      expectedTotal,
+      countedTotal,
+      differenceCash: roundMoney(countedCash - expectedCash),
+      differenceTransfer: roundMoney(countedTransfer - expectedTransfer),
+      differenceTotal,
+      status,
+    };
+  }, [
+    cashClose.openingCash,
+    cashSession.openingCash,
+    closingCashModal?.openingCash,
+    closingCashModal?.countedCash,
+    closingCashModal?.countedTransfer,
+    dashboardStats.efectivoToday,
+    dashboardStats.transferenciaToday,
+  ]);
 
   const paymentPreview = useMemo(() => {
     if (!payingOrder) {
@@ -1099,21 +1737,6 @@ function App() {
     };
   }, [payingOrder, paymentDraft]);
 
-  const beverageCategories = useMemo(
-    () => stats.categories.filter((category) => category.label === "BEBIDAS"),
-    [stats.categories],
-  );
-
-  const foodCategories = useMemo(
-    () => stats.categories.filter((category) => category.label !== "BEBIDAS"),
-    [stats.categories],
-  );
-
-  const maxPaymentAmount = useMemo(
-    () => Math.max(...stats.paymentSummary.map((item) => item.amount), 0),
-    [stats.paymentSummary],
-  );
-
   const hasPendingWeightValues = useMemo(() => {
     if (!weightModalOrder) return false;
     return weightModalOrder.items.some(
@@ -1154,22 +1777,6 @@ function App() {
     return snapshot;
   }, []);
 
-  function savePublicBackendUrl() {
-    const nextUrl = publicBackendDraft.trim().replace(/\/+$/, "");
-    if (!nextUrl) {
-      setNetworkStatus("Debes pegar la URL HTTPS del servidor.");
-      return;
-    }
-    if (!/^https:\/\//i.test(nextUrl)) {
-      setNetworkStatus("La URL publica debe iniciar con https://.");
-      return;
-    }
-    writeStoredPublicApiBaseUrl(nextUrl);
-    writeStoredPublicSocketUrl(nextUrl);
-    setApiBaseUrl(nextUrl);
-    window.location.href = `${window.location.pathname}?api=${encodeURIComponent(nextUrl)}&socket=${encodeURIComponent(nextUrl)}`;
-  }
-
   const loadCashView = useCallback(async ({ silent = false, cutoff = cashSessionCutoff } = {}) => {
     if (!silent) {
       setLoading(true);
@@ -1186,8 +1793,12 @@ function App() {
         pending,
         cutoff,
       );
-      const filteredPaid = filterOrdersByCashSession(paid, cutoff);
       const normalizedCashSession = normalizeCashSession(cashSessionResult);
+      const filteredPaid =
+        normalizedCashSession.closingReport &&
+        !normalizedCashSession.closingReport.adminConfirmed
+          ? filterOrdersForPendingClosing(paid, normalizedCashSession)
+          : filterOrdersByCashSession(paid, cutoff);
       const closingReport = normalizedCashSession.closingReport;
       const openingCash = normalizedCashSession.openingCash;
       const filteredClose = cutoff
@@ -1197,16 +1808,31 @@ function App() {
             openingCash,
           )
         : close;
+      const closeEfectivo = Number(filteredClose.efectivo ?? 0);
+      const closeTransferencia = Number(filteredClose.transferencia ?? 0);
       const reconciledClose = {
         ...filteredClose,
-        openingCash,
-        expectedCash: roundMoney(openingCash + Number(filteredClose.efectivo ?? 0)),
-        expectedTransfer: Number(filteredClose.transferencia ?? 0),
+        efectivo: closingReport?.efectivo ?? closeEfectivo,
+        transferencia: closingReport?.transferencia ?? closeTransferencia,
+        total: closingReport?.totalSold ?? filteredClose.total,
+        openingCash: closingReport?.openingCash ?? openingCash,
+        expectedCash:
+          closingReport?.expectedCash ??
+          roundMoney(closeEfectivo),
+        expectedTransfer:
+          closingReport?.expectedTransfer ??
+          roundMoney(closeTransferencia),
+        expectedTotal:
+          closingReport?.expectedTotal ??
+          roundMoney(closeEfectivo + closeTransferencia),
         countedCash: closingReport?.countedCash ?? null,
         countedTransfer: closingReport?.countedTransfer ?? null,
+        countedTotal: closingReport?.countedTotal ?? null,
         matches: closingReport?.matches ?? null,
         differenceCash: closingReport?.differenceCash ?? null,
         differenceTransfer: closingReport?.differenceTransfer ?? null,
+        differenceTotal: closingReport?.differenceTotal ?? null,
+        status: closingReport?.status ?? null,
         closedAt: closingReport?.closedAt ?? null,
       };
       setRestaurantName(menuData.restaurantName);
@@ -1352,7 +1978,7 @@ function App() {
     [getJson],
   );
 
-  async function startNewDay() {
+  async function startNewDay({ closingReport, closingHistory } = {}) {
     try {
       setLoading(true);
       const newCutoff = new Date().toISOString();
@@ -1364,7 +1990,8 @@ function App() {
         body: JSON.stringify({
           openingCash: 0,
           openingConfirmed: false,
-          closingReport: cashSession.closingReport,
+          ...(closingReport ? { closingReport } : {}),
+          ...(closingHistory ? { closingHistory } : {}),
           sessionKey: bogotaDayKey,
         }),
       });
@@ -1372,9 +1999,10 @@ function App() {
         ...current,
         openingCash: 0,
         openingConfirmed: false,
+        closingReport: closingReport ?? current.closingReport,
+        closingHistory: closingHistory ?? current.closingHistory,
       }));
       setConfirmModal(null);
-      requestProtectedView("history");
       setPendingOrders([]);
       setPaidOrders([]);
       setQuery("");
@@ -1386,12 +2014,38 @@ function App() {
         loadStatsView(),
         loadRecentHistory(7),
       ]);
-      setNetworkStatus("Cierre de caja realizado. Moviendo a dias anteriores.");
+      setNetworkStatus("Cierre de caja realizado. La jornada actual quedó limpia.");
     } catch (error) {
       setNetworkStatus(`Error cerrando caja: ${error.message}`);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function confirmAdminCashClose() {
+    const pendingReport =
+      cashSession.closingReport ?? dashboardStats.cashSummary.pendingClosingReport;
+    if (!pendingReport) return;
+
+    const reportForHistory = { ...pendingReport };
+    delete reportForHistory.reviewPaidOrders;
+    const confirmedReport = {
+      ...reportForHistory,
+      adminConfirmed: true,
+      confirmedAt: new Date().toISOString(),
+    };
+    const closingHistory = [
+      confirmedReport,
+      ...(Array.isArray(cashSession.closingHistory)
+        ? cashSession.closingHistory
+        : []),
+    ].slice(0, 100);
+
+    await startNewDay({
+      closingReport: confirmedReport,
+      closingHistory,
+    });
+    setNetworkStatus("Cierre confirmado por administración. Jornada nueva iniciada.");
   }
 
   async function loadRecentHistory(days = 7) {
@@ -1686,7 +2340,7 @@ function App() {
         loadStatsView(),
         loadHistoryView(historyDate),
       ]);
-    } catch (error) {
+    } catch {
       await loadCashView().catch(() => {});
       window.alert(
         "Comanda despachada, pero fallo al refrescar algunas vistas. Recarga con F5.",
@@ -1968,10 +2622,49 @@ function App() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
           });
+          await getJson("/api/settings/cash-session", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              openingCash: 0,
+              openingConfirmed: false,
+              closingReport: null,
+              closingHistory: [],
+              sessionKey: null,
+            }),
+          });
           setNetworkStatus("Base de datos limpiada completamente.");
           setConfirmModal(null);
           setDayDetailModal(null);
-          await loadCashView();
+          saveCashSessionCutoff("");
+          setCashSessionCutoff("");
+          setPendingOrders([]);
+          setPaidOrders([]);
+          setHistoryOrders([]);
+          setHistoryGrouped([]);
+          setCashSession({
+            openingCash: 0,
+            openingConfirmed: false,
+            closingReport: null,
+            closingHistory: [],
+            sessionKey: null,
+          });
+          setCashClose({
+            date: "",
+            total: 0,
+            efectivo: 0,
+            transferencia: 0,
+            orders: 0,
+            openingCash: 0,
+            expectedCash: 0,
+            countedCash: null,
+            countedTransfer: null,
+            matches: null,
+            differenceCash: null,
+            differenceTransfer: null,
+            closedAt: null,
+          });
+          await loadCashView({ cutoff: "" });
           await loadStatsView();
         } catch (err) {
           setNetworkStatus(`Error limpiando todo: ${err.message}`);
@@ -2260,10 +2953,6 @@ function App() {
     const topPaidOrders = paidOrdersForDisplay.slice(0, 4);
     const topDishes = stats.topDishes.slice(0, 5);
     const bottomDishes = stats.bottomDishes.slice(0, 5);
-    const paymentTotal = stats.paymentSummary.reduce(
-      (acc, item) => acc + Number(item.amount ?? 0),
-      0,
-    );
     const statusLabel = networkStatus
       ? networkStatus
       : publicBackendConnected
@@ -2297,7 +2986,7 @@ function App() {
         <div className="stats-hero">
           <article className="stats-banner">
             <p className="eyebrow">Resumen del día</p>
-            <h3>{formatCurrency(statsSummary.today.total)} en ventas hoy</h3>
+            <h3>{formatCurrency(dashboardStats.totalSalesToday)} en ventas hoy</h3>
             <p>
               Pedidos pagos, ranking histórico y métodos de cobro actualizados
               desde el backend.
@@ -2307,7 +2996,7 @@ function App() {
           <div className="kpi-grid stats-kpi-grid">
             <article className="kpi-card">
               <h3>Ganancias</h3>
-              <strong>{formatCurrency(statsSummary.today.total)}</strong>
+              <strong>{formatCurrency(dashboardStats.totalSalesToday)}</strong>
               <p>Ventas cobradas hoy</p>
             </article>
             <article className="kpi-card">
@@ -2317,13 +3006,13 @@ function App() {
             </article>
             <article className="kpi-card">
               <h3>Pagados</h3>
-              <strong>{paidOrdersForDisplay.length}</strong>
+              <strong>{dashboardStats.totalPaidOrders}</strong>
               <p>Pedidos cerrados</p>
             </article>
             <article className="kpi-card">
               <h3>Contenedores</h3>
-              <strong>{formatCurrency(stats.containerSummary.revenue)}</strong>
-              <p>{stats.containerSummary.quantity} unidades</p>
+              <strong>{formatCurrency(dashboardStats.containers.reduce((acc, item) => acc + Number(item.total ?? 0), 0))}</strong>
+              <p>{dashboardStats.containers.reduce((acc, item) => acc + Number(item.quantity ?? 0), 0)} unidades</p>
             </article>
           </div>
         </div>
@@ -2507,23 +3196,23 @@ function App() {
                   Cobro actual y acumulado
                 </p>
               </div>
-              <span className="stats-chip">{formatCurrency(paymentTotal)}</span>
+              <span className="stats-chip">{formatCurrency(dashboardStats.paymentTotal)}</span>
             </div>
 
             <div className="payment-grid">
-              {stats.paymentSummary.map((method) => (
+              {dashboardStats.paymentRows.map((method) => (
                 <article className="payment-card" key={method.method}>
                   <div className="payment-card-head">
                     <div>
                       <p>{method.label}</p>
                       <span>{method.method === "efectivo" ? "Caja" : "Bancos"}</span>
                     </div>
-                    <strong>{formatCurrency(method.amount)}</strong>
+                    <strong>{formatCurrency(method.total)}</strong>
                   </div>
                   <div className="stats-bar-track payment-track">
                     <div
                       className="stats-bar-fill"
-                      style={getSalesIntensityStyle(method.amount, Math.max(paymentTotal, 0))}
+                      style={getSalesIntensityStyle(method.total, Math.max(dashboardStats.paymentTotal, 0))}
                     />
                   </div>
                 </article>
@@ -2536,7 +3225,7 @@ function App() {
               <div>
                 <h3>Resumen del día e histórico</h3>
                 <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  {stats.rangeLabel || "Rango activo"}
+                  {dashboardStats.historyComparisonRows.length > 0 ? "Comparación de ventas pagadas" : "Rango activo"}
                 </p>
               </div>
               <span className="stats-chip">Nuevo Día</span>
@@ -2548,28 +3237,28 @@ function App() {
                   <strong>Ganancia del día actual</strong>
                   <p>Ventas cerradas hoy</p>
                 </div>
-                <span>{formatCurrency(statsSummary.today.total)}</span>
+                <span>{formatCurrency(dashboardStats.totalSalesToday)}</span>
               </div>
               <div className="stats-item-row">
                 <div>
                   <strong>Ganancias históricas cerradas</strong>
                   <p>Acumulado que no se reinicia</p>
                 </div>
-                <span>{formatCurrency(statsSummary.historical.total)}</span>
+                <span>{formatCurrency(allTimeStats.totalSales ?? 0)}</span>
               </div>
               <div className="stats-item-row">
                 <div>
                   <strong>Ganancia acumulada total</strong>
                   <p>Suma de hoy + histórico</p>
                 </div>
-                <span>{formatCurrency(statsSummary.today.total + statsSummary.historical.total)}</span>
+                <span>{formatCurrency((allTimeStats.totalSales ?? 0) + dashboardStats.totalSalesToday)}</span>
               </div>
               <div className="stats-item-row">
                 <div>
                   <strong>Pedidos visibles</strong>
                   <p>Resumen sincronizado en pantalla</p>
                 </div>
-                <span>{paidOrdersForDisplay.length}</span>
+                <span>{dashboardStats.totalPaidOrders}</span>
               </div>
             </div>
 
@@ -2968,7 +3657,7 @@ function App() {
               </>
             ) : null}
 
-            <h3 className="group-title">Pagadas hoy</h3>
+            <h3 className="group-title">Pagadas en jornada actual</h3>
             <div className="card-grid compact">
               {paidOrdersForDisplay.slice(0, 12).map((order) => (
                 <article
@@ -2988,204 +3677,494 @@ function App() {
         ) : null}
 
         {activeView === "stats" ? (
-          <section>
+          <section className="stats-dashboard">
             <header className="section-header">
               <div>
-                <h2>Estadistica del dia</h2>
+                <h2>Estadísticas y cierre de caja</h2>
                 <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  {stats.monthLabel || "Hoy"} · {stats.rangeLabel || "Corte operativo"}
+                  Jornada actual desde el último cierre. El histórico queda separado en Días anteriores.
                 </p>
               </div>
+              <button type="button" onClick={openClosingCashModal}>
+                Cierre de caja
+              </button>
             </header>
 
-            <div className="kpi-grid" style={{ marginTop: 18 }}>
-              <article className="kpi-card">
-                <h3>Apertura de caja</h3>
-                <strong>{formatCurrency(cashClose.openingCash)}</strong>
-              </article>
-              <article className="kpi-card">
-                <h3>Efectivo esperado</h3>
-                <strong>{formatCurrency(cashClose.expectedCash)}</strong>
-              </article>
-              <article className="kpi-card">
-                <h3>Transferencia esperada</h3>
-                <strong>{formatCurrency(cashClose.expectedTransfer)}</strong>
-              </article>
-            </div>
-
-            {cashClose.matches === true ? (
-              <article className="stats-panel" style={{ marginTop: 18 }}>
-                <p className="eyebrow">Arqueo validado</p>
-                <h3>La caja cuadró en el último cierre</h3>
-                <p>
-                  Efectivo contado: {formatCurrency(cashClose.countedCash ?? 0)} · Transferencia contada: {formatCurrency(cashClose.countedTransfer ?? 0)}
-                </p>
-              </article>
+            {dashboardStats.cashSummary.pendingAdminConfirmation ? (
+              <section className={`admin-close-review ${dashboardStats.cashSummary.status ?? "idle"}`}>
+                <div>
+                  <p className="eyebrow">Cierre pendiente</p>
+                  <h3>Revisión administrativa requerida</h3>
+                  <p>
+                    El cajero ya registró el cierre, pero la jornada seguirá visible
+                    hasta que administración confirme. Revisa platos, bebidas,
+                    ventas y diferencia antes de iniciar una jornada nueva.
+                  </p>
+                </div>
+                <button type="button" onClick={confirmAdminCashClose}>
+                  Confirmar cierre y limpiar jornada
+                </button>
+              </section>
             ) : null}
 
-            <div className="stats-hero">
-              <article className="stats-banner">
-                <p className="eyebrow">Ventas y control</p>
-                <h3>Resumen diario desde cobros reales, ranking y categorías</h3>
-                <p>
-                  Esta vista muestra el corte actual para comparar caja, cobros y ranking sin mezclar históricos.
-                </p>
-              </article>
-
-              <div className="kpi-grid stats-kpi-grid">
-                <article className="kpi-card">
-                  <h3>Comandas del dia</h3>
-                  <strong>{stats.totalOrders}</strong>
+            <div className="stats-summary-grid">
+              {dashboardStats.summaryCards.map((card) => (
+                <article className={`stats-summary-card ${card.tone}`} key={card.label}>
+                  <span className="stats-summary-icon">{card.icon}</span>
+                  <div>
+                    <p>{card.label}</p>
+                    <strong>
+                      {card.plain
+                        ? `${card.value}${card.suffix ? ` ${card.suffix}` : ""}`
+                        : formatCurrency(card.value)}
+                    </strong>
+                    <small>{card.hint}</small>
+                  </div>
                 </article>
-                <article className="kpi-card">
-                  <h3>Comandas pagadas hoy</h3>
-                  <strong>{stats.totalPaidOrders}</strong>
-                </article>
-                <article className="kpi-card">
-                  <h3>Ganancia del dia</h3>
-                  <strong>{formatCurrency(stats.totalSales)}</strong>
-                </article>
-                <article className="kpi-card">
-                  <h3>Contenedores hoy</h3>
-                  <strong>{stats.containerSummary.quantity}</strong>
-                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                    {formatCurrency(stats.containerSummary.revenue)} ganados hoy
-                  </p>
-                </article>
-              </div>
+              ))}
             </div>
 
-            <section className="stats-panel" style={{ marginTop: 18 }}>
+            <div className="stats-split-grid">
+              <section className="stats-panel">
+                <div className="section-header stats-panel-head">
+                  <div>
+                    <h3>Métodos de pago</h3>
+                    <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                      No se manejan tarjetas, solo cobros hechos al cliente.
+                    </p>
+                  </div>
+                  <span className="stats-chip">Total {formatCurrency(dashboardStats.paymentTotal)}</span>
+                </div>
+
+                <div className="payment-grid">
+                  {dashboardStats.paymentRows.map((method) => (
+                    <article className="payment-card" key={method.method}>
+                      <div className="payment-card-head">
+                        <div>
+                          <p>{method.label}</p>
+                          <span>{method.count} pagos registrados</span>
+                        </div>
+                        <strong>{formatCurrency(method.total)}</strong>
+                      </div>
+                      <div className="stats-bar-track payment-track">
+                        <div
+                          className="stats-bar-fill"
+                          style={getSalesIntensityStyle(method.total, Math.max(dashboardStats.paymentTotal, 0))}
+                        />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="stats-table-card">
+                  <table className="stats-table">
+                    <thead>
+                      <tr>
+                        <th>Método</th>
+                        <th>Cantidad</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboardStats.paymentRows.map((method) => (
+                        <tr key={`${method.method}-row`}>
+                          <td>{method.label}</td>
+                          <td>{method.count}</td>
+                          <td>{formatCurrency(method.total)}</td>
+                        </tr>
+                      ))}
+                      <tr className="stats-total-row">
+                        <td>Total general</td>
+                        <td>{dashboardStats.paymentRows.reduce((acc, row) => acc + row.count, 0)}</td>
+                        <td>{formatCurrency(dashboardStats.paymentTotal)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section className={`stats-panel cash-status ${dashboardStats.cashSummary.status ?? "idle"}`}>
+                <div className="section-header stats-panel-head">
+                  <div>
+                    <h3>Cierre de caja automático</h3>
+                    <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                      La caja inicial se muestra aparte; la diferencia compara ventas cobradas contra lo contado.
+                    </p>
+                  </div>
+                  {dashboardStats.cashSummary.status ? (
+                    <span className="stats-chip">
+                      {getCashCloseStatusLabel(dashboardStats.cashSummary.status)}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="stats-item-list">
+                  <div className="stats-item-row">
+                    <div>
+                      <strong>Caja inicial</strong>
+                      <p>Valor pedido al comenzar el día</p>
+                    </div>
+                    <span>{formatCurrency(dashboardStats.cashSummary.openingCash)}</span>
+                  </div>
+                  <div className="stats-item-row">
+                    <div>
+                      <strong>Dinero registrado</strong>
+                      <p>Efectivo + transferencia cobrados</p>
+                    </div>
+                    <span>{formatCurrency(dashboardStats.cashSummary.registeredTotal)}</span>
+                  </div>
+                  <div className="stats-item-row">
+                    <div>
+                      <strong>Ventas esperadas</strong>
+                      <p>Efectivo + transferencia, sin sumar caja inicial</p>
+                    </div>
+                    <span>{formatCurrency(dashboardStats.cashSummary.expectedTotal)}</span>
+                  </div>
+                  <div className="stats-item-row">
+                    <div>
+                      <strong>Diferencia último cierre</strong>
+                      <p>Verde coincide, amarillo sobra, rojo falta</p>
+                    </div>
+                    <span>
+                      {dashboardStats.cashSummary.differenceTotal == null
+                        ? "Sin cierre"
+                        : formatSignedCurrency(dashboardStats.cashSummary.differenceTotal)}
+                    </span>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <section className="stats-panel">
               <div className="section-header stats-panel-head">
-                <h3>Cobros reales por método</h3>
-                <span className="stats-chip">Hoy vs histórico</span>
+                <div>
+                  <h3>Ranking de platos</h3>
+                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                    Ordenado del más vendido al menos vendido.
+                  </p>
+                </div>
+                <span className="stats-chip">Top 5 / Top 10</span>
               </div>
 
-              <div className="payment-grid">
-                {stats.paymentSummary.map((method) => (
-                  <article className="payment-card" key={method.method}>
-                    <div className="payment-card-head">
-                      <div>
-                        <p>{method.label}</p>
-                        <span>{method.method === "efectivo" ? "Caja" : "Bancos"}</span>
+              <div className="stats-split-grid">
+                <article className="ranking-card">
+                  <h4>Top 5 más vendidos</h4>
+                  <div className="stats-bar-list">
+                    {dashboardStats.topDishes.map((dish, index) => (
+                      <div className="stats-bar-row" key={`${dish.label}-top-${index}`}>
+                        <div className="stats-bar-meta">
+                          <span>{index + 1}. {dish.label}</span>
+                          <small>{dish.quantity} · {formatCurrency(dish.total)}</small>
+                        </div>
+                        <div className="stats-bar-track">
+                          <div
+                            className="stats-bar-fill"
+                            style={getSalesIntensityStyle(dish.quantity, Math.max(...dashboardStats.topDishes.map((item) => item.quantity), 0))}
+                          />
+                        </div>
                       </div>
-                      <strong>{formatCurrency(method.amount)}</strong>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="ranking-card">
+                  <h4>Top 10 detalle</h4>
+                  <div className="stats-table-card">
+                    <table className="stats-table">
+                      <thead>
+                        <tr>
+                          <th>Plato</th>
+                          <th>Cantidad</th>
+                          <th>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dashboardStats.topDishes10.length > 0 ? (
+                          dashboardStats.topDishes10.map((dish) => (
+                            <tr key={`${dish.key}-top10`}>
+                              <td>{dish.label}</td>
+                              <td>{dish.quantity}</td>
+                              <td>{formatCurrency(dish.total)}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan="3">Sin platos pagados todavía.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+              </div>
+
+              <div className="stats-table-card" style={{ marginTop: 14 }}>
+                <table className="stats-table">
+                  <thead>
+                    <tr>
+                      <th>Todos los platos de la jornada actual</th>
+                      <th>Cantidad</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboardStats.allDishes.length > 0 ? (
+                      dashboardStats.allDishes.map((dish) => (
+                        <tr key={`${dish.key}-all-dishes`}>
+                          <td>{dish.label}</td>
+                          <td>{dish.quantity}</td>
+                          <td>{formatCurrency(dish.total)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="3">Sin platos pagados en esta jornada.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="stats-panel">
+              <div className="section-header stats-panel-head">
+                <div>
+                  <h3>Cortes, contenedores, extras y bebidas</h3>
+                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                    Todo sale de pedidos pagados, incluyendo peso, precio y cobros extra.
+                  </p>
+                </div>
+                <span className="stats-chip">{dashboardStats.totalKgSold.toFixed(2)} kg</span>
+              </div>
+
+              <div className="stats-category-grid">
+                {[
+                  {
+                    title: "Cortes de carne por peso",
+                    subtitle: `${dashboardStats.totalKgSold.toFixed(2)} kg vendidos en jornada`,
+                    empty: "No hay ventas por peso registradas en esta jornada.",
+                    rows: dashboardStats.weightedCuts,
+                    columns: ["Corte", "Kg vendidos", "Total"],
+                    render: (item) => [item.label, `${item.quantity.toFixed(2)} kg`, formatCurrency(item.total)],
+                  },
+                  {
+                    title: "Contenedores vendidos",
+                    subtitle: `${dashboardStats.containers.reduce((acc, item) => acc + item.quantity, 0)} vendidos en jornada`,
+                    empty: "Sin contenedores vendidos en esta jornada.",
+                    rows: dashboardStats.containers,
+                    columns: ["Contenedor", "Cantidad", "Total"],
+                    render: (item) => [item.label, item.quantity, formatCurrency(item.total)],
+                  },
+                  {
+                    title: "Productos adicionales cobrados",
+                    subtitle: `${dashboardStats.extras.reduce((acc, item) => acc + item.quantity, 0)} cobros extra`,
+                    empty: "No hay extras cobrados en esta jornada.",
+                    rows: dashboardStats.extras,
+                    columns: ["Producto Extra", "Cantidad", "Total"],
+                    render: (item) => [item.label, item.quantity, formatCurrency(item.total)],
+                  },
+                  {
+                    title: "Bebidas",
+                    subtitle: `${dashboardStats.beverages.reduce((acc, item) => acc + item.quantity, 0)} vendidas`,
+                    empty: "No hay bebidas cobradas en esta jornada.",
+                    rows: dashboardStats.beverages,
+                    columns: ["Bebida", "Cantidad", "Total"],
+                    render: (item) => [item.label, item.quantity, formatCurrency(item.total)],
+                  },
+                ].map((block) => (
+                  <article className="stats-category-block" key={block.title}>
+                    <div className="stats-block-head">
+                      <div>
+                        <p className="stats-block-label">{block.title}</p>
+                        <h4>{block.subtitle}</h4>
+                      </div>
                     </div>
-                    <div className="stats-bar-track payment-track">
-                      <div
-                        className="stats-bar-fill"
-                        style={getSalesIntensityStyle(method.amount, maxPaymentAmount)}
-                      />
+                    <div className="stats-table-card">
+                      <table className="stats-table">
+                        <thead>
+                          <tr>
+                            {block.columns.map((column) => (
+                              <th key={column}>{column}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {block.rows.length > 0 ? (
+                            block.rows.map((item) => (
+                              <tr key={`${block.title}-${item.key}`}>
+                                {block.render(item).map((value, index) => (
+                                  <td key={`${item.key}-${index}`}>{value}</td>
+                                ))}
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={block.columns.length}>{block.empty}</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </article>
                 ))}
               </div>
             </section>
 
-            <div className="stats-split-grid" style={{ marginTop: 18 }}>
+            <div className="stats-split-grid">
               <section className="stats-panel">
                 <div className="section-header stats-panel-head">
-                  <h3>Ranking general del dia</h3>
-                  <span className="stats-chip">Más vendidos y menos vendidos</span>
+                  <div>
+                    <h3>Histórico de ventas</h3>
+                    <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                      Comparación por rango con barras de ventas.
+                    </p>
+                  </div>
                 </div>
 
-                <div className="ranking-grid">
-                  <article className="ranking-card">
-                    <h4>Top vendidos</h4>
-                    <ol className="rank-list">
-                      {stats.topDishes.map((dish, index) => (
-                        <li key={`${dish.name}-${index}`}>
-                          <span>{dish.name}</span>
-                          <div style={{ textAlign: "right" }}>
-                            <strong>{dish.quantity}</strong>
-                            <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                              {formatCurrency(dish.revenue)}
-                            </small>
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                  </article>
+                <div className="stats-filter-row">
+                  {STATS_RANGE_OPTIONS.map((option) => (
+                    <button
+                      type="button"
+                      key={option.id}
+                      className={statsRange === option.id ? "active" : ""}
+                      onClick={() => setStatsRange(option.id)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                  {statsRange === "personalizado" ? (
+                    <>
+                      <input
+                        type="date"
+                        value={historyDate}
+                        onChange={(event) => setHistoryDate(event.target.value)}
+                      />
+                      <button type="button" onClick={() => loadHistoryView(historyDate)}>
+                        Aplicar
+                      </button>
+                    </>
+                  ) : null}
+                </div>
 
-                  <article className="ranking-card">
-                    <h4>Menos vendidos</h4>
-                    <ol className="rank-list muted">
-                      {stats.bottomDishes.map((dish, index) => (
-                        <li key={`${dish.name}-${index}`}>
-                          <span>{dish.name}</span>
-                          <div style={{ textAlign: "right" }}>
-                            <strong>{dish.quantity}</strong>
-                            <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                              {formatCurrency(dish.revenue)}
-                            </small>
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                  </article>
+                <div className="stats-history-chart">
+                  {dashboardStats.historyComparisonRows.map((row) => (
+                    <div className="stats-history-bar" key={`${row.date}-bar`}>
+                      <span>{row.label ?? row.date}</span>
+                      <div>
+                        <i
+                          style={getSalesIntensityStyle(
+                            row.sales,
+                            Math.max(...dashboardStats.historyComparisonRows.map((item) => item.sales), 0),
+                          )}
+                        />
+                      </div>
+                      <strong>{formatCurrency(row.sales)}</strong>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="stats-table-card">
+                  <table className="stats-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Ventas</th>
+                        <th>Pedidos</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboardStats.historyComparisonRows.length > 0 ? (
+                        dashboardStats.historyComparisonRows.map((row) => (
+                          <tr key={`${row.date}-${row.label}`}>
+                            <td>{row.label ?? row.date}</td>
+                            <td>{formatCurrency(row.sales ?? 0)}</td>
+                            <td>{row.orders ?? 0}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="3">Sin histórico reciente para mostrar.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </section>
 
-              {publicPagesView ? (
-                <section className="stats-panel">
-                  <div className="section-header stats-panel-head">
-                    <h3>Quincenas</h3>
-                    <span className="stats-chip">Resumen histórico</span>
+              <section className="stats-panel">
+                <div className="section-header stats-panel-head">
+                  <div>
+                    <h3>Histórico de cierres</h3>
+                    <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                      Se guarda cada cierre con diferencia y estado.
+                    </p>
                   </div>
+                </div>
 
-                  <div className="card-grid">
-                    {stats.quincenas.map((period) => (
-                      <article className="ranking-card" key={period.id}>
-                        <h4>{period.label}</h4>
-                        <div className="quincena-kpis">
-                          <div>
-                            <span>Pedidos</span>
-                            <strong>{period.orders}</strong>
-                          </div>
-                          <div>
-                            <span>Ganancia</span>
-                            <strong>{formatCurrency(period.totalSales)}</strong>
-                          </div>
-                        </div>
-                        <div className="rank-columns">
-                          <div>
-                            <p className="rank-column-label">Más vendidos</p>
-                            <ol className="rank-list">
-                              {period.topDishes.map((dish, index) => (
-                                <li key={`${period.id}-${dish.name}-top-${index}`}>
-                                  <span>{dish.name}</span>
-                                  <div style={{ textAlign: "right" }}>
-                                    <strong>{dish.quantity}</strong>
-                                    <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                                      {formatCurrency(dish.revenue)}
-                                    </small>
-                                  </div>
-                                </li>
-                              ))}
-                            </ol>
-                          </div>
-                          <div>
-                            <p className="rank-column-label">Menos vendidos</p>
-                            <ol className="rank-list muted">
-                              {period.bottomDishes.map((dish, index) => (
-                                <li key={`${period.id}-${dish.name}-bottom-${index}`}>
-                                  <span>{dish.name}</span>
-                                  <div style={{ textAlign: "right" }}>
-                                    <strong>{dish.quantity}</strong>
-                                    <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                                      {formatCurrency(dish.revenue)}
-                                    </small>
-                                  </div>
-                                </li>
-                              ))}
-                            </ol>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
+                <div className="stats-table-card">
+                  <table className="stats-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Caja inicial</th>
+                        <th>Ventas esperadas</th>
+                        <th>Diferencia</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboardStats.cashSummary.closingHistory.length > 0 ? (
+                        dashboardStats.cashSummary.closingHistory.slice(0, 8).map((report) => (
+                          <tr key={report.id ?? report.closedAt}>
+                            <td>
+                              {report.closedAt
+                                ? new Date(report.closedAt).toLocaleString("es-CO")
+                                : report.date}
+                            </td>
+                            <td>{formatCurrency(report.openingCash ?? 0)}</td>
+                            <td>{formatCurrency(report.expectedTotal ?? 0)}</td>
+                            <td className={`cash-difference ${report.status}`}>
+                              {formatSignedCurrency(report.differenceTotal ?? 0)}
+                            </td>
+                            <td>{getCashCloseStatusLabel(report.status)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="5">Aún no hay cierres guardados.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="stats-table-card">
+                  <table className="stats-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Contenedores</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboardStats.containerHistoryRows.length > 0 ? (
+                        dashboardStats.containerHistoryRows.slice(0, 6).map((row) => (
+                          <tr key={`${row.date}-containers`}>
+                            <td>{row.label}</td>
+                            <td>{row.quantity}</td>
+                            <td>{formatCurrency(row.total)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="3">Sin histórico de contenedores en la jornada.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </div>
           </section>
         ) : null}
@@ -4464,6 +5443,15 @@ function App() {
               Ingresa lo que hay en efectivo y transferencia antes de cerrar.
             </p>
 
+            <div className="cash-opening-reminder">
+              <span>Caja inicial para este cierre</span>
+              <strong>{formatCurrency(closingPreview.openingCash)}</strong>
+              <p>
+                Escríbela aquí al cerrar. La comparación queda visible en
+                Estadísticas para administración.
+              </p>
+            </div>
+
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -4471,14 +5459,37 @@ function App() {
               }}
             >
               <div className="security-field">
-                <label htmlFor="closing-cash-amount">Efectivo contado</label>
+                <label htmlFor="closing-opening-cash">Caja inicial</label>
+                <input
+                  id="closing-opening-cash"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  autoFocus
+                  value={closingCashModal.openingCash}
+                  onChange={(event) =>
+                    setClosingCashModal((current) =>
+                      current
+                        ? { ...current, openingCash: event.target.value, error: "" }
+                        : current,
+                    )
+                  }
+                  disabled={closingCashModal.loading}
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div className="security-field">
+                <label htmlFor="closing-cash-amount">
+                  Efectivo contado en caja
+                </label>
                 <input
                   id="closing-cash-amount"
                   type="number"
                   min="0"
                   step="0.01"
                   inputMode="decimal"
-                  autoFocus
                   value={closingCashModal.countedCash}
                   onChange={(event) =>
                     setClosingCashModal((current) =>

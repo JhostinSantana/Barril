@@ -250,6 +250,7 @@ function parseDashboardCashSession(rawValue) {
       openingCash: 0,
       openingConfirmed: false,
       closingReport: null,
+      closingHistory: [],
       sessionKey: null,
     };
   }
@@ -261,6 +262,7 @@ function parseDashboardCashSession(rawValue) {
         openingCash: 0,
         openingConfirmed: false,
         closingReport: null,
+        closingHistory: [],
         sessionKey: null,
       };
     }
@@ -269,6 +271,9 @@ function parseDashboardCashSession(rawValue) {
       openingCash: Number(parsed.openingCash ?? 0),
       openingConfirmed: Boolean(parsed.openingConfirmed),
       closingReport: parsed.closingReport ?? null,
+      closingHistory: Array.isArray(parsed.closingHistory)
+        ? parsed.closingHistory
+        : [],
       sessionKey: typeof parsed.sessionKey === "string" ? parsed.sessionKey : null,
     };
   } catch {
@@ -276,6 +281,7 @@ function parseDashboardCashSession(rawValue) {
       openingCash: 0,
       openingConfirmed: false,
       closingReport: null,
+      closingHistory: [],
       sessionKey: null,
     };
   }
@@ -432,6 +438,12 @@ app.patch("/api/settings/cash-session", async (req, res, next) => {
       req.body?.closingReport !== undefined
         ? req.body.closingReport
         : current.closingReport;
+    const closingHistory =
+      req.body?.closingHistory !== undefined
+        ? Array.isArray(req.body.closingHistory)
+          ? req.body.closingHistory
+          : []
+        : current.closingHistory;
     const sessionKey =
       req.body?.sessionKey !== undefined
         ? typeof req.body.sessionKey === "string"
@@ -443,10 +455,12 @@ app.patch("/api/settings/cash-session", async (req, res, next) => {
       openingCash: Number.isFinite(openingCash) ? openingCash : 0,
       openingConfirmed,
       closingReport: closingReport ?? null,
+      closingHistory: closingHistory.slice(0, 100),
       sessionKey: sessionKey ?? null,
     };
 
     await setSetting("cashSession", JSON.stringify(nextValue));
+    await publishDashboardSnapshot();
     res.json(nextValue);
   } catch (error) {
     next(error);
@@ -1135,7 +1149,17 @@ app.post("/api/cleanup", async (req, res, next) => {
 app.post("/api/cleanup/all", async (req, res, next) => {
   try {
     await deleteAllOrders();
-      await publishDashboardSnapshot();
+    await setSetting(
+      "cashSession",
+      JSON.stringify({
+        openingCash: 0,
+        openingConfirmed: false,
+        closingReport: null,
+        closingHistory: [],
+        sessionKey: null,
+      }),
+    );
+    await publishDashboardSnapshot();
     res.json({ ok: true });
   } catch (error) {
     next(error);

@@ -871,7 +871,7 @@ export function getStats(orders, menu, fromDate, toDate) {
 
   const filtered = orders.filter((order) => {
     const created = new Date(order.createdAt);
-    return created >= from && created <= to;
+    return order.status === "paid" && created >= from && created <= to;
   });
 
   const dishMap = new Map();
@@ -1146,7 +1146,7 @@ export function getStatsSummary(orders, menu) {
     },
   };
 
-  orders.forEach((order) => {
+  orders.filter((order) => order.status === "paid").forEach((order) => {
     const movements = getPaymentMovements(order);
 
     movements.forEach((movement) => {

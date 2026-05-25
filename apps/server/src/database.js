@@ -401,6 +401,31 @@ export async function initializeDatabase() {
     WHERE service_type = 'domicilio'
   `);
 
+  // Ensure order_items has the columns used by listOrderItems before reading items
+  try {
+    const _itemColsForMigration = await all('PRAGMA table_info(order_items)');
+    if (!_itemColsForMigration.some((column) => column.name === 'category')) {
+      await run("ALTER TABLE order_items ADD COLUMN category TEXT NOT NULL DEFAULT 'Sin categoria'");
+    }
+    if (!_itemColsForMigration.some((column) => column.name === 'weight_grams')) {
+      await run('ALTER TABLE order_items ADD COLUMN weight_grams REAL');
+    }
+    if (!_itemColsForMigration.some((column) => column.name === 'pricing_mode')) {
+      await run("ALTER TABLE order_items ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'fixed'");
+    }
+    if (!_itemColsForMigration.some((column) => column.name === 'weight_breakdown_json')) {
+      await run('ALTER TABLE order_items ADD COLUMN weight_breakdown_json TEXT');
+    }
+    if (!_itemColsForMigration.some((column) => column.name === 'weight_formula')) {
+      await run('ALTER TABLE order_items ADD COLUMN weight_formula TEXT');
+    }
+    if (!_itemColsForMigration.some((column) => column.name === 'notes')) {
+      await run("ALTER TABLE order_items ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
+    }
+  } catch (e) {
+    // ignore migration errors here; later initialization will attempt other migrations
+  }
+
   const completedWithoutSnapshot = await all(`
     SELECT id
     FROM orders
