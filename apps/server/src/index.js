@@ -1,9 +1,12 @@
 import cors from "cors";
 import express from "express";
 import { nanoid } from "nanoid";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import {
     addOrderPayment,
@@ -56,8 +59,159 @@ const io = new Server(httpServer, {
   },
 });
 
+const TUNNEL_TARGET_URL = "http://localhost:4000";
+const TUNNEL_PUBLIC_URL_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
+let tunnelProcess = null;
+let tunnelUrlWaiters = [];
+const tunnelState = {
+  status: "stopped",
+  publicUrl: "",
+  error: "",
+  startedAt: null,
+};
+
 app.use(cors());
 app.use(express.json());
+
+function getTunnelStatus() {
+  return {
+    ...tunnelState,
+    pid: tunnelProcess?.pid ?? null,
+  };
+}
+
+function notifyTunnelWaiters(error = null) {
+  const waiters = tunnelUrlWaiters;
+  tunnelUrlWaiters = [];
+  waiters.forEach(({ resolve, reject }) => {
+    if (error) {
+      reject(error);
+      return;
+    }
+    resolve(getTunnelStatus());
+  });
+}
+
+async function registerTunnelUrl(publicUrl) {
+  tunnelState.status = "running";
+  tunnelState.publicUrl = publicUrl;
+  tunnelState.error = "";
+  await setSetting("publicApiUrl", publicUrl);
+  io.emit("tunnel:updated", getTunnelStatus());
+  notifyTunnelWaiters();
+}
+
+function waitForTunnelUrl(timeoutMs = 60000) {
+  if (tunnelState.publicUrl) {
+    return Promise.resolve(getTunnelStatus());
+  }
+
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      resolve: (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      reject: (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    };
+    const timer = setTimeout(() => {
+      tunnelUrlWaiters = tunnelUrlWaiters.filter((item) => item !== waiter);
+      reject(new Error("No se pudo obtener la URL publica del tunel a tiempo."));
+    }, timeoutMs);
+
+    tunnelUrlWaiters.push(waiter);
+  });
+}
+
+function processTunnelOutput(chunk) {
+  const text = chunk.toString();
+  const publicUrl = text.match(TUNNEL_PUBLIC_URL_PATTERN)?.[0];
+  if (!publicUrl || publicUrl === tunnelState.publicUrl) return;
+
+  registerTunnelUrl(publicUrl).catch((error) => {
+    tunnelState.error = error.message;
+    notifyTunnelWaiters(error);
+  });
+}
+
+async function startTunnel() {
+  if (tunnelProcess && tunnelState.status !== "stopped") {
+    return waitForTunnelUrl();
+  }
+
+  tunnelState.status = "starting";
+  tunnelState.publicUrl = "";
+  tunnelState.error = "";
+  tunnelState.startedAt = new Date().toISOString();
+
+  tunnelProcess = spawn(
+    "npx",
+    ["--yes", "cloudflared", "tunnel", "--url", TUNNEL_TARGET_URL],
+    {
+      shell: true,
+      windowsHide: true,
+      env: process.env,
+    },
+  );
+
+  tunnelProcess.stdout?.on("data", processTunnelOutput);
+  tunnelProcess.stderr?.on("data", processTunnelOutput);
+  tunnelProcess.on("error", (error) => {
+    tunnelState.status = "error";
+    tunnelState.error = error.message;
+    tunnelProcess = null;
+    io.emit("tunnel:updated", getTunnelStatus());
+    notifyTunnelWaiters(error);
+  });
+  tunnelProcess.on("exit", (code) => {
+    if (tunnelState.status !== "stopped") {
+      tunnelState.status = code === 0 ? "stopped" : "error";
+      tunnelState.error =
+        code === 0 ? "" : `El tunel se cerro con codigo ${code ?? "desconocido"}.`;
+    }
+    tunnelProcess = null;
+    io.emit("tunnel:updated", getTunnelStatus());
+    if (!tunnelState.publicUrl && tunnelState.status === "error") {
+      notifyTunnelWaiters(new Error(tunnelState.error));
+    }
+  });
+
+  io.emit("tunnel:updated", getTunnelStatus());
+  return waitForTunnelUrl();
+}
+
+function stopTunnelProcess() {
+  if (!tunnelProcess?.pid) {
+    tunnelState.status = "stopped";
+    tunnelState.publicUrl = "";
+    tunnelState.error = "";
+    tunnelState.startedAt = null;
+    return Promise.resolve(getTunnelStatus());
+  }
+
+  const pid = tunnelProcess.pid;
+  tunnelState.status = "stopped";
+  tunnelState.publicUrl = "";
+  tunnelState.error = "";
+  tunnelState.startedAt = null;
+
+  return new Promise((resolve) => {
+    if (process.platform === "win32") {
+      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+        windowsHide: true,
+      });
+      killer.on("close", () => resolve(getTunnelStatus()));
+      killer.on("error", () => resolve(getTunnelStatus()));
+      return;
+    }
+
+    tunnelProcess.kill("SIGTERM");
+    resolve(getTunnelStatus());
+  });
+}
 
 async function buildDashboardSnapshot() {
   const [menu, orders, restaurantName, cashSession] = await Promise.all([
@@ -135,6 +289,15 @@ app.get("/health", (_, res) => {
   res.json({ ok: true, service: "asados-en-el-barril-server" });
 });
 
+app.get("/", (_, res) => {
+  res.json({
+    ok: true,
+    service: "asados-en-el-barril-server",
+    message:
+      "Servidor Barril activo. Usa /health para probar o /api/dashboard/snapshot para el dashboard publico.",
+  });
+});
+
 app.get("/api/menu", async (_, res, next) => {
   try {
     const [restaurantName, menu] = await Promise.all([
@@ -176,7 +339,31 @@ app.get("/api/network-info", async (_, res, next) => {
       localIp,
       localApiUrl: `http://${localIp}:4000`,
       publicApiUrl,
+      tunnel: getTunnelStatus(),
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/tunnel/status", (_, res) => {
+  res.json(getTunnelStatus());
+});
+
+app.post("/api/tunnel/start", async (_, res, next) => {
+  try {
+    res.json(await startTunnel());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/tunnel/stop", async (_, res, next) => {
+  try {
+    const status = await stopTunnelProcess();
+    await setSetting("publicApiUrl", "");
+    io.emit("tunnel:updated", status);
+    res.json(status);
   } catch (error) {
     next(error);
   }
@@ -415,9 +602,13 @@ app.post("/api/orders", async (req, res, next) => {
       menuItemId: item.menuItemId,
       quantity: Number(item.quantity) || 1,
       weightGrams: item.weightGrams != null ? Number(item.weightGrams) : null,
+      weightBreakdown: Array.isArray(item.weightBreakdown)
+        ? item.weightBreakdown.map((grams) => Number(grams))
+        : null,
       unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
       subtotal: item.subtotal != null ? Number(item.subtotal) : null,
       pricingMode: item.pricingMode ?? null,
+      weightFormula: item.weightFormula ?? null,
       notes: typeof item.notes === "string" ? item.notes : "",
     }));
 
@@ -533,9 +724,13 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
       menuItemId: item.menuItemId,
       quantity: Number(item.quantity) || 1,
       weightGrams: item.weightGrams != null ? Number(item.weightGrams) : null,
+      weightBreakdown: Array.isArray(item.weightBreakdown)
+        ? item.weightBreakdown.map((grams) => Number(grams))
+        : null,
       unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
       subtotal: item.subtotal != null ? Number(item.subtotal) : null,
       pricingMode: item.pricingMode ?? null,
+      weightFormula: item.weightFormula ?? null,
       notes: typeof item.notes === "string" ? item.notes : "",
     }));
 
@@ -787,13 +982,13 @@ app.patch("/api/orders/:orderId/pay", async (req, res, next) => {
       io.emit("order:paid", updatedOrder);
     }
 
+    await publishDashboardSnapshot();
     res.json(updatedOrder);
   } catch (error) {
     next(error);
   }
 });
 
-          await publishDashboardSnapshot();
 app.delete("/api/orders/:orderId", async (req, res, next) => {
   try {
     const { orderId } = req.params;
@@ -967,11 +1162,8 @@ const PORT = process.env.PORT || 4000;
 await initializeDatabase();
 
 // Ensure backups directory exists and schedule periodic copies of the DB file.
-const DATA_DIR = new URL("../data", import.meta.url).pathname.replace(
-  /^\/?([A-Za-z]:)?/,
-  "",
-);
-const BACKUPS_DIR = `${DATA_DIR.replace(/\\/g, "/")}/backups`;
+const DATA_DIR = fileURLToPath(new URL("../data/", import.meta.url));
+const BACKUPS_DIR = path.join(DATA_DIR, "backups");
 try {
   // Create backups dir if missing
   // eslint-disable-next-line no-console
@@ -982,10 +1174,12 @@ try {
 
 function performPeriodicBackup() {
   try {
-    const src = `${DATA_DIR.replace(/\\/g, "/")}/barril.sqlite`;
-    const dest = `${BACKUPS_DIR.replace(/\\/g, "/")}/barril-${new Date()
+    const src = path.join(DATA_DIR, "barril.sqlite");
+    if (!fs.existsSync(src)) return;
+
+    const dest = path.join(BACKUPS_DIR, `barril-${new Date()
       .toISOString()
-      .replace(/[:.]/g, "-")}.sqlite`;
+      .replace(/[:.]/g, "-")}.sqlite`);
     fs.copyFileSync(src, dest);
     // eslint-disable-next-line no-console
     console.log("Backup saved to", dest);
