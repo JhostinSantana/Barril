@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { nanoid } from "nanoid";
+import fs from "node:fs";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { Server } from "socket.io";
@@ -59,10 +60,11 @@ app.use(cors());
 app.use(express.json());
 
 async function buildDashboardSnapshot() {
-  const [menu, orders, restaurantName] = await Promise.all([
+  const [menu, orders, restaurantName, cashSession] = await Promise.all([
     getMenu(),
     listOrders(),
     getRestaurantName(),
+    getSetting("cashSession"),
   ]);
 
   const todayKey = getDateKey(new Date().toISOString());
@@ -84,7 +86,45 @@ async function buildDashboardSnapshot() {
       "2100-01-01T00:00:00.000Z",
     ),
     statsSummary: getStatsSummary(orders, menu),
+    cashSession: parseDashboardCashSession(cashSession),
   };
+}
+
+function parseDashboardCashSession(rawValue) {
+  if (!rawValue) {
+    return {
+      openingCash: 0,
+      openingConfirmed: false,
+      closingReport: null,
+      sessionKey: null,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || typeof parsed !== "object") {
+      return {
+        openingCash: 0,
+        openingConfirmed: false,
+        closingReport: null,
+        sessionKey: null,
+      };
+    }
+
+    return {
+      openingCash: Number(parsed.openingCash ?? 0),
+      openingConfirmed: Boolean(parsed.openingConfirmed),
+      closingReport: parsed.closingReport ?? null,
+      sessionKey: typeof parsed.sessionKey === "string" ? parsed.sessionKey : null,
+    };
+  } catch {
+    return {
+      openingCash: 0,
+      openingConfirmed: false,
+      closingReport: null,
+      sessionKey: null,
+    };
+  }
 }
 
 async function publishDashboardSnapshot() {
@@ -174,6 +214,53 @@ app.patch("/api/settings/restaurant-name", async (req, res, next) => {
 
     await setSetting("restaurantName", restaurantName);
     res.json({ ok: true, restaurantName });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/settings/cash-session", async (_, res, next) => {
+  try {
+    const cashSession = parseDashboardCashSession(
+      await getSetting("cashSession"),
+    );
+    res.json(cashSession);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/settings/cash-session", async (req, res, next) => {
+  try {
+    const current = parseDashboardCashSession(
+      await getSetting("cashSession"),
+    );
+    const openingCash =
+      req.body?.openingCash != null ? Number(req.body.openingCash) : current.openingCash;
+    const openingConfirmed =
+      req.body?.openingConfirmed != null
+        ? Boolean(req.body.openingConfirmed)
+        : current.openingConfirmed;
+    const closingReport =
+      req.body?.closingReport !== undefined
+        ? req.body.closingReport
+        : current.closingReport;
+    const sessionKey =
+      req.body?.sessionKey !== undefined
+        ? typeof req.body.sessionKey === "string"
+          ? req.body.sessionKey
+          : null
+        : current.sessionKey;
+
+    const nextValue = {
+      openingCash: Number.isFinite(openingCash) ? openingCash : 0,
+      openingConfirmed,
+      closingReport: closingReport ?? null,
+      sessionKey: sessionKey ?? null,
+    };
+
+    await setSetting("cashSession", JSON.stringify(nextValue));
+    res.json(nextValue);
   } catch (error) {
     next(error);
   }
@@ -888,8 +975,7 @@ const BACKUPS_DIR = `${DATA_DIR.replace(/\\/g, "/")}/backups`;
 try {
   // Create backups dir if missing
   // eslint-disable-next-line no-console
-  if (!require("fs").existsSync(BACKUPS_DIR))
-    require("fs").mkdirSync(BACKUPS_DIR, { recursive: true });
+  if (!fs.existsSync(BACKUPS_DIR)) fs.mkdirSync(BACKUPS_DIR, { recursive: true });
 } catch (e) {
   // ignore
 }
@@ -900,7 +986,7 @@ function performPeriodicBackup() {
     const dest = `${BACKUPS_DIR.replace(/\\/g, "/")}/barril-${new Date()
       .toISOString()
       .replace(/[:.]/g, "-")}.sqlite`;
-    require("fs").copyFileSync(src, dest);
+    fs.copyFileSync(src, dest);
     // eslint-disable-next-line no-console
     console.log("Backup saved to", dest);
   } catch (err) {

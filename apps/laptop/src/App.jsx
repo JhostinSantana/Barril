@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { QRCode } from "react-qr-code";
 import { io } from "socket.io-client";
@@ -51,7 +51,8 @@ function isDashboardSnapshot(value) {
         Array.isArray(value.paidOrders) ||
         value.dailyStats ||
         value.allTimeStats ||
-        value.statsSummary),
+        value.statsSummary ||
+        value.cashSession),
   );
 }
 
@@ -66,6 +67,7 @@ function isLocalhostBackendUrl(value) {
 }
 
 const DELETE_ACCOUNT_PIN = "040420";
+const STATS_ACCESS_PIN = "040420";
 const BOGOTA_TIME_ZONE = "America/Bogota";
 const SERVICE_TYPE_OPTIONS = [
   { id: "mesa", label: "Mesa" },
@@ -107,6 +109,46 @@ function writeStoredPublicSocketUrl(value) {
   } else {
     window.localStorage.removeItem(PUBLIC_SOCKET_URL_STORAGE_KEY);
   }
+}
+
+function normalizeCashSession(value) {
+  const openingCash = Number(value?.openingCash ?? 0);
+  const closingReport = value?.closingReport ?? null;
+  return {
+    openingCash: Number.isFinite(openingCash) ? openingCash : 0,
+    openingConfirmed: Boolean(value?.openingConfirmed),
+    closingReport:
+      closingReport && typeof closingReport === "object"
+        ? {
+            countedCash:
+              closingReport.countedCash != null
+                ? Number(closingReport.countedCash)
+                : null,
+            countedTransfer:
+              closingReport.countedTransfer != null
+                ? Number(closingReport.countedTransfer)
+                : null,
+            expectedCash:
+              closingReport.expectedCash != null
+                ? Number(closingReport.expectedCash)
+                : null,
+            expectedTransfer:
+              closingReport.expectedTransfer != null
+                ? Number(closingReport.expectedTransfer)
+                : null,
+            differenceCash:
+              closingReport.differenceCash != null
+                ? Number(closingReport.differenceCash)
+                : null,
+            differenceTransfer:
+              closingReport.differenceTransfer != null
+                ? Number(closingReport.differenceTransfer)
+                : null,
+            matches: Boolean(closingReport.matches),
+            closedAt: closingReport.closedAt ?? null,
+          }
+        : null,
+  };
 }
 
 function readPublicDashboardSnapshot() {
@@ -156,6 +198,10 @@ function parseMoneyInput(rawValue) {
   const value = Number(cleaned);
   if (!Number.isFinite(value)) return 0;
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value ?? 0) + Number.EPSILON) * 100) / 100;
 }
 
 function getCurrentMonthRange() {
@@ -443,7 +489,7 @@ function filterOrdersByCashSession(orders, cutoff) {
   );
 }
 
-function buildCashCloseFromOrders(orders, date) {
+function buildCashCloseFromOrders(orders, date, openingCash = 0) {
   const uniqueOrders = new Set();
 
   const summary = (Array.isArray(orders) ? orders : []).reduce(
@@ -470,6 +516,7 @@ function buildCashCloseFromOrders(orders, date) {
     efectivo: summary.efectivo,
     transferencia: summary.transferencia,
     orders: uniqueOrders.size,
+    openingCash: Number.isFinite(Number(openingCash)) ? Number(openingCash) : 0,
   };
 }
 
@@ -544,6 +591,18 @@ function App() {
     efectivo: 0,
     transferencia: 0,
     orders: 0,
+    openingCash: 0,
+    expectedCash: 0,
+    countedCash: null,
+    countedTransfer: null,
+    matches: null,
+    differenceCash: null,
+    differenceTransfer: null,
+    closedAt: null,
+  });
+  const [cashSession, setCashSession] = useState({
+    openingCash: 0,
+    closingReport: null,
   });
   const [cashSessionCutoff, setCashSessionCutoff] = useState(() =>
     loadCashSessionCutoff(),
@@ -556,6 +615,7 @@ function App() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loading, setLoading] = useState(false);
   const [expandedDays, setExpandedDays] = useState({});
+  const [bogotaDayKey, setBogotaDayKey] = useState(() => getBogotaDateKey());
   const [apiBaseUrl, setApiBaseUrl] = useState(getApiBaseUrl());
   const [networkInfo, setNetworkInfo] = useState({
     localIp: "",
@@ -568,6 +628,9 @@ function App() {
   const [waiterStatus, setWaiterStatus] = useState("");
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
   const [confirmModal, setConfirmModal] = useState(null);
+  const [protectedViewModal, setProtectedViewModal] = useState(null);
+  const [openingCashModal, setOpeningCashModal] = useState(null);
+  const [closingCashModal, setClosingCashModal] = useState(null);
   const [deleteOrderModal, setDeleteOrderModal] = useState(null);
   const [weightModalOrder, setWeightModalOrder] = useState(null);
   const [weightDrafts, setWeightDrafts] = useState({});
@@ -577,12 +640,222 @@ function App() {
   const [restoreFileInputKey, setRestoreFileInputKey] = useState(Date.now());
   const [dayDetailModal, setDayDetailModal] = useState(null);
   const [cleanupDateInput, setCleanupDateInput] = useState("2026-01-01");
+  const [cashSessionHydrated, setCashSessionHydrated] = useState(false);
   const [publicBackendDraft, setPublicBackendDraft] = useState(() =>
     readStoredPublicApiBaseUrl(),
   );
   const [publicBackendConnected, setPublicBackendConnected] = useState(false);
+  const openingCashPromptedRef = useRef(false);
   const publicPagesView = isPublicPagesView();
   const stats = publicPagesView ? allTimeStats : dailyStats;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setBogotaDayKey(getBogotaDateKey());
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (publicPagesView) return;
+    if (!cashSessionHydrated) return;
+
+    if (cashSession.sessionKey !== bogotaDayKey) {
+      openingCashPromptedRef.current = false;
+      setCashSession((current) =>
+        current.sessionKey === bogotaDayKey
+          ? current
+          : {
+              ...current,
+              openingCash: 0,
+              openingConfirmed: false,
+              closingReport: null,
+              sessionKey: bogotaDayKey,
+            },
+      );
+      if (activeView === "cash" && !openingCashModal) {
+        setOpeningCashModal({
+          amount: "0",
+          error: "",
+          loading: false,
+        });
+      }
+      return;
+    }
+
+    if (activeView !== "cash") {
+      openingCashPromptedRef.current = false;
+      return;
+    }
+
+    if (!cashSession.openingConfirmed && !openingCashModal && !openingCashPromptedRef.current) {
+      openingCashPromptedRef.current = true;
+      setOpeningCashModal({
+        amount: `${cashSession.openingCash ?? 0}`,
+        error: "",
+        loading: false,
+      });
+    }
+  }, [activeView, bogotaDayKey, cashSession.openingConfirmed, cashSession.sessionKey, cashSessionHydrated, openingCashModal, publicPagesView]);
+
+  function requestProtectedView(view) {
+    if (publicPagesView) {
+      setActiveView(view);
+      return;
+    }
+
+    setProtectedViewModal({
+      targetView: view,
+      pin: "",
+      error: "",
+      loading: false,
+    });
+  }
+
+  function confirmProtectedView() {
+    if (!protectedViewModal) return;
+
+    const pin = `${protectedViewModal.pin ?? ""}`.trim();
+    if (pin !== STATS_ACCESS_PIN) {
+      setProtectedViewModal((current) =>
+        current
+          ? { ...current, error: "PIN incorrecto. Vuelve a intentarlo." }
+          : current,
+      );
+      return;
+    }
+
+    setActiveView(protectedViewModal.targetView);
+    setProtectedViewModal(null);
+  }
+
+  function openOpeningCashModal() {
+    setOpeningCashModal({
+      amount: `${cashSession.openingCash ?? 0}`,
+      error: "",
+      loading: false,
+    });
+  }
+
+  async function confirmOpeningCash() {
+    if (!openingCashModal) return;
+
+    if (`${openingCashModal.amount ?? ""}`.trim() === "") {
+      setOpeningCashModal((current) =>
+        current ? { ...current, loading: false, error: "Ingresa el efectivo inicial." } : current,
+      );
+      return;
+    }
+
+    const amount = parseMoneyInput(openingCashModal.amount);
+    setOpeningCashModal((current) =>
+      current ? { ...current, loading: true, error: "" } : current,
+    );
+
+    try {
+      const nextSession = await getJson("/api/settings/cash-session", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          openingCash: amount,
+          openingConfirmed: true,
+          sessionKey: bogotaDayKey,
+        }),
+      });
+      const normalizedSession = normalizeCashSession(nextSession);
+      setCashSession(normalizedSession);
+      setCashClose((current) => ({
+        ...current,
+        openingCash: normalizedSession.openingCash,
+        expectedCash: roundMoney(
+          normalizedSession.openingCash + Number(current.efectivo ?? 0),
+        ),
+      }));
+      setOpeningCashModal(null);
+      void loadCashView({ silent: true }).catch(() => {});
+    } catch (error) {
+      setOpeningCashModal((current) =>
+        current ? { ...current, loading: false, error: error.message } : current,
+      );
+    }
+  }
+
+  function openClosingCashModal() {
+    setClosingCashModal({
+      countedCash: "",
+      countedTransfer: "",
+      error: "",
+      loading: false,
+    });
+  }
+
+  async function confirmClosingCash() {
+    if (!closingCashModal) return;
+
+    if (
+      `${closingCashModal.countedCash ?? ""}`.trim() === "" ||
+      `${closingCashModal.countedTransfer ?? ""}`.trim() === ""
+    ) {
+      setClosingCashModal((current) =>
+        current ? { ...current, loading: false, error: "Completa efectivo y transferencia." } : current,
+      );
+      return;
+    }
+
+    const countedCash = parseMoneyInput(closingCashModal.countedCash);
+    const countedTransfer = parseMoneyInput(closingCashModal.countedTransfer);
+    const openingCash = Number(cashSession.openingCash ?? cashClose.openingCash ?? 0);
+    const expectedCash = roundMoney(openingCash + Number(cashClose.efectivo ?? 0));
+    const expectedTransfer = roundMoney(Number(cashClose.transferencia ?? 0));
+    const closingReport = {
+      countedCash,
+      countedTransfer,
+      expectedCash,
+      expectedTransfer,
+      differenceCash: roundMoney(countedCash - expectedCash),
+      differenceTransfer: roundMoney(countedTransfer - expectedTransfer),
+      matches:
+        roundMoney(countedCash - expectedCash) === 0 &&
+        roundMoney(countedTransfer - expectedTransfer) === 0,
+      closedAt: new Date().toISOString(),
+    };
+
+    setClosingCashModal((current) =>
+      current ? { ...current, loading: true, error: "" } : current,
+    );
+
+    try {
+      const nextSession = await getJson("/api/settings/cash-session", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          closingReport,
+          openingConfirmed: false,
+          openingCash: 0,
+        }),
+      });
+      const normalizedSession = normalizeCashSession(nextSession);
+      setCashSession(normalizedSession);
+      setCashClose((current) => ({
+        ...current,
+        openingCash,
+        expectedCash,
+        countedCash,
+        countedTransfer,
+        matches: closingReport.matches,
+        differenceCash: closingReport.differenceCash,
+        differenceTransfer: closingReport.differenceTransfer,
+        closedAt: closingReport.closedAt,
+      }));
+      setClosingCashModal(null);
+      await startNewDay();
+    } catch (error) {
+      setClosingCashModal((current) =>
+        current ? { ...current, loading: false, error: error.message } : current,
+      );
+    }
+  }
 
   function resolveApiRequestUrl(url) {
     if (/^https?:\/\//i.test(url)) {
@@ -610,6 +883,7 @@ function App() {
     if (Array.isArray(snapshot.pendingOrders)) setPendingOrders(snapshot.pendingOrders);
     if (Array.isArray(snapshot.paidOrders)) setPaidOrders(snapshot.paidOrders);
     if (snapshot.cashClose) setCashClose(snapshot.cashClose);
+    if (snapshot.cashSession) setCashSession(normalizeCashSession(snapshot.cashSession));
     if (snapshot.dailyStats) setDailyStats(snapshot.dailyStats);
     if (snapshot.allTimeStats) setAllTimeStats(snapshot.allTimeStats);
     if (snapshot.statsSummary) setStatsSummary(snapshot.statsSummary);
@@ -633,6 +907,7 @@ function App() {
     if (Array.isArray(snapshot.pendingOrders)) setPendingOrders(snapshot.pendingOrders);
     if (Array.isArray(snapshot.paidOrders)) setPaidOrders(snapshot.paidOrders);
     if (snapshot.cashClose) setCashClose(snapshot.cashClose);
+    if (snapshot.cashSession) setCashSession(normalizeCashSession(snapshot.cashSession));
     if (snapshot.dailyStats) setDailyStats(snapshot.dailyStats);
     if (snapshot.allTimeStats) setAllTimeStats(snapshot.allTimeStats);
     if (snapshot.statsSummary) setStatsSummary(snapshot.statsSummary);
@@ -830,32 +1105,51 @@ function App() {
       setLoading(true);
     }
     try {
-      const [menuData, pending, paid, close] = await Promise.all([
+      const [menuData, pending, paid, close, cashSessionResult] = await Promise.all([
         getJson("/api/menu"),
         getJson("/api/orders?status=pending"),
         getJson("/api/orders?status=paid"),
         getJson("/api/cash-close"),
+        getJson("/api/settings/cash-session"),
       ]);
       const filteredPending = filterOrdersByCashSession(
         pending,
         cashSessionCutoff,
       );
       const filteredPaid = filterOrdersByCashSession(paid, cashSessionCutoff);
+      const normalizedCashSession = normalizeCashSession(cashSessionResult);
+      const closingReport = normalizedCashSession.closingReport;
+      const openingCash = normalizedCashSession.openingCash;
       const filteredClose = cashSessionCutoff
         ? buildCashCloseFromOrders(
             [...filteredPending, ...filteredPaid],
             cashSessionCutoff,
+            openingCash,
           )
         : close;
+      const reconciledClose = {
+        ...filteredClose,
+        openingCash,
+        expectedCash: roundMoney(openingCash + Number(filteredClose.efectivo ?? 0)),
+        expectedTransfer: Number(filteredClose.transferencia ?? 0),
+        countedCash: closingReport?.countedCash ?? null,
+        countedTransfer: closingReport?.countedTransfer ?? null,
+        matches: closingReport?.matches ?? null,
+        differenceCash: closingReport?.differenceCash ?? null,
+        differenceTransfer: closingReport?.differenceTransfer ?? null,
+        closedAt: closingReport?.closedAt ?? null,
+      };
       setRestaurantName(menuData.restaurantName);
       setRestaurantNameDraft(menuData.restaurantName ?? "");
       setPendingOrders(filteredPending);
       setPaidOrders(filteredPaid);
-      setCashClose(filteredClose);
+      setCashSession(normalizedCashSession);
+      setCashClose(reconciledClose);
       persistPublicDashboardSnapshot({
         pendingOrders: filteredPending,
         paidOrders: filteredPaid,
-        cashClose: filteredClose,
+        cashClose: reconciledClose,
+        cashSession: normalizedCashSession,
         dailyStats,
         allTimeStats,
         statsSummary,
@@ -871,11 +1165,12 @@ function App() {
       }
       throw error;
     } finally {
+      setCashSessionHydrated(true);
       if (!silent) {
         setLoading(false);
       }
     }
-  }, [cashSessionCutoff, getJson, publicPagesView]);
+  }, [cashSessionCutoff, dailyStats, allTimeStats, getJson, historyGrouped, historyOrders, networkInfo, publicPagesView, restaurantName, statsSummary]);
 
   const loadStatsView = useCallback(async () => {
     const todayRange = getBogotaDayRange();
@@ -905,6 +1200,7 @@ function App() {
         pendingOrders,
         paidOrders,
         cashClose,
+        cashSession,
         dailyStats: nextDailyStats,
         allTimeStats: nextAllTimeStats,
         statsSummary: summaryResult,
@@ -928,6 +1224,7 @@ function App() {
     networkInfo,
     pendingOrders,
     paidOrders,
+    cashSession,
     publicPagesView,
     restaurantName,
   ]);
@@ -1002,25 +1299,31 @@ function App() {
       const newCutoff = new Date().toISOString();
       setCashSessionCutoff(newCutoff);
       saveCashSessionCutoff(newCutoff);
+      await getJson("/api/settings/cash-session", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          openingCash: 0,
+          openingConfirmed: false,
+          closingReport: cashSession.closingReport,
+          sessionKey: bogotaDayKey,
+        }),
+      });
+      setCashSession((current) => ({
+        ...current,
+        openingCash: 0,
+        openingConfirmed: false,
+      }));
       setConfirmModal(null);
-      setActiveView("cash");
+      setActiveView("history");
       setPendingOrders([]);
       setPaidOrders([]);
-      setCashClose({
-        date: newCutoff,
-        total: 0,
-        efectivo: 0,
-        transferencia: 0,
-        orders: 0,
-      });
       setQuery("");
       setPayingOrder(null);
       setSelectedPaidOrder(null);
       setDayDetailModal(null);
-      setHistoryOrders([]);
-      setHistoryGrouped([]);
-      await loadCashView();
-      setNetworkStatus("Cierre de caja realizado. Pantalla limpiada.");
+      await Promise.all([loadStatsView(), loadRecentHistory(7)]);
+      setNetworkStatus("Cierre de caja realizado. Moviendo a dias anteriores.");
     } catch (error) {
       setNetworkStatus(`Error cerrando caja: ${error.message}`);
     } finally {
@@ -1813,8 +2116,6 @@ function App() {
       (acc, item) => acc + Number(item.amount ?? 0),
       0,
     );
-    const needsBackendSetup =
-      isLocalhostBackendUrl(getApiBaseUrl()) && !publicBackendConnected;
     const statusLabel = networkStatus
       ? networkStatus
       : publicBackendConnected
@@ -1844,39 +2145,6 @@ function App() {
             <span>{statusLabel}</span>
           </div>
         </header>
-
-        {needsBackendSetup || networkStatus.includes("Sin conexion") ? (
-          <section className="public-setup-panel">
-            <h2>Conecta esta pagina con tu servidor</h2>
-            <p>
-              GitHub Pages solo muestra la interfaz. Los datos viven en tu
-              laptop con el servidor Barril y la base SQLite. Debes exponer ese
-              servidor con HTTPS (por ejemplo con{" "}
-              <code>npm run tunnel:server</code>) y pegar aqui la URL publica.
-            </p>
-            <ol className="public-setup-steps">
-              <li>En la laptop: ejecuta <strong>npm run dev:server</strong>.</li>
-              <li>En otra consola: ejecuta <strong>npm run tunnel:server</strong>.</li>
-              <li>Copia la URL HTTPS del tunel (ej. <code>https://xxxx.trycloudflare.com</code>).</li>
-              <li>Pegala abajo y pulsa <strong>Conectar</strong>.</li>
-            </ol>
-            <div className="public-setup-form">
-              <input
-                type="url"
-                placeholder="https://tu-tunel.trycloudflare.com"
-                value={publicBackendDraft}
-                onChange={(event) => setPublicBackendDraft(event.target.value)}
-              />
-              <button type="button" onClick={savePublicBackendUrl}>
-                Conectar
-              </button>
-            </div>
-            <p className="public-setup-note">
-              Tambien puedes abrir la pagina con{" "}
-              <code>?api=URL&socket=URL</code> en la barra de direccion.
-            </p>
-          </section>
-        ) : null}
 
         <div className="stats-hero">
           <article className="stats-banner">
@@ -1910,6 +2178,82 @@ function App() {
               <p>{stats.containerSummary.quantity} unidades</p>
             </article>
           </div>
+        </div>
+
+        <div className="stats-split-grid" style={{ marginTop: 18 }}>
+          <section className="stats-panel">
+            <div className="section-header stats-panel-head">
+              <div>
+                <h3>Caja y apertura</h3>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  Estado sincronizado de la jornada
+                </p>
+              </div>
+              <span className="stats-chip">Caja</span>
+            </div>
+
+            <div className="stats-item-list">
+              <div className="stats-item-row">
+                <div>
+                  <strong>Apertura de caja</strong>
+                  <p>Fondo inicial del turno</p>
+                </div>
+                <span>{formatCurrency(cashClose.openingCash)}</span>
+              </div>
+              <div className="stats-item-row">
+                <div>
+                  <strong>Efectivo esperado</strong>
+                  <p>Con base en ventas cobradas</p>
+                </div>
+                <span>{formatCurrency(cashClose.expectedCash)}</span>
+              </div>
+              <div className="stats-item-row">
+                <div>
+                  <strong>Transferencia esperada</strong>
+                  <p>Total previsto por pagos electrónicos</p>
+                </div>
+                <span>{formatCurrency(cashClose.expectedTransfer)}</span>
+              </div>
+              {cashClose.matches === true ? (
+                <div className="stats-item-row">
+                  <div>
+                    <strong>Arqueo validado</strong>
+                    <p>La caja cuadró en el último cierre</p>
+                  </div>
+                  <span>Sí</span>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="stats-panel">
+            <div className="section-header stats-panel-head">
+              <div>
+                <h3>Último cierre</h3>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  Solo se marca cuando coincide
+                </p>
+              </div>
+              <span className="stats-chip">Cierre</span>
+            </div>
+
+            <div className="stats-item-list">
+              <div className="stats-item-row">
+                <div>
+                  <strong>Efectivo contado</strong>
+                  <p>Conteo manual al cerrar</p>
+                </div>
+                <span>{formatCurrency(cashClose.countedCash ?? 0)}</span>
+              </div>
+              <div className="stats-item-row">
+                <div>
+                  <strong>Transferencia contada</strong>
+                  <p>Conteo manual al cerrar</p>
+                </div>
+                <span>{formatCurrency(cashClose.countedTransfer ?? 0)}</span>
+              </div>
+            </div>
+          </section>
         </div>
 
         <div className="stats-split-grid" style={{ marginTop: 18 }}>
@@ -2108,7 +2452,14 @@ function App() {
               className={
                 activeView === item.id ? "nav-button active" : "nav-button"
               }
-              onClick={() => setActiveView(item.id)}
+              onClick={() => {
+                if (item.id === "stats" || item.id === "history") {
+                  requestProtectedView(item.id);
+                  return;
+                }
+
+                setActiveView(item.id);
+              }}
             >
               {item.label}
             </button>
@@ -2188,36 +2539,12 @@ function App() {
               </div>
               <button
                 type="button"
-                onClick={() =>
-                  setConfirmModal({
-                    title: "Cierre de caja",
-                    message:
-                      "Se cerrara la caja y se limpiara la pantalla por completo. Esta accion no tiene vuelta atras.",
-                    action: startNewDay,
-                    confirmText: "Cerrar caja",
-                    cancelText: "Cancelar",
-                  })
-                }
+                onClick={openClosingCashModal}
                 style={{ padding: "10px 16px", marginLeft: "8px" }}
               >
                 Cierre de caja
               </button>
             </header>
-
-            <div className="kpi-grid">
-              <article className="kpi-card">
-                <h3>Total del dia</h3>
-                <strong>{formatCurrency(cashClose.total)}</strong>
-              </article>
-              <article className="kpi-card">
-                <h3>Efectivo</h3>
-                <strong>{formatCurrency(cashClose.efectivo)}</strong>
-              </article>
-              <article className="kpi-card">
-                <h3>Transferencia</h3>
-                <strong>{formatCurrency(cashClose.transferencia)}</strong>
-              </article>
-            </div>
 
             <h3 className="group-title">Cuentas pendientes</h3>
             <div className="card-grid">
@@ -2523,12 +2850,37 @@ function App() {
               </div>
             </header>
 
+            <div className="kpi-grid" style={{ marginTop: 18 }}>
+              <article className="kpi-card">
+                <h3>Apertura de caja</h3>
+                <strong>{formatCurrency(cashClose.openingCash)}</strong>
+              </article>
+              <article className="kpi-card">
+                <h3>Efectivo esperado</h3>
+                <strong>{formatCurrency(cashClose.expectedCash)}</strong>
+              </article>
+              <article className="kpi-card">
+                <h3>Transferencia esperada</h3>
+                <strong>{formatCurrency(cashClose.expectedTransfer)}</strong>
+              </article>
+            </div>
+
+            {cashClose.matches === true ? (
+              <article className="stats-panel" style={{ marginTop: 18 }}>
+                <p className="eyebrow">Arqueo validado</p>
+                <h3>La caja cuadró en el último cierre</h3>
+                <p>
+                  Efectivo contado: {formatCurrency(cashClose.countedCash ?? 0)} · Transferencia contada: {formatCurrency(cashClose.countedTransfer ?? 0)}
+                </p>
+              </article>
+            ) : null}
+
             <div className="stats-hero">
               <article className="stats-banner">
                 <p className="eyebrow">Ventas y control</p>
                 <h3>Resumen diario desde cobros reales, ranking y categorías</h3>
                 <p>
-                  Esta vista muestra solo el corte de hoy para comparar con cocina y caja sin mezclar históricos.
+                  Esta vista muestra el corte actual para comparar caja, cobros y ranking sin mezclar históricos.
                 </p>
               </article>
 
@@ -2561,142 +2913,28 @@ function App() {
                 <span className="stats-chip">Hoy vs histórico</span>
               </div>
 
-              <div style={{ overflowX: "auto" }}>
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    fontSize: 13,
-                  }}
-                >
-                  <thead>
-                    <tr style={{ background: "#f5ede3", borderBottom: "2px solid #e8d8c5" }}>
-                      <th style={{ padding: 12, textAlign: "left", fontWeight: 700, color: "#6f5e4d" }}>Método</th>
-                      <th style={{ padding: 12, textAlign: "center", fontWeight: 700, color: "#2f8f73" }}>Hoy</th>
-                      <th style={{ padding: 12, textAlign: "center", fontWeight: 700, color: "#2f8f73" }}>Histórico</th>
-                      <th style={{ padding: 12, textAlign: "center", fontWeight: 700, color: "#2f8f73" }}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr style={{ borderBottom: "1px solid #f0e8e0" }}>
-                      <td style={{ padding: 12, fontWeight: 600 }}>Efectivo</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.efectivo)}</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.historical.efectivo)}</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.efectivo + statsSummary.historical.efectivo)}</td>
-                    </tr>
-                    <tr style={{ background: "#fafaf7" }}>
-                      <td style={{ padding: 12, fontWeight: 600 }}>Transferencia</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.transferencia)}</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.historical.transferencia)}</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.transferencia + statsSummary.historical.transferencia)}</td>
-                    </tr>
-                    <tr style={{ borderTop: "1px solid #f0e8e0" }}>
-                      <td style={{ padding: 12, fontWeight: 700 }}>Total</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.total)}</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.historical.total)}</td>
-                      <td style={{ padding: 12, textAlign: "center" }}>{formatCurrency(statsSummary.today.total + statsSummary.historical.total)}</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div className="payment-grid">
+                {stats.paymentSummary.map((method) => (
+                  <article className="payment-card" key={method.method}>
+                    <div className="payment-card-head">
+                      <div>
+                        <p>{method.label}</p>
+                        <span>{method.method === "efectivo" ? "Caja" : "Bancos"}</span>
+                      </div>
+                      <strong>{formatCurrency(method.amount)}</strong>
+                    </div>
+                    <div className="stats-bar-track payment-track">
+                      <div
+                        className="stats-bar-fill"
+                        style={getSalesIntensityStyle(method.amount, maxPaymentAmount)}
+                      />
+                    </div>
+                  </article>
+                ))}
               </div>
             </section>
 
             <div className="stats-split-grid" style={{ marginTop: 18 }}>
-              <section className="stats-panel">
-                <div className="section-header stats-panel-head">
-                  <h3>Comida y bebidas separadas</h3>
-                  <span className="stats-chip">Ranking por categoría</span>
-                </div>
-
-                <div className="stats-category-grid">
-                  <article className="stats-category-block stats-drink-block">
-                    <div className="stats-block-head">
-                      <div>
-                        <p className="stats-block-label">Bebidas</p>
-                        <h4>Bebidas vendidas</h4>
-                      </div>
-                      <span>{beverageCategories.length} categorías</span>
-                    </div>
-
-                    {beverageCategories.length > 0 ? (
-                      beverageCategories.map((category) => {
-                        const topItems = category.items.slice(0, 5);
-                        const maxItemQuantity = Math.max(...topItems.map((item) => item.quantity), 0);
-                        return (
-                          <article className="stats-chart-card" key={category.label}>
-                            <div className="stats-chart-head">
-                              <div>
-                                <h5>{category.label}</h5>
-                                <p>{category.quantity} vendidos</p>
-                              </div>
-                              <strong>{formatCurrency(category.revenue)}</strong>
-                            </div>
-                            <div className="stats-bar-list">
-                              {topItems.map((item) => (
-                                <div className="stats-bar-row" key={`${category.label}-${item.name}`}>
-                                  <div className="stats-bar-meta">
-                                    <span>{item.name}</span>
-                                    <small>{item.quantity} uds · {formatCurrency(item.revenue)}</small>
-                                  </div>
-                                  <div className="stats-bar-track">
-                                    <div className="stats-bar-fill" style={getSalesIntensityStyle(item.quantity, maxItemQuantity)} />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </article>
-                        );
-                      })
-                    ) : (
-                      <p className="empty">Aun no hay ventas de bebidas hoy.</p>
-                    )}
-                  </article>
-
-                  <article className="stats-category-block stats-food-block">
-                    <div className="stats-block-head">
-                      <div>
-                        <p className="stats-block-label">Comida</p>
-                        <h4>Platos y complementos</h4>
-                      </div>
-                      <span>{foodCategories.length} categorías</span>
-                    </div>
-
-                    {foodCategories.length > 0 ? (
-                      foodCategories.map((category) => {
-                        const topItems = category.items.slice(0, 5);
-                        const maxItemQuantity = Math.max(...topItems.map((item) => item.quantity), 0);
-                        return (
-                          <article className="stats-chart-card" key={category.label}>
-                            <div className="stats-chart-head">
-                              <div>
-                                <h5>{category.label}</h5>
-                                <p>{category.quantity} vendidos</p>
-                              </div>
-                              <strong>{formatCurrency(category.revenue)}</strong>
-                            </div>
-                            <div className="stats-bar-list">
-                              {topItems.map((item) => (
-                                <div className="stats-bar-row" key={`${category.label}-${item.name}`}>
-                                  <div className="stats-bar-meta">
-                                    <span>{item.name}</span>
-                                    <small>{item.quantity} uds · {formatCurrency(item.revenue)}</small>
-                                  </div>
-                                  <div className="stats-bar-track">
-                                    <div className="stats-bar-fill" style={getSalesIntensityStyle(item.quantity, maxItemQuantity)} />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </article>
-                        );
-                      })
-                    ) : (
-                      <p className="empty">Aun no hay ventas de comida hoy.</p>
-                    )}
-                  </article>
-                </div>
-              </section>
-
               <section className="stats-panel">
                 <div className="section-header stats-panel-head">
                   <h3>Ranking general del dia</h3>
@@ -2705,116 +2943,101 @@ function App() {
 
                 <div className="ranking-grid">
                   <article className="ranking-card">
-                    <h4>Ranking general</h4>
-                    <div className="rank-columns">
-                      <div>
-                        <p className="rank-column-label">Top vendidos</p>
-                        <ol className="rank-list">
-                          {stats.topDishes.map((dish, index) => (
-                            <li key={`${dish.name}-${index}`}>
-                              <span>{dish.name}</span>
-                              <div style={{ textAlign: "right" }}>
-                                <strong>{dish.quantity}</strong>
-                                <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                                  {formatCurrency(dish.revenue)}
-                                </small>
-                              </div>
-                            </li>
-                          ))}
-                        </ol>
-                      </div>
-                      <div>
-                        <p className="rank-column-label">Menos vendidos</p>
-                        <ol className="rank-list muted">
-                          {stats.bottomDishes.map((dish, index) => (
-                            <li key={`${dish.name}-${index}`}>
-                              <span>{dish.name}</span>
-                              <div style={{ textAlign: "right" }}>
-                                <strong>{dish.quantity}</strong>
-                                <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                                  {formatCurrency(dish.revenue)}
-                                </small>
-                              </div>
-                            </li>
-                          ))}
-                        </ol>
-                      </div>
-                    </div>
+                    <h4>Top vendidos</h4>
+                    <ol className="rank-list">
+                      {stats.topDishes.map((dish, index) => (
+                        <li key={`${dish.name}-${index}`}>
+                          <span>{dish.name}</span>
+                          <div style={{ textAlign: "right" }}>
+                            <strong>{dish.quantity}</strong>
+                            <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                              {formatCurrency(dish.revenue)}
+                            </small>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
                   </article>
 
-                  {publicPagesView
-                    ? stats.quincenas.map((period) => (
-                        <article className="ranking-card" key={period.id}>
-                          <h4>{period.label}</h4>
-                          <div className="quincena-kpis">
-                            <div>
-                              <span>Pedidos</span>
-                              <strong>{period.orders}</strong>
-                            </div>
-                            <div>
-                              <span>Ganancia</span>
-                              <strong>{formatCurrency(period.totalSales)}</strong>
-                            </div>
+                  <article className="ranking-card">
+                    <h4>Menos vendidos</h4>
+                    <ol className="rank-list muted">
+                      {stats.bottomDishes.map((dish, index) => (
+                        <li key={`${dish.name}-${index}`}>
+                          <span>{dish.name}</span>
+                          <div style={{ textAlign: "right" }}>
+                            <strong>{dish.quantity}</strong>
+                            <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                              {formatCurrency(dish.revenue)}
+                            </small>
                           </div>
-                          <div className="rank-columns">
-                            <div>
-                              <p className="rank-column-label">Más vendidos</p>
-                              <ol className="rank-list">
-                                {period.topDishes.map((dish, index) => (
-                                  <li key={`${period.id}-${dish.name}-top-${index}`}>
-                                    <span>{dish.name}</span>
-                                    <div style={{ textAlign: "right" }}>
-                                      <strong>{dish.quantity}</strong>
-                                      <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                                        {formatCurrency(dish.revenue)}
-                                      </small>
-                                    </div>
-                                  </li>
-                                ))}
-                              </ol>
-                            </div>
-                            <div>
-                              <p className="rank-column-label">Menos vendidos</p>
-                              <ol className="rank-list muted">
-                                {period.bottomDishes.map((dish, index) => (
-                                  <li key={`${period.id}-${dish.name}-bottom-${index}`}>
-                                    <span>{dish.name}</span>
-                                    <div style={{ textAlign: "right" }}>
-                                      <strong>{dish.quantity}</strong>
-                                      <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                                        {formatCurrency(dish.revenue)}
-                                      </small>
-                                    </div>
-                                  </li>
-                                ))}
-                              </ol>
-                            </div>
-                          </div>
-                        </article>
-                      ))
-                    : null}
-                </div>
-
-                <div className="payment-grid" style={{ marginTop: 18 }}>
-                  {stats.paymentSummary.map((method) => (
-                    <article className="payment-card" key={method.method}>
-                      <div className="payment-card-head">
-                        <div>
-                          <p>{method.label}</p>
-                          <span>{method.method === "efectivo" ? "Caja" : "Bancos"}</span>
-                        </div>
-                        <strong>{formatCurrency(method.amount)}</strong>
-                      </div>
-                      <div className="stats-bar-track payment-track">
-                        <div
-                          className="stats-bar-fill"
-                          style={getSalesIntensityStyle(method.amount, maxPaymentAmount)}
-                        />
-                      </div>
-                    </article>
-                  ))}
+                        </li>
+                      ))}
+                    </ol>
+                  </article>
                 </div>
               </section>
+
+              {publicPagesView ? (
+                <section className="stats-panel">
+                  <div className="section-header stats-panel-head">
+                    <h3>Quincenas</h3>
+                    <span className="stats-chip">Resumen histórico</span>
+                  </div>
+
+                  <div className="card-grid">
+                    {stats.quincenas.map((period) => (
+                      <article className="ranking-card" key={period.id}>
+                        <h4>{period.label}</h4>
+                        <div className="quincena-kpis">
+                          <div>
+                            <span>Pedidos</span>
+                            <strong>{period.orders}</strong>
+                          </div>
+                          <div>
+                            <span>Ganancia</span>
+                            <strong>{formatCurrency(period.totalSales)}</strong>
+                          </div>
+                        </div>
+                        <div className="rank-columns">
+                          <div>
+                            <p className="rank-column-label">Más vendidos</p>
+                            <ol className="rank-list">
+                              {period.topDishes.map((dish, index) => (
+                                <li key={`${period.id}-${dish.name}-top-${index}`}>
+                                  <span>{dish.name}</span>
+                                  <div style={{ textAlign: "right" }}>
+                                    <strong>{dish.quantity}</strong>
+                                    <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                                      {formatCurrency(dish.revenue)}
+                                    </small>
+                                  </div>
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                          <div>
+                            <p className="rank-column-label">Menos vendidos</p>
+                            <ol className="rank-list muted">
+                              {period.bottomDishes.map((dish, index) => (
+                                <li key={`${period.id}-${dish.name}-bottom-${index}`}>
+                                  <span>{dish.name}</span>
+                                  <div style={{ textAlign: "right" }}>
+                                    <strong>{dish.quantity}</strong>
+                                    <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
+                                      {formatCurrency(dish.revenue)}
+                                    </small>
+                                  </div>
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
           </section>
         ) : null}
@@ -3889,6 +4112,157 @@ function App() {
         </div>
       ) : null}
 
+      {openingCashModal ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => setOpeningCashModal(null)}
+        >
+          <article
+            className="modal modal-security"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="security-flag">Apertura de caja</p>
+            <h3>Ingresa el efectivo inicial</h3>
+            <p className="security-note">
+              Este valor se usa como base para validar el cierre del día.
+            </p>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                confirmOpeningCash();
+              }}
+            >
+              <div className="security-field">
+                <label htmlFor="opening-cash-amount">Efectivo inicial</label>
+                <input
+                  id="opening-cash-amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  autoFocus
+                  value={openingCashModal.amount}
+                  onChange={(event) =>
+                    setOpeningCashModal((current) =>
+                      current
+                        ? { ...current, amount: event.target.value, error: "" }
+                        : current,
+                    )
+                  }
+                  disabled={openingCashModal.loading}
+                  placeholder="0.00"
+                />
+              </div>
+
+              {openingCashModal.error ? (
+                <p className="security-error">{openingCashModal.error}</p>
+              ) : null}
+
+              <div className="actions security-actions">
+                <button type="submit" disabled={openingCashModal.loading}>
+                  Guardar apertura
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setOpeningCashModal(null)}
+                  disabled={openingCashModal.loading}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
+      ) : null}
+
+      {closingCashModal ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => setClosingCashModal(null)}
+        >
+          <article
+            className="modal modal-security"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="security-flag">Cierre de caja</p>
+            <h3>Arqueo final de la jornada</h3>
+            <p className="security-note">
+              Ingresa lo que hay en efectivo y transferencia antes de cerrar.
+            </p>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                confirmClosingCash();
+              }}
+            >
+              <div className="security-field">
+                <label htmlFor="closing-cash-amount">Efectivo contado</label>
+                <input
+                  id="closing-cash-amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  autoFocus
+                  value={closingCashModal.countedCash}
+                  onChange={(event) =>
+                    setClosingCashModal((current) =>
+                      current
+                        ? { ...current, countedCash: event.target.value, error: "" }
+                        : current,
+                    )
+                  }
+                  disabled={closingCashModal.loading}
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div className="security-field">
+                <label htmlFor="closing-transfer-amount">Transferencia contada</label>
+                <input
+                  id="closing-transfer-amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={closingCashModal.countedTransfer}
+                  onChange={(event) =>
+                    setClosingCashModal((current) =>
+                      current
+                        ? { ...current, countedTransfer: event.target.value, error: "" }
+                        : current,
+                    )
+                  }
+                  disabled={closingCashModal.loading}
+                  placeholder="0.00"
+                />
+              </div>
+
+              {closingCashModal.error ? (
+                <p className="security-error">{closingCashModal.error}</p>
+              ) : null}
+
+              <div className="actions security-actions">
+                <button type="submit" disabled={closingCashModal.loading}>
+                  Cerrar jornada
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setClosingCashModal(null)}
+                  disabled={closingCashModal.loading}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
+      ) : null}
+
       {confirmModal ? (
         <div className="modal-backdrop" onClick={() => setConfirmModal(null)}>
           <article
@@ -3944,6 +4318,71 @@ function App() {
                 {confirmModal.cancelText}
               </button>
             </div>
+          </article>
+        </div>
+      ) : null}
+
+      {protectedViewModal ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => setProtectedViewModal(null)}
+        >
+          <article
+            className="modal modal-security"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="security-flag">Acceso restringido</p>
+            <h3>Estadisticas y dias anteriores</h3>
+            <p className="security-note">
+              Ingresa el PIN para acceder a esta pantalla.
+            </p>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                confirmProtectedView();
+              }}
+            >
+              <div className="security-field">
+                <label htmlFor="stats-access-pin">PIN de acceso</label>
+                <input
+                  id="stats-access-pin"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  autoFocus
+                  maxLength={6}
+                  value={protectedViewModal.pin}
+                  onChange={(event) =>
+                    setProtectedViewModal((current) =>
+                      current
+                        ? { ...current, pin: event.target.value, error: "" }
+                        : current,
+                    )
+                  }
+                  placeholder="⬢⬢⬢⬢⬢⬢"
+                  disabled={protectedViewModal.loading}
+                />
+              </div>
+
+              {protectedViewModal.error ? (
+                <p className="security-error">{protectedViewModal.error}</p>
+              ) : null}
+
+              <div className="actions security-actions">
+                <button type="submit" disabled={protectedViewModal.loading}>
+                  Entrar
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setProtectedViewModal(null)}
+                  disabled={protectedViewModal.loading}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
           </article>
         </div>
       ) : null}
