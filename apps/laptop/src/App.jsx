@@ -49,6 +49,7 @@ function isDashboardSnapshot(value) {
     value &&
       (Array.isArray(value.pendingOrders) ||
         Array.isArray(value.paidOrders) ||
+        Array.isArray(value.historyGrouped) ||
         value.dailyStats ||
         value.allTimeStats ||
         value.statsSummary ||
@@ -611,6 +612,7 @@ function buildDashboardMetrics({
   cashSession,
   historyDate,
   statsRange,
+  sessionKey,
 }) {
   const todayKey = getBogotaDateKey();
   const yesterdayDate = new Date();
@@ -629,7 +631,7 @@ function buildDashboardMetrics({
   const paidByDate = new Map();
   const containerHistoryMap = new Map();
   const pendingClosingReport =
-    cashSession?.closingReport && !cashSession.closingReport.adminConfirmed
+    hasActivePendingClosing(cashSession, sessionKey) && cashSession?.closingReport
       ? cashSession.closingReport
       : null;
   const paidOrdersList =
@@ -1003,6 +1005,33 @@ function filterOrdersForPendingClosing(orders, cashSession) {
   });
 }
 
+function hasActivePendingClosing(cashSession, sessionKey) {
+  if (!cashSession || cashSession.sessionKey !== sessionKey) return false;
+  return Boolean(
+    cashSession.closingReport &&
+      !cashSession.closingReport.adminConfirmed &&
+      cashSession.closingReport.closedAt,
+  );
+}
+
+function getLastConfirmedCloseAt(cashSession) {
+  return (Array.isArray(cashSession?.closingHistory) ? cashSession.closingHistory : [])
+    .reduce((latest, entry) => {
+      if (!entry?.adminConfirmed || !entry.closedAt) return latest;
+      return !latest || entry.closedAt > latest ? entry.closedAt : latest;
+    }, "");
+}
+
+function filterPaidOrdersForCurrentJornada(orders, cashSession) {
+  const previousCloseAt = getLastConfirmedCloseAt(cashSession);
+  return (Array.isArray(orders) ? orders : []).filter((order) => {
+    if (order?.status !== "paid") return false;
+    const movementAt = order?.paidAt ?? order?.createdAt;
+    if (!movementAt) return false;
+    return !previousCloseAt || movementAt > previousCloseAt;
+  });
+}
+
 function buildCashCloseFromOrders(orders, date, openingCash = 0) {
   const uniqueOrders = new Set();
 
@@ -1128,6 +1157,7 @@ function App() {
   const [historyOrders, setHistoryOrders] = useState([]);
   const [historyGrouped, setHistoryGrouped] = useState([]);
   const [statsRange, setStatsRange] = useState("semana");
+  const [publicTab, setPublicTab] = useState("jornada");
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loading, setLoading] = useState(false);
   const [expandedDays, setExpandedDays] = useState({});
@@ -1298,6 +1328,16 @@ function App() {
   }
 
   function openClosingCashModal() {
+    if (
+      hasActivePendingClosing(cashSession, bogotaDayKey) ||
+      dashboardStats.cashSummary.pendingAdminConfirmation
+    ) {
+      setNetworkStatus(
+        "Ya hay un cierre pendiente. Revisa los datos y confirma abajo.",
+      );
+      return;
+    }
+
     setClosingCashModal({
       openingCash: `${cashSession.openingCash ?? cashClose.openingCash ?? 0}`,
       countedCash: "",
@@ -1328,59 +1368,71 @@ function App() {
       current ? { ...current, loading: true, error: "" } : current,
     );
 
-    const allPaidOrders = await getJson("/api/orders?status=paid").catch(() => paidOrdersForStats);
-    const reviewPaidOrders = filterOrdersForPendingClosing(allPaidOrders, {
-      closingReport: { closedAt, adminConfirmed: false },
-      closingHistory: cashSession.closingHistory,
-    });
-    const reviewPayments = reviewPaidOrders.reduce(
-      (acc, order) => {
-        for (const movement of getDashboardPaymentMovements(order)) {
-          if (movement.paymentMethod === "efectivo") {
-            acc.efectivo = roundMoney(acc.efectivo + Number(movement.amount ?? 0));
-          }
-          if (movement.paymentMethod === "transferencia") {
-            acc.transferencia = roundMoney(acc.transferencia + Number(movement.amount ?? 0));
-          }
-        }
-        return acc;
-      },
-      { efectivo: 0, transferencia: 0 },
-    );
-    const efectivo = reviewPaidOrders.length > 0 ? reviewPayments.efectivo : closingPreview.efectivo;
-    const transferencia = reviewPaidOrders.length > 0 ? reviewPayments.transferencia : closingPreview.transferencia;
-    const expectedCash = roundMoney(efectivo);
-    const expectedTransfer = roundMoney(transferencia);
-    const expectedTotal = roundMoney(expectedCash + expectedTransfer);
-    const countedTotal = roundMoney(countedCash + countedTransfer);
-    const differenceCash = roundMoney(countedCash - expectedCash);
-    const differenceTransfer = roundMoney(countedTransfer - expectedTransfer);
-    const differenceTotal = roundMoney(countedTotal - expectedTotal);
-    const closingReport = {
-      id: `close-${Date.now()}`,
-      date: bogotaDayKey,
-      openingCash: closingPreview.openingCash,
-      efectivo,
-      transferencia,
-      totalSold: expectedTotal,
-      countedCash,
-      countedTransfer,
-      expectedCash,
-      expectedTransfer,
-      expectedTotal,
-      countedTotal,
-      differenceCash,
-      differenceTransfer,
-      differenceTotal,
-      matches: differenceTotal === 0,
-      adminConfirmed: false,
-      confirmedAt: null,
-      reviewPaidOrders,
-      status: getCashCloseStatus(differenceTotal),
-      closedAt,
-    };
-
     try {
+      const allPaidOrders = await getJson("/api/orders?status=paid").catch(
+        () => paidOrdersForStats,
+      );
+      const reviewPaidOrders = filterOrdersForPendingClosing(allPaidOrders, {
+        closingReport: { closedAt, adminConfirmed: false },
+        closingHistory: cashSession.closingHistory,
+      });
+      const reviewPayments = reviewPaidOrders.reduce(
+        (acc, order) => {
+          for (const movement of getDashboardPaymentMovements(order)) {
+            if (movement.paymentMethod === "efectivo") {
+              acc.efectivo = roundMoney(
+                acc.efectivo + Number(movement.amount ?? 0),
+              );
+            }
+            if (movement.paymentMethod === "transferencia") {
+              acc.transferencia = roundMoney(
+                acc.transferencia + Number(movement.amount ?? 0),
+              );
+            }
+          }
+          return acc;
+        },
+        { efectivo: 0, transferencia: 0 },
+      );
+      const efectivo =
+        reviewPaidOrders.length > 0
+          ? reviewPayments.efectivo
+          : closingPreview.efectivo;
+      const transferencia =
+        reviewPaidOrders.length > 0
+          ? reviewPayments.transferencia
+          : closingPreview.transferencia;
+      const expectedCash = roundMoney(efectivo);
+      const expectedTransfer = roundMoney(transferencia);
+      const expectedTotal = roundMoney(expectedCash + expectedTransfer);
+      const countedTotal = roundMoney(countedCash + countedTransfer);
+      const differenceCash = roundMoney(countedCash - expectedCash);
+      const differenceTransfer = roundMoney(countedTransfer - expectedTransfer);
+      const differenceTotal = roundMoney(countedTotal - expectedTotal);
+      const closingReport = {
+        id: `close-${Date.now()}`,
+        date: bogotaDayKey,
+        openingCash: closingPreview.openingCash,
+        efectivo,
+        transferencia,
+        totalSold: expectedTotal,
+        countedCash,
+        countedTransfer,
+        expectedCash,
+        expectedTransfer,
+        expectedTotal,
+        countedTotal,
+        differenceCash,
+        differenceTransfer,
+        differenceTotal,
+        matches: differenceTotal === 0,
+        adminConfirmed: false,
+        confirmedAt: null,
+        reviewPaidOrders,
+        status: getCashCloseStatus(differenceTotal),
+        closedAt,
+      };
+
       const nextSession = await getJson("/api/settings/cash-session", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1454,9 +1506,16 @@ function App() {
     if (Array.isArray(snapshot.paidOrders)) {
       setPaidOrders(
         publicPagesView
-          ? snapshot.paidOrders
-          : normalizedSnapshotSession?.closingReport &&
-              !normalizedSnapshotSession.closingReport.adminConfirmed
+          ? hasActivePendingClosing(normalizedSnapshotSession, bogotaDayKey)
+            ? filterOrdersForPendingClosing(
+                snapshot.paidOrders,
+                normalizedSnapshotSession,
+              )
+            : filterPaidOrdersForCurrentJornada(
+                snapshot.paidOrders,
+                normalizedSnapshotSession,
+              )
+          : hasActivePendingClosing(normalizedSnapshotSession, bogotaDayKey)
             ? filterOrdersForPendingClosing(snapshot.paidOrders, normalizedSnapshotSession)
             : filterOrdersByCashSession(snapshot.paidOrders, cashSessionCutoff),
       );
@@ -1497,9 +1556,16 @@ function App() {
     if (Array.isArray(snapshot.paidOrders)) {
       setPaidOrders(
         publicPagesView
-          ? snapshot.paidOrders
-          : normalizedSnapshotSession?.closingReport &&
-              !normalizedSnapshotSession.closingReport.adminConfirmed
+          ? hasActivePendingClosing(normalizedSnapshotSession, bogotaDayKey)
+            ? filterOrdersForPendingClosing(
+                snapshot.paidOrders,
+                normalizedSnapshotSession,
+              )
+            : filterPaidOrdersForCurrentJornada(
+                snapshot.paidOrders,
+                normalizedSnapshotSession,
+              )
+          : hasActivePendingClosing(normalizedSnapshotSession, bogotaDayKey)
             ? filterOrdersForPendingClosing(snapshot.paidOrders, normalizedSnapshotSession)
             : filterOrdersByCashSession(snapshot.paidOrders, cashSessionCutoff),
       );
@@ -1585,6 +1651,7 @@ function App() {
         cashSession,
         historyDate,
         statsRange,
+        sessionKey: bogotaDayKey,
       }),
     [
       allTimeStats,
@@ -1596,6 +1663,7 @@ function App() {
       historyOrders,
       paidOrdersForStats,
       statsRange,
+      bogotaDayKey,
     ],
   );
 
@@ -1795,8 +1863,7 @@ function App() {
       );
       const normalizedCashSession = normalizeCashSession(cashSessionResult);
       const filteredPaid =
-        normalizedCashSession.closingReport &&
-        !normalizedCashSession.closingReport.adminConfirmed
+        hasActivePendingClosing(normalizedCashSession, bogotaDayKey)
           ? filterOrdersForPendingClosing(paid, normalizedCashSession)
           : filterOrdersByCashSession(paid, cutoff);
       const closingReport = normalizedCashSession.closingReport;
@@ -1866,7 +1933,7 @@ function App() {
         setLoading(false);
       }
     }
-  }, [cashSessionCutoff, getJson, publicPagesView]);
+  }, [bogotaDayKey, cashSessionCutoff, getJson, publicPagesView]);
 
   const loadStatsView = useCallback(async () => {
     const todayRange = getBogotaDayRange();
@@ -2025,7 +2092,7 @@ function App() {
   async function confirmAdminCashClose() {
     const pendingReport =
       cashSession.closingReport ?? dashboardStats.cashSummary.pendingClosingReport;
-    if (!pendingReport) return;
+    if (!pendingReport || !hasActivePendingClosing(cashSession, bogotaDayKey)) return;
 
     const reportForHistory = { ...pendingReport };
     delete reportForHistory.reviewPaidOrders;
@@ -2904,6 +2971,8 @@ function App() {
         }
         setNetworkStatus("Sin conexion con el backend publico.");
       });
+      loadRecentHistory(7).catch(() => {});
+      loadStatsView().catch(() => {});
       publicFallbackTimer = window.setInterval(() => {
         loadPublicDashboardSnapshot().catch(() => {
           if (!hydratePublicDashboardSnapshot()) {
@@ -2911,6 +2980,7 @@ function App() {
             setNetworkStatus("Sin conexion con el backend publico.");
           }
         });
+        loadRecentHistory(7).catch(() => {});
       }, 30000);
     } else {
       loadCashView();
@@ -2949,331 +3019,60 @@ function App() {
     triggerAutoPrint,
   ]);
 
-  if (publicPagesView) {
-    const topPaidOrders = paidOrdersForDisplay.slice(0, 4);
-    const topDishes = stats.topDishes.slice(0, 5);
-    const bottomDishes = stats.bottomDishes.slice(0, 5);
-    const statusLabel = networkStatus
-      ? networkStatus
-      : publicBackendConnected
-        ? "Conectado al servidor"
-        : "Esperando datos del servidor";
+  const showStatsView =
+    activeView === "stats" || (publicPagesView && publicTab === "jornada");
+  const showHistoryView =
+    activeView === "history" || (publicPagesView && publicTab === "historial");
+  const publicStatusLabel = networkStatus
+    ? networkStatus
+    : publicBackendConnected
+      ? "Conectado al servidor"
+      : "Esperando datos del servidor";
 
-    return (
-      <main className="public-shell">
-        <header className="public-header">
-          <div>
-            <p className="eyebrow">Barril · dashboard público</p>
-            <h1 className="public-title">Ventas y ganancias en vivo</h1>
-            <p className="public-lead">
-              Esta página lee el estado sincronizado del servidor SQLite y
-              muestra pedidos, cobros y ranking en tiempo real.
-            </p>
-          </div>
-
-          <div className="public-status">
-            <span
-              className={
-                publicBackendConnected
-                  ? "public-status-dot"
-                  : "public-status-dot loading"
-              }
-            />
-            <span>{statusLabel}</span>
-          </div>
-        </header>
-
-        <div className="stats-hero">
-          <article className="stats-banner">
-            <p className="eyebrow">Resumen del día</p>
-            <h3>{formatCurrency(dashboardStats.totalSalesToday)} en ventas hoy</h3>
-            <p>
-              Pedidos pagos, ranking histórico y métodos de cobro actualizados
-              desde el backend.
-            </p>
-          </article>
-
-          <div className="kpi-grid stats-kpi-grid">
-            <article className="kpi-card">
-              <h3>Ganancias</h3>
-              <strong>{formatCurrency(dashboardStats.totalSalesToday)}</strong>
-              <p>Ventas cobradas hoy</p>
-            </article>
-            <article className="kpi-card">
-              <h3>Pendientes</h3>
-              <strong>{pendingOrders.length}</strong>
-              <p>Pedidos sin cobrar</p>
-            </article>
-            <article className="kpi-card">
-              <h3>Pagados</h3>
-              <strong>{dashboardStats.totalPaidOrders}</strong>
-              <p>Pedidos cerrados</p>
-            </article>
-            <article className="kpi-card">
-              <h3>Contenedores</h3>
-              <strong>{formatCurrency(dashboardStats.containers.reduce((acc, item) => acc + Number(item.total ?? 0), 0))}</strong>
-              <p>{dashboardStats.containers.reduce((acc, item) => acc + Number(item.quantity ?? 0), 0)} unidades</p>
-            </article>
-          </div>
-        </div>
-
-        <div className="stats-split-grid" style={{ marginTop: 18 }}>
-          <section className="stats-panel">
-            <div className="section-header stats-panel-head">
-              <div>
-                <h3>Caja y apertura</h3>
-                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  Estado sincronizado de la jornada
-                </p>
-              </div>
-              <span className="stats-chip">Caja</span>
-            </div>
-
-            <div className="stats-item-list">
-              <div className="stats-item-row">
-                <div>
-                  <strong>Apertura de caja</strong>
-                  <p>Fondo inicial del turno</p>
-                </div>
-                <span>{formatCurrency(cashClose.openingCash)}</span>
-              </div>
-              <div className="stats-item-row">
-                <div>
-                  <strong>Efectivo esperado</strong>
-                  <p>Con base en ventas cobradas</p>
-                </div>
-                <span>{formatCurrency(cashClose.expectedCash)}</span>
-              </div>
-              <div className="stats-item-row">
-                <div>
-                  <strong>Transferencia esperada</strong>
-                  <p>Total previsto por pagos electrónicos</p>
-                </div>
-                <span>{formatCurrency(cashClose.expectedTransfer)}</span>
-              </div>
-              {cashClose.matches === true ? (
-                <div className="stats-item-row">
-                  <div>
-                    <strong>Arqueo validado</strong>
-                    <p>La caja cuadró en el último cierre</p>
-                  </div>
-                  <span>Sí</span>
-                </div>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="stats-panel">
-            <div className="section-header stats-panel-head">
-              <div>
-                <h3>Último cierre</h3>
-                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  Solo se marca cuando coincide
-                </p>
-              </div>
-              <span className="stats-chip">Cierre</span>
-            </div>
-
-            <div className="stats-item-list">
-              <div className="stats-item-row">
-                <div>
-                  <strong>Efectivo contado</strong>
-                  <p>Conteo manual al cerrar</p>
-                </div>
-                <span>{formatCurrency(cashClose.countedCash ?? 0)}</span>
-              </div>
-              <div className="stats-item-row">
-                <div>
-                  <strong>Transferencia contada</strong>
-                  <p>Conteo manual al cerrar</p>
-                </div>
-                <span>{formatCurrency(cashClose.countedTransfer ?? 0)}</span>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <div className="stats-split-grid" style={{ marginTop: 18 }}>
-          <section className="stats-panel">
-            <div className="section-header stats-panel-head">
-              <div>
-                <h3>Pedidos sincronizados (detalle)</h3>
-                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  {topPaidOrders.length > 0
-                    ? "Ultimos pedidos cobrados"
-                    : "No hay pedidos pagados para mostrar"}
-                </p>
-              </div>
-              <span className="stats-chip">{topPaidOrders.length} visibles</span>
-            </div>
-
-            <div className="stats-item-list">
-              {topPaidOrders.map((order) => {
-                const previewItems = Array.isArray(order.items)
-                  ? order.items.slice(0, 2)
-                  : [];
-
-                return (
-                  <article className="stats-item-row public-order-row" key={order.id}>
-                    <div>
-                      <strong>{order.clientName}</strong>
-                      <p>
-                        {formatOrderLocation(order)} · {order.waiterName}
-                      </p>
-                      {previewItems.length > 0 ? (
-                        <p>
-                          {previewItems
-                            .map((item) => `${item.quantity} x ${item.name}`)
-                            .join(" · ")}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <strong>{formatCurrency(order.total)}</strong>
-                      <p>{getStatusLabel(order.status)}</p>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="stats-panel">
-            <div className="section-header stats-panel-head">
-              <div>
-                <h3>Ranking histórico de platos</h3>
-                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  {stats.monthLabel || "Resumen del mes"}
-                </p>
-              </div>
-              <span className="stats-chip">Histórico</span>
-            </div>
-
-            <div className="ranking-grid">
-              <article className="ranking-card">
-                <h4>Más vendidos</h4>
-                <ol className="rank-list">
-                  {topDishes.map((dish, index) => (
-                    <li key={`${dish.name}-${index}`}>
-                      <span>{dish.name}</span>
-                      <div style={{ textAlign: "right" }}>
-                        <strong>{dish.quantity}</strong>
-                        <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                          {formatCurrency(dish.revenue)}
-                        </small>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              </article>
-
-              <article className="ranking-card">
-                <h4>Menos vendidos</h4>
-                <ol className="rank-list muted">
-                  {bottomDishes.map((dish, index) => (
-                    <li key={`${dish.name}-${index}`}>
-                      <span>{dish.name}</span>
-                      <div style={{ textAlign: "right" }}>
-                        <strong>{dish.quantity}</strong>
-                        <small style={{ display: "block", color: "#80664f", fontSize: "0.78rem" }}>
-                          {formatCurrency(dish.revenue)}
-                        </small>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              </article>
-            </div>
-          </section>
-        </div>
-
-        <div className="stats-split-grid" style={{ marginTop: 18 }}>
-          <section className="stats-panel">
-            <div className="section-header stats-panel-head">
-              <div>
-                <h3>Ventas por método de pago</h3>
-                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  Cobro actual y acumulado
-                </p>
-              </div>
-              <span className="stats-chip">{formatCurrency(dashboardStats.paymentTotal)}</span>
-            </div>
-
-            <div className="payment-grid">
-              {dashboardStats.paymentRows.map((method) => (
-                <article className="payment-card" key={method.method}>
-                  <div className="payment-card-head">
-                    <div>
-                      <p>{method.label}</p>
-                      <span>{method.method === "efectivo" ? "Caja" : "Bancos"}</span>
-                    </div>
-                    <strong>{formatCurrency(method.total)}</strong>
-                  </div>
-                  <div className="stats-bar-track payment-track">
-                    <div
-                      className="stats-bar-fill"
-                      style={getSalesIntensityStyle(method.total, Math.max(dashboardStats.paymentTotal, 0))}
-                    />
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="stats-panel">
-            <div className="section-header stats-panel-head">
-              <div>
-                <h3>Resumen del día e histórico</h3>
-                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  {dashboardStats.historyComparisonRows.length > 0 ? "Comparación de ventas pagadas" : "Rango activo"}
-                </p>
-              </div>
-              <span className="stats-chip">Nuevo Día</span>
-            </div>
-
-            <div className="stats-item-list">
-              <div className="stats-item-row">
-                <div>
-                  <strong>Ganancia del día actual</strong>
-                  <p>Ventas cerradas hoy</p>
-                </div>
-                <span>{formatCurrency(dashboardStats.totalSalesToday)}</span>
-              </div>
-              <div className="stats-item-row">
-                <div>
-                  <strong>Ganancias históricas cerradas</strong>
-                  <p>Acumulado que no se reinicia</p>
-                </div>
-                <span>{formatCurrency(allTimeStats.totalSales ?? 0)}</span>
-              </div>
-              <div className="stats-item-row">
-                <div>
-                  <strong>Ganancia acumulada total</strong>
-                  <p>Suma de hoy + histórico</p>
-                </div>
-                <span>{formatCurrency((allTimeStats.totalSales ?? 0) + dashboardStats.totalSalesToday)}</span>
-              </div>
-              <div className="stats-item-row">
-                <div>
-                  <strong>Pedidos visibles</strong>
-                  <p>Resumen sincronizado en pantalla</p>
-                </div>
-                <span>{dashboardStats.totalPaidOrders}</span>
-              </div>
-            </div>
-
-            <p className="public-lead" style={{ marginTop: 16 }}>
-              El tablero de hoy puede reiniciarse con Nuevo Día sin borrar el
-              histórico acumulado.
-            </p>
-          </section>
-        </div>
-      </main>
-    );
-  }
 
   return (
-    <div className="layout">
+    <div className={publicPagesView ? "public-shell" : "layout"}>
+      {publicPagesView ? (
+        <>
+          <header className="public-header">
+            <div>
+              <p className="eyebrow">Barril · panel del dueño</p>
+              <h1 className="public-title">{restaurantName}</h1>
+              <p className="public-lead">
+                Estadísticas completas de la jornada, histórico y días anteriores.
+                Se actualiza con la última conexión al servidor del restaurante.
+              </p>
+            </div>
+            <div className="public-status">
+              <span
+                className={
+                  publicBackendConnected
+                    ? "public-status-dot"
+                    : "public-status-dot loading"
+                }
+              />
+              <span>{publicStatusLabel}</span>
+            </div>
+          </header>
+
+          <div className="public-tab-row">
+            <button
+              type="button"
+              className={publicTab === "jornada" ? "active" : ""}
+              onClick={() => setPublicTab("jornada")}
+            >
+              Jornada actual
+            </button>
+            <button
+              type="button"
+              className={publicTab === "historial" ? "active" : ""}
+              onClick={() => setPublicTab("historial")}
+            >
+              Días anteriores
+            </button>
+          </div>
+        </>
+      ) : (
       <aside className="sidebar">
         <div>
           <p className="eyebrow">Restaurante</p>
@@ -3358,11 +3157,12 @@ function App() {
           </div>
         </div>
       </aside>
+      )}
 
       <main className="content">
         {loading ? <p className="loading">Cargando tablero...</p> : null}
 
-        {activeView === "cash" ? (
+        {!publicPagesView && activeView === "cash" ? (
           <section>
             <header className="section-header">
               <div style={{ flex: 1 }}>
@@ -3374,13 +3174,6 @@ function App() {
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </div>
-              <button
-                type="button"
-                onClick={openClosingCashModal}
-                style={{ padding: "10px 16px", marginLeft: "8px" }}
-              >
-                Cierre de caja
-              </button>
             </header>
 
             <h3 className="group-title">Cuentas pendientes</h3>
@@ -3676,18 +3469,30 @@ function App() {
           </section>
         ) : null}
 
-        {activeView === "stats" ? (
+        {showStatsView ? (
           <section className="stats-dashboard">
             <header className="section-header">
               <div>
-                <h2>Estadísticas y cierre de caja</h2>
+                <h2>
+                  {publicPagesView
+                    ? "Estadísticas de la jornada"
+                    : "Estadísticas y cierre de caja"}
+                </h2>
                 <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                  Jornada actual desde el último cierre. El histórico queda separado en Días anteriores.
+                  {publicPagesView
+                    ? "Mismas tablas que en la laptop: platos, cortes, extras, bebidas y pagos."
+                    : "Jornada actual desde el último cierre. El histórico queda separado en Días anteriores."}
                 </p>
               </div>
-              <button type="button" onClick={openClosingCashModal}>
-                Cierre de caja
-              </button>
+              {!publicPagesView ? (
+                <button
+                  type="button"
+                  onClick={openClosingCashModal}
+                  disabled={dashboardStats.cashSummary.pendingAdminConfirmation}
+                >
+                  Cierre de caja
+                </button>
+              ) : null}
             </header>
 
             {dashboardStats.cashSummary.pendingAdminConfirmation ? (
@@ -3696,14 +3501,16 @@ function App() {
                   <p className="eyebrow">Cierre pendiente</p>
                   <h3>Revisión administrativa requerida</h3>
                   <p>
-                    El cajero ya registró el cierre, pero la jornada seguirá visible
-                    hasta que administración confirme. Revisa platos, bebidas,
-                    ventas y diferencia antes de iniciar una jornada nueva.
+                    {publicPagesView
+                      ? "Hay un cierre registrado en el restaurante. Los datos de la jornada siguen visibles hasta confirmación en la laptop."
+                      : "Ya registraste el arqueo de esta jornada. Revisa platos, bebidas, ventas y diferencia abajo. Cuando todo cuadre, confirma para pasar al histórico e iniciar jornada nueva."}
                   </p>
                 </div>
-                <button type="button" onClick={confirmAdminCashClose}>
-                  Confirmar cierre y limpiar jornada
-                </button>
+                {!publicPagesView ? (
+                  <button type="button" onClick={confirmAdminCashClose}>
+                    Confirmar cierre y limpiar jornada
+                  </button>
+                ) : null}
               </section>
             ) : null}
 
@@ -4169,10 +3976,10 @@ function App() {
           </section>
         ) : null}
 
-        {activeView === "history" ? (
-          <section>
+        {showHistoryView ? (
+          <section className={publicPagesView ? "public-history-section" : undefined}>
             <header className="section-header">
-              <h2>Dias anteriores</h2>
+              <h2>Días anteriores</h2>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
                   type="date"
@@ -4483,7 +4290,7 @@ function App() {
           </section>
         ) : null}
 
-        {activeView === "waiters" ? (
+        {!publicPagesView && activeView === "waiters" ? (
           <section>
             <header className="section-header">
               <h2>Meseros autorizados</h2>
@@ -4566,7 +4373,7 @@ function App() {
           </section>
         ) : null}
 
-        {activeView === "network" ? (
+        {!publicPagesView && activeView === "network" ? (
           <section>
             <header className="section-header">
               <h2>Conectividad remota</h2>
@@ -5447,8 +5254,8 @@ function App() {
               <span>Caja inicial para este cierre</span>
               <strong>{formatCurrency(closingPreview.openingCash)}</strong>
               <p>
-                Escríbela aquí al cerrar. La comparación queda visible en
-                Estadísticas para administración.
+                Escríbela aquí al cerrar. La comparación se muestra en esta
+                pantalla para que confirmes cuando todo cuadre.
               </p>
             </div>
 

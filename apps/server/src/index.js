@@ -213,12 +213,34 @@ function stopTunnelProcess() {
   });
 }
 
+async function buildRecentHistoryGrouped(days = 7) {
+  const list = [];
+
+  for (let index = 0; index < days; index += 1) {
+    const date = new Date();
+    date.setDate(date.getDate() - index);
+    const iso = getDateKey(date.toISOString());
+    if (!iso) continue;
+
+    try {
+      const orders = await listOrdersByDate(iso);
+      list.push({ date: iso, orders });
+    } catch {
+      list.push({ date: iso, orders: [] });
+    }
+  }
+
+  return list;
+}
+
 async function buildDashboardSnapshot() {
-  const [menu, orders, restaurantName, cashSession] = await Promise.all([
+  const [menu, orders, restaurantName, cashSession, historyGrouped] =
+    await Promise.all([
     getMenu(),
     listOrders(),
     getRestaurantName(),
     getSetting("cashSession"),
+    buildRecentHistoryGrouped(7),
   ]);
 
   const todayKey = getDateKey(new Date().toISOString());
@@ -241,6 +263,7 @@ async function buildDashboardSnapshot() {
     ),
     statsSummary: getStatsSummary(orders, menu),
     cashSession: parseDashboardCashSession(cashSession),
+    historyGrouped,
   };
 }
 
