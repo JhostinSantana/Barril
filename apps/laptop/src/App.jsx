@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { QRCode } from "react-qr-code";
 import { io } from "socket.io-client";
@@ -1194,6 +1194,7 @@ function App() {
   const [dayDetailModal, setDayDetailModal] = useState(null);
   const [cleanupDateInput, setCleanupDateInput] = useState("2026-01-01");
   const [cashSessionHydrated, setCashSessionHydrated] = useState(false);
+  const legacyPendingFinalizedRef = useRef(false);
   const [publicBackendConnected, setPublicBackendConnected] = useState(false);
   const publicPagesView = isPublicPagesView();
   const stats = publicPagesView ? allTimeStats : dailyStats;
@@ -1228,6 +1229,36 @@ function App() {
       );
     }
   }, [bogotaDayKey, cashSession.sessionKey, cashSessionHydrated, publicPagesView]);
+
+  useEffect(() => {
+    if (publicPagesView || !cashSessionHydrated || legacyPendingFinalizedRef.current) {
+      return;
+    }
+
+    const report = cashSession.closingReport;
+    if (!report || report.adminConfirmed || !report.closedAt) return;
+
+    legacyPendingFinalizedRef.current = true;
+    const reportForHistory = { ...report };
+    delete reportForHistory.reviewPaidOrders;
+    const closingHistory = [
+      {
+        ...reportForHistory,
+        adminConfirmed: true,
+        confirmedAt: report.confirmedAt ?? new Date().toISOString(),
+      },
+      ...(Array.isArray(cashSession.closingHistory) ? cashSession.closingHistory : []),
+    ].slice(0, 100);
+
+    void startNewDay({ closingHistory }).then(() => {
+      setNetworkStatus("Cierre pendiente anterior finalizado. Jornada nueva iniciada.");
+    });
+  }, [
+    cashSession.closingHistory,
+    cashSession.closingReport,
+    cashSessionHydrated,
+    publicPagesView,
+  ]);
 
   function requestProtectedView(view) {
     if (publicPagesView) {
@@ -1328,16 +1359,6 @@ function App() {
   }
 
   function openClosingCashModal() {
-    if (
-      hasActivePendingClosing(cashSession, bogotaDayKey) ||
-      dashboardStats.cashSummary.pendingAdminConfirmation
-    ) {
-      setNetworkStatus(
-        "Ya hay un cierre pendiente. Revisa los datos y confirma abajo.",
-      );
-      return;
-    }
-
     setClosingCashModal({
       openingCash: `${cashSession.openingCash ?? cashClose.openingCash ?? 0}`,
       countedCash: "",
@@ -1426,43 +1447,25 @@ function App() {
         differenceTransfer,
         differenceTotal,
         matches: differenceTotal === 0,
-        adminConfirmed: false,
-        confirmedAt: null,
+        adminConfirmed: true,
+        confirmedAt: closedAt,
         reviewPaidOrders,
         status: getCashCloseStatus(differenceTotal),
         closedAt,
       };
 
-      const nextSession = await getJson("/api/settings/cash-session", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          closingReport,
-          openingConfirmed: false,
-          openingCash: closingReport.openingCash,
-          sessionKey: bogotaDayKey,
-        }),
-      });
-      const normalizedSession = normalizeCashSession(nextSession);
-      setCashSession(normalizedSession);
-      setCashClose((current) => ({
-        ...current,
-        openingCash: closingReport.openingCash,
-        expectedCash: closingReport.expectedCash,
-        expectedTransfer: closingReport.expectedTransfer,
-        countedCash,
-        countedTransfer,
-        matches: closingReport.matches,
-        differenceCash: closingReport.differenceCash,
-        differenceTransfer: closingReport.differenceTransfer,
-        differenceTotal: closingReport.differenceTotal,
-        countedTotal: closingReport.countedTotal,
-        expectedTotal: closingReport.expectedTotal,
-        status: closingReport.status,
-        closedAt: closingReport.closedAt,
-      }));
+      const reportForHistory = { ...closingReport };
+      delete reportForHistory.reviewPaidOrders;
+      const closingHistory = [
+        reportForHistory,
+        ...(Array.isArray(cashSession.closingHistory)
+          ? cashSession.closingHistory
+          : []),
+      ].slice(0, 100);
+
       setClosingCashModal(null);
-      setNetworkStatus("Cierre registrado. Pendiente de confirmación en Estadísticas.");
+      await startNewDay({ closingHistory });
+      setNetworkStatus("Cierre de caja realizado. La jornada actual quedó limpia.");
     } catch (error) {
       setClosingCashModal((current) =>
         current ? { ...current, loading: false, error: error.message } : current,
@@ -2045,7 +2048,7 @@ function App() {
     [getJson],
   );
 
-  async function startNewDay({ closingReport, closingHistory } = {}) {
+  async function startNewDay({ closingHistory } = {}) {
     try {
       setLoading(true);
       const newCutoff = new Date().toISOString();
@@ -2057,7 +2060,7 @@ function App() {
         body: JSON.stringify({
           openingCash: 0,
           openingConfirmed: false,
-          ...(closingReport ? { closingReport } : {}),
+          closingReport: null,
           ...(closingHistory ? { closingHistory } : {}),
           sessionKey: bogotaDayKey,
         }),
@@ -2066,7 +2069,7 @@ function App() {
         ...current,
         openingCash: 0,
         openingConfirmed: false,
-        closingReport: closingReport ?? current.closingReport,
+        closingReport: null,
         closingHistory: closingHistory ?? current.closingHistory,
       }));
       setConfirmModal(null);
@@ -2087,32 +2090,6 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }
-
-  async function confirmAdminCashClose() {
-    const pendingReport =
-      cashSession.closingReport ?? dashboardStats.cashSummary.pendingClosingReport;
-    if (!pendingReport || !hasActivePendingClosing(cashSession, bogotaDayKey)) return;
-
-    const reportForHistory = { ...pendingReport };
-    delete reportForHistory.reviewPaidOrders;
-    const confirmedReport = {
-      ...reportForHistory,
-      adminConfirmed: true,
-      confirmedAt: new Date().toISOString(),
-    };
-    const closingHistory = [
-      confirmedReport,
-      ...(Array.isArray(cashSession.closingHistory)
-        ? cashSession.closingHistory
-        : []),
-    ].slice(0, 100);
-
-    await startNewDay({
-      closingReport: confirmedReport,
-      closingHistory,
-    });
-    setNetworkStatus("Cierre confirmado por administración. Jornada nueva iniciada.");
   }
 
   async function loadRecentHistory(days = 7) {
@@ -3485,34 +3462,11 @@ function App() {
                 </p>
               </div>
               {!publicPagesView ? (
-                <button
-                  type="button"
-                  onClick={openClosingCashModal}
-                  disabled={dashboardStats.cashSummary.pendingAdminConfirmation}
-                >
+                <button type="button" onClick={openClosingCashModal}>
                   Cierre de caja
                 </button>
               ) : null}
             </header>
-
-            {dashboardStats.cashSummary.pendingAdminConfirmation ? (
-              <section className={`admin-close-review ${dashboardStats.cashSummary.status ?? "idle"}`}>
-                <div>
-                  <p className="eyebrow">Cierre pendiente</p>
-                  <h3>Revisión administrativa requerida</h3>
-                  <p>
-                    {publicPagesView
-                      ? "Hay un cierre registrado en el restaurante. Los datos de la jornada siguen visibles hasta confirmación en la laptop."
-                      : "Ya registraste el arqueo de esta jornada. Revisa platos, bebidas, ventas y diferencia abajo. Cuando todo cuadre, confirma para pasar al histórico e iniciar jornada nueva."}
-                  </p>
-                </div>
-                {!publicPagesView ? (
-                  <button type="button" onClick={confirmAdminCashClose}>
-                    Confirmar cierre y limpiar jornada
-                  </button>
-                ) : null}
-              </section>
-            ) : null}
 
             <div className="stats-summary-grid">
               {dashboardStats.summaryCards.map((card) => (
