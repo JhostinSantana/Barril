@@ -1393,10 +1393,10 @@ function App() {
       const allPaidOrders = await getJson("/api/orders?status=paid").catch(
         () => paidOrdersForStats,
       );
-      const reviewPaidOrders = filterOrdersForPendingClosing(allPaidOrders, {
-        closingReport: { closedAt, adminConfirmed: false },
-        closingHistory: cashSession.closingHistory,
-      });
+      const reviewPaidOrders = filterPaidOrdersForCurrentJornada(
+        allPaidOrders,
+        cashSession,
+      );
       const reviewPayments = reviewPaidOrders.reduce(
         (acc, order) => {
           for (const movement of getDashboardPaymentMovements(order)) {
@@ -1433,7 +1433,7 @@ function App() {
       const closingReport = {
         id: `close-${Date.now()}`,
         date: bogotaDayKey,
-        openingCash: closingPreview.openingCash,
+        openingCash: parseMoneyInput(closingCashModal.openingCash),
         efectivo,
         transferencia,
         totalSold: expectedTotal,
@@ -3151,6 +3151,13 @@ function App() {
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </div>
+              <button
+                type="button"
+                onClick={openClosingCashModal}
+                style={{ padding: "10px 16px", marginLeft: "8px" }}
+              >
+                Cierre de caja
+              </button>
             </header>
 
             <h3 className="group-title">Cuentas pendientes</h3>
@@ -5208,8 +5215,8 @@ function App() {
               <span>Caja inicial para este cierre</span>
               <strong>{formatCurrency(closingPreview.openingCash)}</strong>
               <p>
-                Escríbela aquí al cerrar. La comparación se muestra en esta
-                pantalla para que confirmes cuando todo cuadre.
+                Ingresa caja inicial, efectivo y transferencia. Al cerrar, la
+                jornada se limpia y el detalle queda en Estadísticas e histórico.
               </p>
             </div>
 
