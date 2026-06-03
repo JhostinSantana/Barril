@@ -19,6 +19,23 @@ import {
     normalizeContainerQuantity,
     normalizeServiceType,
 } from "../../server/src/utils.js";
+import {
+  buildBranchPublicDashboardUrl,
+  buildMasterPublicDashboardUrl,
+  buildMultiSiteStatusLabel,
+  COMBINED_PUBLIC_SITE_ID,
+  createInitialPublicSiteRuntime,
+  fetchPublicDashboardSnapshot,
+  formatPublicSyncLabel,
+  getPublicDashboardMode,
+  isPublicPagesView,
+  normalizePublicBackendUrl,
+  parsePublicSiteEntriesFromUrl,
+  PUBLIC_SITES,
+  readBranchSiteId,
+  writeBranchSiteId,
+  writeSiteSnapshot,
+} from "./publicDashboardSites.js";
 import "./App.css";
 
 const API_BASE_URL =
@@ -80,31 +97,6 @@ const SERVICE_TYPE_OPTIONS = [
   { id: "mesa", label: "Mesa" },
   { id: "para_llevar", label: "Para llevar" },
 ];
-const PUBLIC_DASHBOARD_URL = "https://jhostinsantana.github.io/Barril/";
-
-function isPublicPagesView() {
-  if (typeof window === "undefined") return false;
-
-  return (
-    window.location.hostname.includes("github.io") &&
-    window.location.pathname.includes("/Barril/")
-  );
-}
-
-function normalizePublicBackendUrl(value) {
-  return `${value ?? ""}`.trim().replace(/\/+$/, "");
-}
-
-function buildPublicDashboardUrl(backendUrl) {
-  const normalizedUrl = normalizePublicBackendUrl(backendUrl);
-  if (!normalizedUrl) return "";
-
-  const url = new URL(PUBLIC_DASHBOARD_URL);
-  url.searchParams.set("api", normalizedUrl);
-  url.searchParams.set("socket", normalizedUrl);
-  return url.toString();
-}
-
 function readStoredPublicApiBaseUrl() {
   if (typeof window === "undefined") return "";
   return window.localStorage.getItem(PUBLIC_API_BASE_URL_STORAGE_KEY) ?? "";
@@ -1196,12 +1188,24 @@ function App() {
   const [cashSessionHydrated, setCashSessionHydrated] = useState(false);
   const legacyPendingFinalizedRef = useRef(false);
   const [publicBackendConnected, setPublicBackendConnected] = useState(false);
+  const [branchSiteId, setBranchSiteId] = useState(() => readBranchSiteId());
+  const [activePublicSite, setActivePublicSite] = useState(
+    COMBINED_PUBLIC_SITE_ID,
+  );
+  const [publicSiteRuntime, setPublicSiteRuntime] = useState(() =>
+    createInitialPublicSiteRuntime(),
+  );
   const publicPagesView = isPublicPagesView();
+  const publicDashboardMode = publicPagesView ? getPublicDashboardMode() : "local";
   const stats = publicPagesView ? allTimeStats : dailyStats;
   const publicBackendUrl = normalizePublicBackendUrl(
     publicApiDraft || networkInfo.publicApiUrl,
   );
-  const publicDashboardUrl = buildPublicDashboardUrl(publicBackendUrl);
+  const publicDashboardUrl = buildBranchPublicDashboardUrl(
+    publicBackendUrl,
+    branchSiteId,
+  );
+  const masterPublicDashboardUrl = buildMasterPublicDashboardUrl();
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1670,6 +1674,70 @@ function App() {
     ],
   );
 
+  const publicCombinedSiteSummaries = useMemo(() => {
+    if (publicDashboardMode !== "multi") return [];
+
+    return PUBLIC_SITES.map((site) => {
+      const runtime = publicSiteRuntime[site.id];
+      const snapshot = runtime?.snapshot;
+      if (!snapshot) {
+        return { site, runtime, metrics: null };
+      }
+
+      const paidOrdersList = Array.isArray(snapshot.paidOrders)
+        ? snapshot.paidOrders.filter((order) => order.status === "paid")
+        : [];
+      const metrics = buildDashboardMetrics({
+        paidOrders: paidOrdersList,
+        historyGrouped: snapshot.historyGrouped ?? [],
+        historyOrders: snapshot.historyOrders ?? [],
+        dailyStats: snapshot.dailyStats ?? {},
+        allTimeStats: snapshot.allTimeStats ?? {},
+        cashClose: snapshot.cashClose ?? {},
+        cashSession: snapshot.cashSession ?? {},
+        historyDate,
+        statsRange: "hoy",
+        sessionKey: bogotaDayKey,
+      });
+
+      return { site, runtime, metrics };
+    });
+  }, [bogotaDayKey, historyDate, publicDashboardMode, publicSiteRuntime]);
+
+  const publicCombinedTotals = useMemo(() => {
+    const summaries = publicCombinedSiteSummaries.filter((entry) => entry.metrics);
+    return {
+      totalSalesToday: roundMoney(
+        summaries.reduce(
+          (acc, entry) => acc + Number(entry.metrics.totalSalesToday ?? 0),
+          0,
+        ),
+      ),
+      efectivoToday: roundMoney(
+        summaries.reduce(
+          (acc, entry) => acc + Number(entry.metrics.efectivoToday ?? 0),
+          0,
+        ),
+      ),
+      transferenciaToday: roundMoney(
+        summaries.reduce(
+          (acc, entry) => acc + Number(entry.metrics.transferenciaToday ?? 0),
+          0,
+        ),
+      ),
+      totalPaidOrders: summaries.reduce(
+        (acc, entry) => acc + Number(entry.metrics.totalPaidOrders ?? 0),
+        0,
+      ),
+      pendingOrders: summaries.reduce((acc, entry) => {
+        const pendingCount = Array.isArray(entry.runtime?.snapshot?.pendingOrders)
+          ? entry.runtime.snapshot.pendingOrders.length
+          : 0;
+        return acc + pendingCount;
+      }, 0),
+    };
+  }, [publicCombinedSiteSummaries]);
+
   const closingPreview = useMemo(() => {
     const openingCash =
       closingCashModal?.openingCash != null
@@ -1847,6 +1915,100 @@ function App() {
     setNetworkStatus("");
     return snapshot;
   }, []);
+
+  const applyPublicSiteSnapshot = useCallback((siteId, snapshot) => {
+    if (!snapshot) return false;
+    applyDashboardSnapshot(snapshot);
+    const site = PUBLIC_SITES.find((entry) => entry.id === siteId);
+    if (site && snapshot.restaurantName) {
+      setRestaurantName(snapshot.restaurantName);
+      setRestaurantNameDraft(snapshot.restaurantName);
+    } else if (site) {
+      setRestaurantName(site.name);
+      setRestaurantNameDraft(site.name);
+    }
+    return true;
+  }, []);
+
+  const refreshPublicMultiSiteDashboard = useCallback(async () => {
+    const entries = parsePublicSiteEntriesFromUrl();
+    const nextRuntime = createInitialPublicSiteRuntime();
+    let anyConnected = false;
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (!entry.apiUrl) {
+          const cached = nextRuntime[entry.id]?.snapshot;
+          nextRuntime[entry.id] = {
+            connected: false,
+            lastSyncAt: cached?.syncedAt ?? null,
+            error: cached ? "" : "Sin URL configurada para esta sede.",
+            snapshot: cached ?? null,
+          };
+          return;
+        }
+
+        try {
+          const snapshot = await fetchPublicDashboardSnapshot(entry.apiUrl);
+          const syncedAt = new Date().toISOString();
+          const storedSnapshot = {
+            ...snapshot,
+            syncedAt,
+            siteId: entry.id,
+            siteName: entry.name,
+          };
+          writeSiteSnapshot(entry.id, storedSnapshot);
+          nextRuntime[entry.id] = {
+            connected: true,
+            lastSyncAt: syncedAt,
+            error: "",
+            snapshot: storedSnapshot,
+          };
+          anyConnected = true;
+        } catch (error) {
+          const cached = nextRuntime[entry.id]?.snapshot;
+          nextRuntime[entry.id] = {
+            connected: false,
+            lastSyncAt: cached?.syncedAt ?? null,
+            error: error.message ?? "Sin conexion con el servidor.",
+            snapshot: cached ?? null,
+          };
+        }
+      }),
+    );
+
+    setPublicSiteRuntime(nextRuntime);
+    setPublicBackendConnected(anyConnected);
+
+    if (publicDashboardMode === "multi") {
+      setNetworkStatus(buildMultiSiteStatusLabel(nextRuntime));
+    }
+
+    return nextRuntime;
+  }, [publicDashboardMode]);
+
+  const handlePublicSiteChange = useCallback(
+    (siteId) => {
+      setActivePublicSite(siteId);
+      if (siteId === COMBINED_PUBLIC_SITE_ID) {
+        setNetworkStatus(buildMultiSiteStatusLabel(publicSiteRuntime));
+        return;
+      }
+
+      const runtime = publicSiteRuntime[siteId];
+      if (applyPublicSiteSnapshot(siteId, runtime?.snapshot)) {
+        setPublicBackendConnected(Boolean(runtime?.connected));
+        setNetworkStatus(
+          runtime?.connected
+            ? ""
+            : runtime?.snapshot
+              ? "Sin backend activo. Mostrando el ultimo estado guardado."
+              : "Sin datos guardados para esta sede.",
+        );
+      }
+    },
+    [applyPublicSiteSnapshot, publicSiteRuntime],
+  );
 
   const loadCashView = useCallback(async ({ silent = false, cutoff = cashSessionCutoff } = {}) => {
     if (!silent) {
@@ -2940,25 +3102,37 @@ function App() {
 
     let publicFallbackTimer = null;
     if (publicPagesView) {
-      loadPublicDashboardSnapshot().catch(() => {
-        setPublicBackendConnected(false);
-        if (hydratePublicDashboardSnapshot()) {
-          setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
-          return;
-        }
-        setNetworkStatus("Sin conexion con el backend publico.");
-      });
-      loadRecentHistory(7).catch(() => {});
-      loadStatsView().catch(() => {});
-      publicFallbackTimer = window.setInterval(() => {
-        loadPublicDashboardSnapshot().catch(() => {
-          if (!hydratePublicDashboardSnapshot()) {
+      if (publicDashboardMode === "multi") {
+        refreshPublicMultiSiteDashboard().catch(() => {
+          setPublicBackendConnected(false);
+          setNetworkStatus("Sin conexion con las sedes. Mostrando ultimos estados guardados.");
+        });
+        publicFallbackTimer = window.setInterval(() => {
+          refreshPublicMultiSiteDashboard().catch(() => {
             setPublicBackendConnected(false);
-            setNetworkStatus("Sin conexion con el backend publico.");
+          });
+        }, 30000);
+      } else {
+        loadPublicDashboardSnapshot().catch(() => {
+          setPublicBackendConnected(false);
+          if (hydratePublicDashboardSnapshot()) {
+            setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
+            return;
           }
+          setNetworkStatus("Sin conexion con el backend publico.");
         });
         loadRecentHistory(7).catch(() => {});
-      }, 30000);
+        loadStatsView().catch(() => {});
+        publicFallbackTimer = window.setInterval(() => {
+          loadPublicDashboardSnapshot().catch(() => {
+            if (!hydratePublicDashboardSnapshot()) {
+              setPublicBackendConnected(false);
+              setNetworkStatus("Sin conexion con el backend publico.");
+            }
+          });
+          loadRecentHistory(7).catch(() => {});
+        }, 30000);
+      }
     } else {
       loadCashView();
       loadStatsView();
@@ -2992,19 +3166,37 @@ function App() {
     loadPublicDashboardSnapshot,
     loadStatsView,
     loadWaiters,
+    publicDashboardMode,
     publicPagesView,
+    refreshPublicMultiSiteDashboard,
     triggerAutoPrint,
   ]);
 
+  const showCombinedPublicView =
+    publicPagesView &&
+    publicDashboardMode === "multi" &&
+    activePublicSite === COMBINED_PUBLIC_SITE_ID;
   const showStatsView =
-    activeView === "stats" || (publicPagesView && publicTab === "jornada");
+    (activeView === "stats" || (publicPagesView && publicTab === "jornada")) &&
+    !showCombinedPublicView;
   const showHistoryView =
     activeView === "history" || (publicPagesView && publicTab === "historial");
+  const activePublicSiteMeta = PUBLIC_SITES.find(
+    (site) => site.id === activePublicSite,
+  );
   const publicStatusLabel = networkStatus
     ? networkStatus
     : publicBackendConnected
-      ? "Conectado al servidor"
+      ? publicDashboardMode === "multi"
+        ? buildMultiSiteStatusLabel(publicSiteRuntime)
+        : "Conectado al servidor"
       : "Esperando datos del servidor";
+  const publicHeaderTitle =
+    publicDashboardMode === "multi" && activePublicSiteMeta
+      ? activePublicSiteMeta.name
+      : publicDashboardMode === "multi"
+        ? "Red Barril"
+        : restaurantName;
 
 
   return (
@@ -3014,10 +3206,11 @@ function App() {
           <header className="public-header">
             <div>
               <p className="eyebrow">Barril · panel del dueño</p>
-              <h1 className="public-title">{restaurantName}</h1>
+              <h1 className="public-title">{publicHeaderTitle}</h1>
               <p className="public-lead">
-                Estadísticas completas de la jornada, histórico y días anteriores.
-                Se actualiza con la última conexión al servidor del restaurante.
+                {publicDashboardMode === "multi"
+                  ? "Vista unificada de Portoviejo y Chone. Cada sede mantiene su base de datos local; aquí solo se consulta."
+                  : "Estadísticas completas de la jornada, histórico y días anteriores. Se actualiza con la última conexión al servidor del restaurante."}
               </p>
             </div>
             <div className="public-status">
@@ -3031,6 +3224,30 @@ function App() {
               <span>{publicStatusLabel}</span>
             </div>
           </header>
+
+          {publicDashboardMode === "multi" ? (
+            <div className="public-site-row">
+              <button
+                type="button"
+                className={
+                  activePublicSite === COMBINED_PUBLIC_SITE_ID ? "active" : ""
+                }
+                onClick={() => handlePublicSiteChange(COMBINED_PUBLIC_SITE_ID)}
+              >
+                Ambas sedes
+              </button>
+              {PUBLIC_SITES.map((site) => (
+                <button
+                  key={site.id}
+                  type="button"
+                  className={activePublicSite === site.id ? "active" : ""}
+                  onClick={() => handlePublicSiteChange(site.id)}
+                >
+                  {site.shortName}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           <div className="public-tab-row">
             <button
@@ -3447,6 +3664,138 @@ function App() {
                   <span>
                     {describePayment(order)} · {formatCurrency(order.total)}
                   </span>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {showCombinedPublicView && publicTab === "jornada" ? (
+          <section className="public-combined-dashboard">
+            <header className="section-header">
+              <div>
+                <h2>Resumen de ambas sedes</h2>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  Totales de la jornada actual. Toca una sede arriba para ver el detalle completo.
+                </p>
+              </div>
+            </header>
+
+            <div className="public-kpi-grid">
+              <article className="public-kpi-card">
+                <h3>Ventas hoy (red)</h3>
+                <strong>{formatCurrency(publicCombinedTotals.totalSalesToday)}</strong>
+                <p>{publicCombinedTotals.totalPaidOrders} pedidos pagados</p>
+              </article>
+              <article className="public-kpi-card">
+                <h3>Efectivo (red)</h3>
+                <strong>{formatCurrency(publicCombinedTotals.efectivoToday)}</strong>
+                <p>Suma de ambas sedes</p>
+              </article>
+              <article className="public-kpi-card">
+                <h3>Transferencia (red)</h3>
+                <strong>{formatCurrency(publicCombinedTotals.transferenciaToday)}</strong>
+                <p>Suma de ambas sedes</p>
+              </article>
+              <article className="public-kpi-card">
+                <h3>Cuentas pendientes</h3>
+                <strong>{publicCombinedTotals.pendingOrders}</strong>
+                <p>En las dos sedes</p>
+              </article>
+            </div>
+
+            <div className="public-split-grid">
+              {publicCombinedSiteSummaries.map(({ site, runtime, metrics }) => (
+                <article className="stats-panel public-site-card" key={site.id}>
+                  <div className="section-header stats-panel-head">
+                    <div>
+                      <h3>{site.name}</h3>
+                      <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                        {runtime?.connected
+                          ? "Servidor en linea"
+                          : runtime?.snapshot
+                            ? "Mostrando ultima sincronizacion"
+                            : "Sin datos todavia"}
+                      </p>
+                    </div>
+                    <span
+                      className={
+                        runtime?.connected
+                          ? "public-status-dot"
+                          : "public-status-dot loading"
+                      }
+                    />
+                  </div>
+
+                  <div className="public-kpi-grid compact">
+                    <article className="public-kpi-card">
+                      <h3>Ventas hoy</h3>
+                      <strong>
+                        {metrics
+                          ? formatCurrency(metrics.totalSalesToday)
+                          : "—"}
+                      </strong>
+                    </article>
+                    <article className="public-kpi-card">
+                      <h3>Pendientes</h3>
+                      <strong>
+                        {Array.isArray(runtime?.snapshot?.pendingOrders)
+                          ? runtime.snapshot.pendingOrders.length
+                          : 0}
+                      </strong>
+                    </article>
+                  </div>
+
+                  <p className="public-setup-note">
+                    Ultima sync: {formatPublicSyncLabel(runtime?.lastSyncAt)}
+                  </p>
+                  {runtime?.error ? (
+                    <p className="public-setup-note">{runtime.error}</p>
+                  ) : null}
+
+                  <div className="actions">
+                    <button
+                      type="button"
+                      onClick={() => handlePublicSiteChange(site.id)}
+                    >
+                      Ver detalle de {site.shortName}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {showCombinedPublicView && publicTab === "historial" ? (
+          <section className="public-combined-dashboard">
+            <header className="section-header">
+              <div>
+                <h2>Historial por sede</h2>
+                <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                  El historial detallado se consulta sede por sede para no mezclar datos.
+                </p>
+              </div>
+            </header>
+
+            <div className="public-split-grid">
+              {publicCombinedSiteSummaries.map(({ site, runtime }) => (
+                <article className="stats-panel public-site-card" key={`${site.id}-history`}>
+                  <h3>{site.name}</h3>
+                  <p className="public-setup-note">
+                    Ultima sync: {formatPublicSyncLabel(runtime?.lastSyncAt)}
+                  </p>
+                  <div className="actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handlePublicSiteChange(site.id);
+                        setPublicTab("historial");
+                      }}
+                    >
+                      Abrir historial de {site.shortName}
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -4464,6 +4813,28 @@ function App() {
               </article>
 
               <article className="order-card">
+                <h4>Sede de esta laptop</h4>
+                <p>
+                  Indica si esta caja corresponde a Portoviejo o Chone. Se usa
+                  para registrar la URL del tunel en el dashboard multi-sede.
+                </p>
+                <select
+                  value={branchSiteId}
+                  onChange={(event) => {
+                    const nextSiteId = event.target.value;
+                    setBranchSiteId(nextSiteId);
+                    writeBranchSiteId(nextSiteId);
+                  }}
+                >
+                  {PUBLIC_SITES.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              </article>
+
+              <article className="order-card">
                 <h4>Dashboard administrativo remoto</h4>
                 {!dashboardLinkUnlocked ? (
                   <div
@@ -4511,8 +4882,9 @@ function App() {
                       </div>
                     </div>
                     <p>
-                      Comparte este QR o enlace solo con el administrador. No
-                      necesita pegar IP ni configurar nada.
+                      Comparte este QR o enlace solo con el administrador. Al
+                      abrirlo se registra esta sede (
+                      {PUBLIC_SITES.find((site) => site.id === branchSiteId)?.name}).
                     </p>
                     <div className="actions">
                       <button
@@ -4524,7 +4896,7 @@ function App() {
                           )
                         }
                       >
-                        Copiar enlace
+                        Copiar enlace de sede
                       </button>
                       <button
                         type="button"
@@ -4547,6 +4919,59 @@ function App() {
                     el enlace y QR del administrador.
                   </p>
                 )}
+              </article>
+
+              <article className="order-card">
+                <h4>Link fijo multi-sede (dueño)</h4>
+                <p style={{ wordBreak: "break-all" }}>{masterPublicDashboardUrl}</p>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    marginTop: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "#fff",
+                      padding: 12,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <QRCode value={masterPublicDashboardUrl} />
+                  </div>
+                </div>
+                <p>
+                  Enlace unico para ver Portoviejo y Chone. Cada sede debe
+                  abrir al menos una vez su enlace de sede para registrar su
+                  tunel en este navegador.
+                </p>
+                <div className="actions">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      copyToClipboard(
+                        masterPublicDashboardUrl,
+                        "link fijo multi-sede",
+                      )
+                    }
+                  >
+                    Copiar link fijo
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() =>
+                      window.open(
+                        masterPublicDashboardUrl,
+                        "_blank",
+                        "noopener,noreferrer",
+                      )
+                    }
+                  >
+                    Abrir multi-sede
+                  </button>
+                </div>
               </article>
 
               <article className="order-card">

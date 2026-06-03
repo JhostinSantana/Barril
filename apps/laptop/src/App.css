@@ -1091,6 +1091,43 @@
   color: #fff7f0;
 }
 
+.public-site-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.public-site-row button {
+  border: 1px solid #d9c7b2;
+  background: #fff;
+  color: #4a382c;
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.public-site-row button.active {
+  background: #fff1e4;
+  border-color: #d46a12;
+  color: #8a3f00;
+}
+
+.public-combined-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.public-site-card {
+  min-height: 100%;
+}
+
+.public-kpi-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .public-history-section {
   margin-top: 4px;
 }

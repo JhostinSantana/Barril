@@ -8,6 +8,7 @@ node_modules/
 # Entorno
 .env
 .env.*
+!.env.example
 
 # Logs y caché
 *.log

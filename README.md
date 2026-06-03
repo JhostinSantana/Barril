@@ -163,3 +163,11 @@ Antes de desplegar:
 4. Ejecuta el workflow de Pages o el build de `apps/laptop`.
 
 La URL del sitio en este repositorio queda bajo `/Barril/`.
+
+## Dashboard del dueno (multi-sede)
+
+Link fijo para ver Portoviejo y Chone desde cualquier internet:
+
+`https://jhostinsantana.github.io/Barril/?multi=1`
+
+Guia para tunel HTTPS fijo (ver desde casa sin URL que cambie): [docs/tunel-fijo-cloudflare.md](docs/tunel-fijo-cloudflare.md)

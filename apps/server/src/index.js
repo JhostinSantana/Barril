@@ -1,4 +1,5 @@
 import cors from "cors";
+import dotenv from "dotenv";
 import express from "express";
 import { nanoid } from "nanoid";
 import { spawn } from "node:child_process";
@@ -51,6 +52,10 @@ import {
     summarizeItems,
 } from "./utils.js";
 
+dotenv.config({
+  path: fileURLToPath(new URL("../.env", import.meta.url)),
+});
+
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -61,6 +66,9 @@ const io = new Server(httpServer, {
 
 const TUNNEL_TARGET_URL = "http://localhost:4000";
 const TUNNEL_PUBLIC_URL_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
+const FIXED_PUBLIC_URL = `${process.env.BARRIL_PUBLIC_URL ?? ""}`.trim().replace(/\/+$/, "");
+const CLOUDFLARE_TUNNEL_TOKEN = `${process.env.CLOUDFLARE_TUNNEL_TOKEN ?? ""}`.trim();
+const AUTO_START_NAMED_TUNNEL = `${process.env.BARRIL_AUTO_START_TUNNEL ?? ""}`.trim() === "1";
 let tunnelProcess = null;
 let tunnelUrlWaiters = [];
 const tunnelState = {
@@ -77,6 +85,12 @@ function getTunnelStatus() {
   return {
     ...tunnelState,
     pid: tunnelProcess?.pid ?? null,
+    mode: CLOUDFLARE_TUNNEL_TOKEN
+      ? "named"
+      : FIXED_PUBLIC_URL
+        ? "fixed-url"
+        : "quick",
+    fixedPublicUrl: FIXED_PUBLIC_URL || null,
   };
 }
 
@@ -143,19 +157,31 @@ async function startTunnel() {
   }
 
   tunnelState.status = "starting";
-  tunnelState.publicUrl = "";
+  tunnelState.publicUrl = FIXED_PUBLIC_URL || "";
   tunnelState.error = "";
   tunnelState.startedAt = new Date().toISOString();
 
-  tunnelProcess = spawn(
-    "npx",
-    ["--yes", "cloudflared", "tunnel", "--url", TUNNEL_TARGET_URL],
-    {
-      shell: true,
-      windowsHide: true,
-      env: process.env,
-    },
-  );
+  if (CLOUDFLARE_TUNNEL_TOKEN) {
+    tunnelProcess = spawn(
+      "npx",
+      ["--yes", "cloudflared", "tunnel", "run", "--token", CLOUDFLARE_TUNNEL_TOKEN],
+      {
+        shell: true,
+        windowsHide: true,
+        env: process.env,
+      },
+    );
+  } else {
+    tunnelProcess = spawn(
+      "npx",
+      ["--yes", "cloudflared", "tunnel", "--url", TUNNEL_TARGET_URL],
+      {
+        shell: true,
+        windowsHide: true,
+        env: process.env,
+      },
+    );
+  }
 
   tunnelProcess.stdout?.on("data", processTunnelOutput);
   tunnelProcess.stderr?.on("data", processTunnelOutput);
@@ -180,6 +206,12 @@ async function startTunnel() {
   });
 
   io.emit("tunnel:updated", getTunnelStatus());
+
+  if (FIXED_PUBLIC_URL) {
+    await registerTunnelUrl(FIXED_PUBLIC_URL);
+    return getTunnelStatus();
+  }
+
   return waitForTunnelUrl();
 }
 
@@ -1241,7 +1273,18 @@ setInterval(performPeriodicBackup, 15 * 60 * 1000);
 // Also run one at startup
 performPeriodicBackup();
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
   // eslint-disable-next-line no-console
   console.log(`Server running on http://localhost:${PORT}`);
+
+  if (FIXED_PUBLIC_URL) {
+    await setSetting("publicApiUrl", FIXED_PUBLIC_URL).catch(() => {});
+  }
+
+  if (AUTO_START_NAMED_TUNNEL && CLOUDFLARE_TUNNEL_TOKEN) {
+    startTunnel().catch((error) => {
+      // eslint-disable-next-line no-console
+      console.error("Named tunnel auto-start failed", error);
+    });
+  }
 });

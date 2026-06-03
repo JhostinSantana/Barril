@@ -10,7 +10,7 @@ export {
 } from "./pricing.js";
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
-export const DEFAULT_MENU_VERSION = "2026-05-22-menu-cafe-postres-bestia-v1";
+export const DEFAULT_MENU_VERSION = "2026-06-03-porciones-extra-moroclo-v1";
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
 
@@ -260,7 +260,7 @@ export const DEFAULT_MENU = [
 
   {
     id: "extra-chicloso",
-    name: "PORCION DE CHICLOSO",
+    name: "PORCION EXTRA CHICLOSO",
     category: "PORCIONES EXTRA",
     price: 2.5,
     pricingMode: "fixed",
@@ -270,6 +270,13 @@ export const DEFAULT_MENU = [
     name: "PORCION DE MORO",
     category: "PORCIONES EXTRA",
     price: 2.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moroclo",
+    name: "PORCION DE MOROCLO",
+    category: "PORCIONES EXTRA",
+    price: 2.25,
     pricingMode: "fixed",
   },
   {
@@ -340,13 +347,6 @@ export const DEFAULT_MENU = [
     name: "PORCION DE LONGANIZA",
     category: "PORCIONES EXTRA",
     price: 1.25,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-panceta",
-    name: "PORCION DE PANCETA",
-    category: "PORCIONES EXTRA",
-    price: 3.0,
     pricingMode: "fixed",
   },
   {
