@@ -249,6 +249,32 @@ export function formatPublicSyncLabel(isoString) {
   }
 }
 
+export const PUBLIC_DASHBOARD_PIN_SESSION_KEY = "barril.publicDashboard.pinSession";
+export const PUBLIC_DASHBOARD_PIN_TTL_MS = 30 * 60 * 1000;
+
+export function isPublicDashboardPinSessionValid() {
+  if (typeof window === "undefined") return false;
+
+  const raw = window.sessionStorage.getItem(PUBLIC_DASHBOARD_PIN_SESSION_KEY);
+  const unlockedAt = Number(raw);
+  if (!Number.isFinite(unlockedAt)) return false;
+
+  return Date.now() - unlockedAt < PUBLIC_DASHBOARD_PIN_TTL_MS;
+}
+
+export function markPublicDashboardPinSession() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(
+    PUBLIC_DASHBOARD_PIN_SESSION_KEY,
+    String(Date.now()),
+  );
+}
+
+export function clearPublicDashboardPinSession() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(PUBLIC_DASHBOARD_PIN_SESSION_KEY);
+}
+
 export function buildMultiSiteStatusLabel(siteRuntime) {
   return PUBLIC_SITES.map((site) => {
     const runtime = siteRuntime[site.id];

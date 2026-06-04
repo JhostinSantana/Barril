@@ -1183,6 +1183,16 @@
   box-shadow: 0 0 0 4px rgba(217, 154, 59, 0.18);
 }
 
+.public-pin-gate {
+  max-width: 420px;
+  margin: 40px auto 0;
+}
+
+.public-lock-button {
+  margin-top: 8px;
+  width: 100%;
+}
+
 .public-setup-panel {
   margin-bottom: 20px;
   padding: 20px 22px;

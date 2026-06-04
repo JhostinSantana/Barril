@@ -23,12 +23,15 @@ import {
   buildBranchPublicDashboardUrl,
   buildMasterPublicDashboardUrl,
   buildMultiSiteStatusLabel,
+  clearPublicDashboardPinSession,
   COMBINED_PUBLIC_SITE_ID,
   createInitialPublicSiteRuntime,
   fetchPublicDashboardSnapshot,
   formatPublicSyncLabel,
   getPublicDashboardMode,
+  isPublicDashboardPinSessionValid,
   isPublicPagesView,
+  markPublicDashboardPinSession,
   normalizePublicBackendUrl,
   parsePublicSiteEntriesFromUrl,
   PUBLIC_SITES,
@@ -88,10 +91,11 @@ const PROTECTED_VIEW_COPY = {
     note: "Ingresa el PIN de administrador para revisar las comandas anteriores.",
   },
   [ADMIN_DASHBOARD_LINK_TARGET]: {
-    title: "Enlace del dashboard administrativo",
-    note: "Ingresa el PIN de administrador para ver el QR y el enlace remoto.",
+    title: "Enlaces administrativos remotos",
+    note: "Ingresa el PIN de administrador para ver los QR y enlaces del dashboard (sede y multi-sede).",
   },
 };
+const ADMIN_SENSITIVE_LINKS_TIMEOUT_MS = 90 * 1000;
 const BOGOTA_TIME_ZONE = "America/Bogota";
 const SERVICE_TYPE_OPTIONS = [
   { id: "mesa", label: "Mesa" },
@@ -1174,6 +1178,11 @@ function App() {
   const [confirmModal, setConfirmModal] = useState(null);
   const [protectedViewModal, setProtectedViewModal] = useState(null);
   const [dashboardLinkUnlocked, setDashboardLinkUnlocked] = useState(false);
+  const [publicRemoteAccessUnlocked, setPublicRemoteAccessUnlocked] = useState(
+    () => isPublicDashboardPinSessionValid(),
+  );
+  const [publicAccessPin, setPublicAccessPin] = useState("");
+  const [publicAccessError, setPublicAccessError] = useState("");
   const [openingCashModal, setOpeningCashModal] = useState(null);
   const [closingCashModal, setClosingCashModal] = useState(null);
   const [deleteOrderModal, setDeleteOrderModal] = useState(null);
@@ -1214,6 +1223,59 @@ function App() {
 
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (activeView !== "network") {
+      setDashboardLinkUnlocked(false);
+    }
+  }, [activeView]);
+
+  useEffect(() => {
+    if (!dashboardLinkUnlocked || activeView !== "network") return undefined;
+
+    const timer = window.setTimeout(() => {
+      setDashboardLinkUnlocked(false);
+    }, ADMIN_SENSITIVE_LINKS_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [activeView, dashboardLinkUnlocked]);
+
+  useEffect(() => {
+    if (!publicPagesView || !publicRemoteAccessUnlocked) return undefined;
+
+    const timer = window.setInterval(() => {
+      if (!isPublicDashboardPinSessionValid()) {
+        lockPublicRemoteAccess();
+      }
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [publicPagesView, publicRemoteAccessUnlocked]);
+
+  useEffect(() => {
+    if (!publicPagesView || !publicRemoteAccessUnlocked) return;
+
+    if (publicDashboardMode === "multi") {
+      refreshPublicMultiSiteDashboard().catch(() => {
+        setNetworkStatus("Sin conexion con las sedes. Mostrando ultimos estados guardados.");
+      });
+      return;
+    }
+
+    loadPublicDashboardSnapshot().catch(() => {
+      if (hydratePublicDashboardSnapshot()) {
+        setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
+        return;
+      }
+      setNetworkStatus("Sin conexion con el backend publico.");
+    });
+  }, [
+    publicDashboardMode,
+    publicPagesView,
+    publicRemoteAccessUnlocked,
+    loadPublicDashboardSnapshot,
+    refreshPublicMultiSiteDashboard,
+  ]);
 
   useEffect(() => {
     if (publicPagesView) return;
@@ -1285,6 +1347,30 @@ function App() {
       error: "",
       loading: false,
     });
+  }
+
+  function lockSensitiveDashboardLinks() {
+    setDashboardLinkUnlocked(false);
+  }
+
+  function confirmPublicRemoteAccess() {
+    const pin = `${publicAccessPin ?? ""}`.trim();
+    if (pin !== STATS_ACCESS_PIN) {
+      setPublicAccessError("PIN incorrecto. Solo el administrador puede entrar.");
+      return;
+    }
+
+    markPublicDashboardPinSession();
+    setPublicRemoteAccessUnlocked(true);
+    setPublicAccessPin("");
+    setPublicAccessError("");
+  }
+
+  function lockPublicRemoteAccess() {
+    clearPublicDashboardPinSession();
+    setPublicRemoteAccessUnlocked(false);
+    setPublicAccessPin("");
+    setPublicAccessError("");
   }
 
   function getProtectedViewCopy(targetView) {
@@ -3101,7 +3187,9 @@ function App() {
     socket.connect();
 
     let publicFallbackTimer = null;
-    if (publicPagesView) {
+    if (publicPagesView && !publicRemoteAccessUnlocked) {
+      // Espera PIN admin antes de cargar datos remotos.
+    } else if (publicPagesView) {
       if (publicDashboardMode === "multi") {
         refreshPublicMultiSiteDashboard().catch(() => {
           setPublicBackendConnected(false);
@@ -3168,6 +3256,7 @@ function App() {
     loadWaiters,
     publicDashboardMode,
     publicPagesView,
+    publicRemoteAccessUnlocked,
     refreshPublicMultiSiteDashboard,
     triggerAutoPrint,
   ]);
@@ -3201,7 +3290,46 @@ function App() {
 
   return (
     <div className={publicPagesView ? "public-shell" : "layout"}>
-      {publicPagesView ? (
+      {publicPagesView && !publicRemoteAccessUnlocked ? (
+        <section className="public-setup-panel public-pin-gate">
+          <p className="security-flag">Acceso restringido</p>
+          <h2>Panel del dueño</h2>
+          <p>
+            Este enlace es solo para el administrador. Ingresa el PIN para ver
+            Portoviejo y Chone.
+          </p>
+          <form
+            className="public-setup-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              confirmPublicRemoteAccess();
+            }}
+          >
+            <label htmlFor="public-remote-pin">PIN de administrador</label>
+            <input
+              id="public-remote-pin"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              value={publicAccessPin}
+              onChange={(event) => {
+                setPublicAccessPin(event.target.value);
+                setPublicAccessError("");
+              }}
+              placeholder="⬢⬢⬢⬢⬢⬢"
+            />
+            {publicAccessError ? (
+              <p className="security-error">{publicAccessError}</p>
+            ) : null}
+            <div className="actions">
+              <button type="submit">Entrar al dashboard</button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      {publicPagesView && publicRemoteAccessUnlocked ? (
         <>
           <header className="public-header">
             <div>
@@ -3222,6 +3350,13 @@ function App() {
                 }
               />
               <span>{publicStatusLabel}</span>
+              <button
+                type="button"
+                className="ghost public-lock-button"
+                onClick={lockPublicRemoteAccess}
+              >
+                Cerrar sesion admin
+              </button>
             </div>
           </header>
 
@@ -3266,7 +3401,9 @@ function App() {
             </button>
           </div>
         </>
-      ) : (
+      ) : null}
+
+      {!publicPagesView ? (
       <aside className="sidebar">
         <div>
           <p className="eyebrow">Restaurante</p>
@@ -3351,8 +3488,9 @@ function App() {
           </div>
         </div>
       </aside>
-      )}
+      ) : null}
 
+      {publicPagesView && !publicRemoteAccessUnlocked ? null : (
       <main className="content">
         {loading ? <p className="loading">Cargando tablero...</p> : null}
 
@@ -4846,7 +4984,8 @@ function App() {
                   >
                     <p>
                       El enlace y el QR del dashboard estan protegidos. Solo el
-                      administrador puede mostrarlos.
+                      administrador puede mostrarlos. Se ocultan al salir de
+                      Conectividad o tras 90 segundos.
                     </p>
                     <div className="actions">
                       <button type="button" onClick={requestDashboardLinkAccess}>
@@ -4911,6 +5050,13 @@ function App() {
                       >
                         Abrir dashboard
                       </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={lockSensitiveDashboardLinks}
+                      >
+                        Ocultar enlaces
+                      </button>
                     </div>
                   </div>
                 ) : (
@@ -4923,55 +5069,89 @@ function App() {
 
               <article className="order-card">
                 <h4>Link fijo multi-sede (dueño)</h4>
-                <p style={{ wordBreak: "break-all" }}>{masterPublicDashboardUrl}</p>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "center",
-                    marginTop: 12,
-                  }}
-                >
+                {!dashboardLinkUnlocked ? (
                   <div
                     style={{
-                      background: "#fff",
-                      padding: 12,
-                      borderRadius: 8,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
                     }}
                   >
-                    <QRCode value={masterPublicDashboardUrl} />
+                    <p>
+                      El enlace y el QR multi-sede estan protegidos. Solo el
+                      administrador puede mostrarlos.
+                    </p>
+                    <div className="actions">
+                      <button type="button" onClick={requestDashboardLinkAccess}>
+                        Mostrar con PIN admin
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <p>
-                  Enlace unico para ver Portoviejo y Chone. Cada sede debe
-                  abrir al menos una vez su enlace de sede para registrar su
-                  tunel en este navegador.
-                </p>
-                <div className="actions">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      copyToClipboard(
-                        masterPublicDashboardUrl,
-                        "link fijo multi-sede",
-                      )
-                    }
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
                   >
-                    Copiar link fijo
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() =>
-                      window.open(
-                        masterPublicDashboardUrl,
-                        "_blank",
-                        "noopener,noreferrer",
-                      )
-                    }
-                  >
-                    Abrir multi-sede
-                  </button>
-                </div>
+                    <p style={{ wordBreak: "break-all" }}>{masterPublicDashboardUrl}</p>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: "#fff",
+                          padding: 12,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <QRCode value={masterPublicDashboardUrl} />
+                      </div>
+                    </div>
+                    <p>
+                      Enlace unico para ver Portoviejo y Chone. Al escanearlo
+                      pedira PIN de administrador. Se oculta solo al salir de
+                      Conectividad o tras 90 segundos.
+                    </p>
+                    <div className="actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyToClipboard(
+                            masterPublicDashboardUrl,
+                            "link fijo multi-sede",
+                          )
+                        }
+                      >
+                        Copiar link fijo
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() =>
+                          window.open(
+                            masterPublicDashboardUrl,
+                            "_blank",
+                            "noopener,noreferrer",
+                          )
+                        }
+                      >
+                        Abrir multi-sede
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={lockSensitiveDashboardLinks}
+                      >
+                        Ocultar enlaces
+                      </button>
+                    </div>
+                  </div>
+                )}
               </article>
 
               <article className="order-card">
@@ -4997,6 +5177,7 @@ function App() {
           </section>
         ) : null}
       </main>
+      )}
 
       {payingOrder ? (
         <div className="modal-backdrop" onClick={closePayModal}>
