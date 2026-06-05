@@ -2740,54 +2740,33 @@ function App() {
     const info = await getJson("/api/network-info");
     setNetworkInfo(info);
     setPublicApiDraft(info.publicApiUrl ?? "");
+    if (info.branchSiteId) {
+      setBranchSiteId(info.branchSiteId);
+      writeBranchSiteId(info.branchSiteId);
+    }
     if (info.tunnel) {
       setTunnelStatus(info.tunnel);
     }
   }, [getJson]);
 
-  async function startTunnelFromLaptop() {
-    setNetworkStatus("Iniciando tunel publico...");
-    setTunnelStatus((current) => ({
-      ...current,
-      status: "starting",
-      error: "",
-    }));
-
+  async function saveBranchSiteOnServer(nextSiteId) {
+    setBranchSiteId(nextSiteId);
+    writeBranchSiteId(nextSiteId);
     try {
-      const status = await getJson("/api/tunnel/start", { method: "POST" });
-      const publicUrl = normalizePublicBackendUrl(status.publicUrl);
-      setTunnelStatus(status);
-      setPublicApiDraft(publicUrl);
+      const result = await getJson("/api/network-info/branch-site", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branchSiteId: nextSiteId }),
+      });
       setNetworkInfo((current) => ({
         ...current,
-        publicApiUrl: publicUrl,
-        tunnel: status,
+        branchSiteId: result.branchSiteId ?? nextSiteId,
       }));
-      setNetworkStatus("Tunel publico activo. Ya puedes mostrar el QR del administrador.");
+      setNetworkStatus(
+        `Sede guardada: ${PUBLIC_SITES.find((site) => site.id === nextSiteId)?.name ?? nextSiteId}.`,
+      );
     } catch (error) {
-      setTunnelStatus((current) => ({
-        ...current,
-        status: "error",
-        error: error.message,
-      }));
-      setNetworkStatus(`Error iniciando tunel: ${error.message}`);
-    }
-  }
-
-  async function stopTunnelFromLaptop() {
-    setNetworkStatus("Deteniendo tunel publico...");
-    try {
-      const status = await getJson("/api/tunnel/stop", { method: "POST" });
-      setTunnelStatus(status);
-      setPublicApiDraft("");
-      setNetworkInfo((current) => ({
-        ...current,
-        publicApiUrl: "",
-        tunnel: status,
-      }));
-      setNetworkStatus("Tunel publico detenido.");
-    } catch (error) {
-      setNetworkStatus(`Error deteniendo tunel: ${error.message}`);
+      setNetworkStatus(`No se pudo guardar la sede: ${error.message}`);
     }
   }
 
@@ -2968,21 +2947,6 @@ function App() {
       cancelText: "Cancelar",
       isDanger: true,
     });
-  }
-
-  async function savePublicUrl() {
-    const nextPublicApiUrl = normalizePublicBackendUrl(publicApiDraft);
-    const payload = await getJson("/api/network-info/public-url", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ publicApiUrl: nextPublicApiUrl }),
-    });
-    setNetworkInfo((current) => ({
-      ...current,
-      publicApiUrl: payload.publicApiUrl,
-    }));
-    setPublicApiDraft(payload.publicApiUrl);
-    setNetworkStatus("URL publica guardada.");
   }
 
   async function saveRestaurantName() {
@@ -4889,15 +4853,34 @@ function App() {
               </article>
 
               <article className="order-card">
-                <h4>URL publica del tunel</h4>
-                <input
-                  value={publicApiDraft}
-                  onChange={(event) => setPublicApiDraft(event.target.value)}
-                  placeholder="https://tu-subdominio.trycloudflare.com"
-                />
+                <h4>Sede de esta laptop</h4>
                 <p>
-                  Puedes iniciar el tunel automaticamente desde aqui. Si ya lo
-                  abriste por terminal, pega manualmente la URL HTTPS.
+                  Cada equipo debe tener su sede. Portoviejo y Chone no se
+                  mezclan: cada uno levanta su propio tunel al iniciar el
+                  servidor.
+                </p>
+                <select
+                  value={branchSiteId}
+                  onChange={(event) => {
+                    void saveBranchSiteOnServer(event.target.value);
+                  }}
+                >
+                  {PUBLIC_SITES.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              </article>
+
+              <article className="order-card">
+                <h4>Tunel remoto (automatico)</h4>
+                <p>
+                  Se inicia solo unos segundos despues de levantar el servidor.
+                  No necesitas apretar ningun boton.
+                </p>
+                <p style={{ wordBreak: "break-all" }}>
+                  {publicApiDraft || networkInfo.publicApiUrl || "Esperando URL publica..."}
                 </p>
                 <p>
                   Estado:{" "}
@@ -4908,9 +4891,13 @@ function App() {
                         ? "Iniciando..."
                         : tunnelStatus.status === "error"
                           ? "Error"
-                          : "Detenido"}
+                          : "Preparando"}
                   </strong>
-                  {tunnelStatus.publicUrl ? ` · ${tunnelStatus.publicUrl}` : ""}
+                  {tunnelStatus.mode === "named" || tunnelStatus.fixedPublicUrl
+                    ? " · URL fija configurada"
+                    : tunnelStatus.publicUrl
+                      ? " · URL temporal Cloudflare"
+                      : ""}
                 </p>
                 {tunnelStatus.error ? (
                   <p style={{ color: "#b42318", fontWeight: 700 }}>
@@ -4920,56 +4907,16 @@ function App() {
                 <div className="actions">
                   <button
                     type="button"
-                    onClick={startTunnelFromLaptop}
-                    disabled={tunnelStatus.status === "starting"}
-                  >
-                    {tunnelStatus.status === "starting"
-                      ? "Iniciando..."
-                      : "Iniciar tunel"}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={stopTunnelFromLaptop}
-                    disabled={tunnelStatus.status === "starting"}
-                  >
-                    Detener tunel
-                  </button>
-                  <button type="button" onClick={savePublicUrl}>
-                    Guardar URL publica
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
                     onClick={() =>
-                      copyToClipboard(networkInfo.publicApiUrl, "URL publica")
+                      copyToClipboard(
+                        publicApiDraft || networkInfo.publicApiUrl,
+                        "URL publica",
+                      )
                     }
                   >
                     Copiar URL publica
                   </button>
                 </div>
-              </article>
-
-              <article className="order-card">
-                <h4>Sede de esta laptop</h4>
-                <p>
-                  Indica si esta caja corresponde a Portoviejo o Chone. Se usa
-                  para registrar la URL del tunel en el dashboard multi-sede.
-                </p>
-                <select
-                  value={branchSiteId}
-                  onChange={(event) => {
-                    const nextSiteId = event.target.value;
-                    setBranchSiteId(nextSiteId);
-                    writeBranchSiteId(nextSiteId);
-                  }}
-                >
-                  {PUBLIC_SITES.map((site) => (
-                    <option key={site.id} value={site.id}>
-                      {site.name}
-                    </option>
-                  ))}
-                </select>
               </article>
 
               <article className="order-card">
@@ -5061,7 +5008,8 @@ function App() {
                   </div>
                 ) : (
                   <p>
-                    Pega y guarda primero la URL HTTPS del tunel para generar
+                    Espera a que el tunel automatico muestre la URL publica
+                    (unos segundos tras iniciar el servidor) para generar
                     el enlace y QR del administrador.
                   </p>
                 )}

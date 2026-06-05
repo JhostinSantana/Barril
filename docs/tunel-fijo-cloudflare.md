@@ -8,6 +8,26 @@ Con esto el dueno puede abrir el dashboard desde cualquier internet (casa, celul
 - Cuenta gratis en Cloudflare: https://dash.cloudflare.com/sign-up
 - Un dominio propio en Cloudflare (ej. `ahumadosalbarril.com`) — unico costo opcional (~USD 10/anio)
 
+## Paso 0 — Dos laptops (prueba en el mismo lugar)
+
+En **cada laptop** crea `apps/server/.env`:
+
+Laptop A (simula Portoviejo):
+
+```env
+BARRIL_BRANCH_SITE_ID=portoviejo
+BARRIL_AUTO_START_TUNNEL=1
+```
+
+Laptop B (simula Chone):
+
+```env
+BARRIL_BRANCH_SITE_ID=chone
+BARRIL_AUTO_START_TUNNEL=1
+```
+
+Reinicia el servidor en ambas. Cada una abrira su tunel solo. En Conectividad verifica que la sede sea la correcta. El dueno abre una vez el QR de cada sede (PIN admin) para registrar ambas URLs en su celular.
+
 ## Paso 1 — Crear tunel por sede
 
 Repite en **Portoviejo** y **Chone**:

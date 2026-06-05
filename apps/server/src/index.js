@@ -68,7 +68,11 @@ const TUNNEL_TARGET_URL = "http://localhost:4000";
 const TUNNEL_PUBLIC_URL_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 const FIXED_PUBLIC_URL = `${process.env.BARRIL_PUBLIC_URL ?? ""}`.trim().replace(/\/+$/, "");
 const CLOUDFLARE_TUNNEL_TOKEN = `${process.env.CLOUDFLARE_TUNNEL_TOKEN ?? ""}`.trim();
-const AUTO_START_NAMED_TUNNEL = `${process.env.BARRIL_AUTO_START_TUNNEL ?? ""}`.trim() === "1";
+const BRANCH_SITE_ID = `${process.env.BARRIL_BRANCH_SITE_ID ?? ""}`.trim();
+const AUTO_START_TUNNEL = `${process.env.BARRIL_AUTO_START_TUNNEL ?? "1"}`.trim() !== "0";
+const TUNNEL_AUTO_START_DELAY_MS = Number(process.env.BARRIL_TUNNEL_START_DELAY_MS ?? 4000);
+const VALID_BRANCH_SITE_IDS = new Set(["portoviejo", "chone"]);
+let tunnelStopRequested = false;
 let tunnelProcess = null;
 let tunnelUrlWaiters = [];
 const tunnelState = {
@@ -111,8 +115,52 @@ async function registerTunnelUrl(publicUrl) {
   tunnelState.publicUrl = publicUrl;
   tunnelState.error = "";
   await setSetting("publicApiUrl", publicUrl);
+  const branchSiteId = await resolveBranchSiteId();
+  if (branchSiteId) {
+    await setSetting(`sitePublicUrl_${branchSiteId}`, publicUrl);
+  }
   io.emit("tunnel:updated", getTunnelStatus());
   notifyTunnelWaiters();
+}
+
+async function resolveBranchSiteId() {
+  const stored = `${(await getSetting("branchSiteId")) ?? ""}`.trim();
+  if (VALID_BRANCH_SITE_IDS.has(stored)) return stored;
+  if (VALID_BRANCH_SITE_IDS.has(BRANCH_SITE_ID)) return BRANCH_SITE_ID;
+  return "portoviejo";
+}
+
+async function bootstrapBranchSiteId() {
+  const stored = `${(await getSetting("branchSiteId")) ?? ""}`.trim();
+  if (VALID_BRANCH_SITE_IDS.has(stored)) return stored;
+
+  const initialSiteId = VALID_BRANCH_SITE_IDS.has(BRANCH_SITE_ID)
+    ? BRANCH_SITE_ID
+    : "portoviejo";
+  await setSetting("branchSiteId", initialSiteId);
+  return initialSiteId;
+}
+
+async function bootstrapPublicAccess() {
+  if (FIXED_PUBLIC_URL) {
+    await setSetting("publicApiUrl", FIXED_PUBLIC_URL);
+    tunnelState.publicUrl = FIXED_PUBLIC_URL;
+  } else {
+    const persistedPublicUrl = `${(await getSetting("publicApiUrl")) ?? ""}`.trim();
+    if (persistedPublicUrl) {
+      tunnelState.publicUrl = persistedPublicUrl;
+    }
+  }
+
+  if (!AUTO_START_TUNNEL) return;
+
+  setTimeout(() => {
+    if (tunnelStopRequested) return;
+    startTunnel().catch((error) => {
+      // eslint-disable-next-line no-console
+      console.error("Tunnel auto-start failed", error);
+    });
+  }, Number.isFinite(TUNNEL_AUTO_START_DELAY_MS) ? TUNNEL_AUTO_START_DELAY_MS : 4000);
 }
 
 function waitForTunnelUrl(timeoutMs = 60000) {
@@ -156,8 +204,9 @@ async function startTunnel() {
     return waitForTunnelUrl();
   }
 
+  tunnelStopRequested = false;
   tunnelState.status = "starting";
-  tunnelState.publicUrl = FIXED_PUBLIC_URL || "";
+  tunnelState.publicUrl = FIXED_PUBLIC_URL || tunnelState.publicUrl || "";
   tunnelState.error = "";
   tunnelState.startedAt = new Date().toISOString();
 
@@ -193,6 +242,11 @@ async function startTunnel() {
     notifyTunnelWaiters(error);
   });
   tunnelProcess.on("exit", (code) => {
+    const shouldRestart =
+      AUTO_START_TUNNEL &&
+      !tunnelStopRequested &&
+      tunnelState.status !== "stopped";
+
     if (tunnelState.status !== "stopped") {
       tunnelState.status = code === 0 ? "stopped" : "error";
       tunnelState.error =
@@ -202,6 +256,15 @@ async function startTunnel() {
     io.emit("tunnel:updated", getTunnelStatus());
     if (!tunnelState.publicUrl && tunnelState.status === "error") {
       notifyTunnelWaiters(new Error(tunnelState.error));
+    }
+
+    if (shouldRestart && code !== 0) {
+      setTimeout(() => {
+        startTunnel().catch((error) => {
+          // eslint-disable-next-line no-console
+          console.error("Tunnel restart failed", error);
+        });
+      }, 5000);
     }
   });
 
@@ -216,6 +279,7 @@ async function startTunnel() {
 }
 
 function stopTunnelProcess() {
+  tunnelStopRequested = true;
   if (!tunnelProcess?.pid) {
     tunnelState.status = "stopped";
     tunnelState.publicUrl = "";
@@ -396,10 +460,12 @@ app.get("/api/network-info", async (_, res, next) => {
   try {
     const localIp = resolveLocalIp();
     const publicApiUrl = (await getSetting("publicApiUrl")) ?? "";
+    const branchSiteId = await resolveBranchSiteId();
     res.json({
       localIp,
       localApiUrl: `http://${localIp}:4000`,
       publicApiUrl,
+      branchSiteId,
       tunnel: getTunnelStatus(),
     });
   } catch (error) {
@@ -444,6 +510,26 @@ app.patch("/api/network-info/public-url", async (req, res, next) => {
 
     await setSetting("publicApiUrl", publicApiUrl);
     res.json({ ok: true, publicApiUrl });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/network-info/branch-site", async (req, res, next) => {
+  try {
+    const branchSiteId = `${req.body?.branchSiteId ?? ""}`.trim();
+    if (!VALID_BRANCH_SITE_IDS.has(branchSiteId)) {
+      res.status(400).json({ message: "Sede invalida. Usa portoviejo o chone." });
+      return;
+    }
+
+    await setSetting("branchSiteId", branchSiteId);
+    const publicApiUrl = `${(await getSetting("publicApiUrl")) ?? ""}`.trim();
+    if (publicApiUrl) {
+      await setSetting(`sitePublicUrl_${branchSiteId}`, publicApiUrl);
+    }
+
+    res.json({ ok: true, branchSiteId, publicApiUrl });
   } catch (error) {
     next(error);
   }
@@ -1239,6 +1325,7 @@ io.on("connection", async (socket) => {
 const PORT = process.env.PORT || 4000;
 
 await initializeDatabase();
+await bootstrapBranchSiteId();
 
 // Ensure backups directory exists and schedule periodic copies of the DB file.
 const DATA_DIR = fileURLToPath(new URL("../data/", import.meta.url));
@@ -1273,18 +1360,12 @@ setInterval(performPeriodicBackup, 15 * 60 * 1000);
 // Also run one at startup
 performPeriodicBackup();
 
-httpServer.listen(PORT, async () => {
+httpServer.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`Server running on http://localhost:${PORT}`);
 
-  if (FIXED_PUBLIC_URL) {
-    await setSetting("publicApiUrl", FIXED_PUBLIC_URL).catch(() => {});
-  }
-
-  if (AUTO_START_NAMED_TUNNEL && CLOUDFLARE_TUNNEL_TOKEN) {
-    startTunnel().catch((error) => {
-      // eslint-disable-next-line no-console
-      console.error("Named tunnel auto-start failed", error);
-    });
-  }
+  bootstrapPublicAccess().catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error("Public access bootstrap failed", error);
+  });
 });
