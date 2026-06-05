@@ -1241,43 +1241,6 @@ function App() {
   }, [activeView, dashboardLinkUnlocked]);
 
   useEffect(() => {
-    if (!publicPagesView || !publicRemoteAccessUnlocked) return undefined;
-
-    const timer = window.setInterval(() => {
-      if (!isPublicDashboardPinSessionValid()) {
-        lockPublicRemoteAccess();
-      }
-    }, 60000);
-
-    return () => window.clearInterval(timer);
-  }, [publicPagesView, publicRemoteAccessUnlocked]);
-
-  useEffect(() => {
-    if (!publicPagesView || !publicRemoteAccessUnlocked) return;
-
-    if (publicDashboardMode === "multi") {
-      refreshPublicMultiSiteDashboard().catch(() => {
-        setNetworkStatus("Sin conexion con las sedes. Mostrando ultimos estados guardados.");
-      });
-      return;
-    }
-
-    loadPublicDashboardSnapshot().catch(() => {
-      if (hydratePublicDashboardSnapshot()) {
-        setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
-        return;
-      }
-      setNetworkStatus("Sin conexion con el backend publico.");
-    });
-  }, [
-    publicDashboardMode,
-    publicPagesView,
-    publicRemoteAccessUnlocked,
-    loadPublicDashboardSnapshot,
-    refreshPublicMultiSiteDashboard,
-  ]);
-
-  useEffect(() => {
     if (publicPagesView) return;
     if (!cashSessionHydrated) return;
 
@@ -2095,6 +2058,43 @@ function App() {
     },
     [applyPublicSiteSnapshot, publicSiteRuntime],
   );
+
+  useEffect(() => {
+    if (!publicPagesView || !publicRemoteAccessUnlocked) return undefined;
+
+    const timer = window.setInterval(() => {
+      if (!isPublicDashboardPinSessionValid()) {
+        lockPublicRemoteAccess();
+      }
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [publicPagesView, publicRemoteAccessUnlocked]);
+
+  useEffect(() => {
+    if (!publicPagesView || !publicRemoteAccessUnlocked) return;
+
+    if (publicDashboardMode === "multi") {
+      refreshPublicMultiSiteDashboard().catch(() => {
+        setNetworkStatus("Sin conexion con las sedes. Mostrando ultimos estados guardados.");
+      });
+      return;
+    }
+
+    loadPublicDashboardSnapshot().catch(() => {
+      if (hydratePublicDashboardSnapshot()) {
+        setNetworkStatus("Sin backend activo. Mostrando el ultimo estado guardado.");
+        return;
+      }
+      setNetworkStatus("Sin conexion con el backend publico.");
+    });
+  }, [
+    publicDashboardMode,
+    publicPagesView,
+    publicRemoteAccessUnlocked,
+    loadPublicDashboardSnapshot,
+    refreshPublicMultiSiteDashboard,
+  ]);
 
   const loadCashView = useCallback(async ({ silent = false, cutoff = cashSessionCutoff } = {}) => {
     if (!silent) {
