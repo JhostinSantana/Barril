@@ -125,20 +125,11 @@ async function registerTunnelUrl(publicUrl) {
 
 async function resolveBranchSiteId() {
   const stored = `${(await getSetting("branchSiteId")) ?? ""}`.trim();
-  if (VALID_BRANCH_SITE_IDS.has(stored)) return stored;
-  if (VALID_BRANCH_SITE_IDS.has(BRANCH_SITE_ID)) return BRANCH_SITE_ID;
-  return "portoviejo";
+  return VALID_BRANCH_SITE_IDS.has(stored) ? stored : null;
 }
 
 async function bootstrapBranchSiteId() {
-  const stored = `${(await getSetting("branchSiteId")) ?? ""}`.trim();
-  if (VALID_BRANCH_SITE_IDS.has(stored)) return stored;
-
-  const initialSiteId = VALID_BRANCH_SITE_IDS.has(BRANCH_SITE_ID)
-    ? BRANCH_SITE_ID
-    : "portoviejo";
-  await setSetting("branchSiteId", initialSiteId);
-  return initialSiteId;
+  return resolveBranchSiteId();
 }
 
 async function bootstrapPublicAccess() {
@@ -461,12 +452,15 @@ app.get("/api/network-info", async (_, res, next) => {
     const localIp = resolveLocalIp();
     const publicApiUrl = (await getSetting("publicApiUrl")) ?? "";
     const branchSiteId = await resolveBranchSiteId();
+    const tunnel = getTunnelStatus();
     res.json({
       localIp,
       localApiUrl: `http://${localIp}:4000`,
       publicApiUrl,
       branchSiteId,
-      tunnel: getTunnelStatus(),
+      branchSiteConfigured: Boolean(branchSiteId),
+      publicUrlIsFixed: Boolean(FIXED_PUBLIC_URL),
+      tunnel,
     });
   } catch (error) {
     next(error);

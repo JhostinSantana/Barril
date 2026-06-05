@@ -50,18 +50,23 @@ export function getPublicSiteById(siteId) {
   return PUBLIC_SITES.find((site) => site.id === siteId) ?? null;
 }
 
-export function readBranchSiteId() {
-  if (typeof window === "undefined") return PUBLIC_SITES[0].id;
+export function isBranchSiteId(value) {
+  return PUBLIC_SITES.some((site) => site.id === value);
+}
 
-  const stored = window.localStorage.getItem(BRANCH_SITE_STORAGE_KEY);
-  return PUBLIC_SITES.some((site) => site.id === stored)
-    ? stored
-    : PUBLIC_SITES[0].id;
+export function readBranchSiteId() {
+  if (typeof window === "undefined") return "";
+
+  const stored = window.localStorage.getItem(BRANCH_SITE_STORAGE_KEY) ?? "";
+  return isBranchSiteId(stored) ? stored : "";
 }
 
 export function writeBranchSiteId(siteId) {
   if (typeof window === "undefined") return;
-  if (!PUBLIC_SITES.some((site) => site.id === siteId)) return;
+  if (!isBranchSiteId(siteId)) {
+    window.localStorage.removeItem(BRANCH_SITE_STORAGE_KEY);
+    return;
+  }
   window.localStorage.setItem(BRANCH_SITE_STORAGE_KEY, siteId);
 }
 
@@ -135,15 +140,15 @@ export function parsePublicSiteEntriesFromUrl() {
   if (mode === "single") {
     const api = normalizePublicBackendUrl(params.get("api"));
     const siteParam = params.get("site")?.trim();
-    const siteId = PUBLIC_SITES.some((site) => site.id === siteParam)
-      ? siteParam
-      : readBranchSiteId();
+    const siteId = isBranchSiteId(siteParam) ? siteParam : "";
 
-    if (api) {
+    if (api && siteId) {
       writeSiteApiUrl(siteId, api);
     }
 
-    const site = getPublicSiteById(siteId) ?? PUBLIC_SITES[0];
+    const site = getPublicSiteById(siteId);
+    if (!site) return [];
+
     return [
       {
         ...site,
@@ -173,14 +178,13 @@ export function buildMasterPublicDashboardUrl() {
 
 export function buildBranchPublicDashboardUrl(backendUrl, siteId) {
   const normalizedUrl = normalizePublicBackendUrl(backendUrl);
-  const branchSiteId = PUBLIC_SITES.some((site) => site.id === siteId)
-    ? siteId
-    : readBranchSiteId();
+  if (!isBranchSiteId(siteId)) return "";
+
   const url = new URL(PUBLIC_DASHBOARD_URL);
   url.searchParams.set("multi", "1");
 
   if (normalizedUrl) {
-    url.searchParams.set(`api_${branchSiteId}`, normalizedUrl);
+    url.searchParams.set(`api_${siteId}`, normalizedUrl);
   }
 
   return url.toString();

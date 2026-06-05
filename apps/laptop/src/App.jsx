@@ -31,6 +31,7 @@ import {
   getPublicDashboardMode,
   isPublicDashboardPinSessionValid,
   isPublicPagesView,
+  isBranchSiteId,
   markPublicDashboardPinSession,
   normalizePublicBackendUrl,
   parsePublicSiteEntriesFromUrl,
@@ -1197,7 +1198,9 @@ function App() {
   const [cashSessionHydrated, setCashSessionHydrated] = useState(false);
   const legacyPendingFinalizedRef = useRef(false);
   const [publicBackendConnected, setPublicBackendConnected] = useState(false);
-  const [branchSiteId, setBranchSiteId] = useState(() => readBranchSiteId());
+  const [branchSiteId, setBranchSiteId] = useState("");
+  const [branchSiteDraft, setBranchSiteDraft] = useState("");
+  const [branchSiteConfigured, setBranchSiteConfigured] = useState(false);
   const [activePublicSite, setActivePublicSite] = useState(
     COMBINED_PUBLIC_SITE_ID,
   );
@@ -1210,10 +1213,10 @@ function App() {
   const publicBackendUrl = normalizePublicBackendUrl(
     publicApiDraft || networkInfo.publicApiUrl,
   );
-  const publicDashboardUrl = buildBranchPublicDashboardUrl(
-    publicBackendUrl,
-    branchSiteId,
-  );
+  const publicDashboardUrl =
+    branchSiteConfigured && publicBackendUrl
+      ? buildBranchPublicDashboardUrl(publicBackendUrl, branchSiteId)
+      : "";
   const masterPublicDashboardUrl = buildMasterPublicDashboardUrl();
 
   useEffect(() => {
@@ -2740,30 +2743,46 @@ function App() {
     const info = await getJson("/api/network-info");
     setNetworkInfo(info);
     setPublicApiDraft(info.publicApiUrl ?? "");
-    if (info.branchSiteId) {
+    const configured = Boolean(info.branchSiteConfigured && info.branchSiteId);
+    setBranchSiteConfigured(configured);
+    if (configured) {
       setBranchSiteId(info.branchSiteId);
+      setBranchSiteDraft(info.branchSiteId);
       writeBranchSiteId(info.branchSiteId);
+    } else {
+      setBranchSiteId("");
+      setBranchSiteDraft("");
+      writeBranchSiteId("");
     }
     if (info.tunnel) {
       setTunnelStatus(info.tunnel);
     }
   }, [getJson]);
 
-  async function saveBranchSiteOnServer(nextSiteId) {
-    setBranchSiteId(nextSiteId);
-    writeBranchSiteId(nextSiteId);
+  async function confirmBranchSiteOnServer() {
+    if (!isBranchSiteId(branchSiteDraft)) {
+      setNetworkStatus("Selecciona Portoviejo o Chone antes de guardar.");
+      return;
+    }
+
     try {
       const result = await getJson("/api/network-info/branch-site", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branchSiteId: nextSiteId }),
+        body: JSON.stringify({ branchSiteId: branchSiteDraft }),
       });
+      const nextSiteId = result.branchSiteId ?? branchSiteDraft;
+      setBranchSiteId(nextSiteId);
+      setBranchSiteDraft(nextSiteId);
+      setBranchSiteConfigured(true);
+      writeBranchSiteId(nextSiteId);
       setNetworkInfo((current) => ({
         ...current,
-        branchSiteId: result.branchSiteId ?? nextSiteId,
+        branchSiteId: nextSiteId,
+        branchSiteConfigured: true,
       }));
       setNetworkStatus(
-        `Sede guardada: ${PUBLIC_SITES.find((site) => site.id === nextSiteId)?.name ?? nextSiteId}.`,
+        `Sede confirmada: ${PUBLIC_SITES.find((site) => site.id === nextSiteId)?.name ?? nextSiteId}. Ya puedes mostrar los enlaces del dashboard.`,
       );
     } catch (error) {
       setNetworkStatus(`No se pudo guardar la sede: ${error.message}`);
@@ -4855,30 +4874,55 @@ function App() {
               <article className="order-card">
                 <h4>Sede de esta laptop</h4>
                 <p>
-                  Cada equipo debe tener su sede. Portoviejo y Chone no se
-                  mezclan: cada uno levanta su propio tunel al iniciar el
-                  servidor.
+                  Tu eliges en cual sede trabaja ESTE servidor. No se adivina:
+                  debes seleccionar y confirmar. Hazlo una vez por laptop
+                  (Portoviejo en una, Chone en la otra).
                 </p>
                 <select
-                  value={branchSiteId}
-                  onChange={(event) => {
-                    void saveBranchSiteOnServer(event.target.value);
-                  }}
+                  value={branchSiteDraft}
+                  onChange={(event) => setBranchSiteDraft(event.target.value)}
                 >
+                  <option value="">Selecciona sede...</option>
                   {PUBLIC_SITES.map((site) => (
                     <option key={site.id} value={site.id}>
                       {site.name}
                     </option>
                   ))}
                 </select>
+                <div className="actions" style={{ marginTop: 10 }}>
+                  <button type="button" onClick={confirmBranchSiteOnServer}>
+                    Confirmar sede de esta laptop
+                  </button>
+                </div>
+                {branchSiteConfigured ? (
+                  <p style={{ marginTop: 10, fontWeight: 700 }}>
+                    Sede activa en este servidor:{" "}
+                    {PUBLIC_SITES.find((site) => site.id === branchSiteId)?.name}
+                  </p>
+                ) : (
+                  <p style={{ marginTop: 10, color: "#b42318", fontWeight: 700 }}>
+                    Aun no has confirmado la sede de esta laptop.
+                  </p>
+                )}
               </article>
 
               <article className="order-card">
                 <h4>Tunel remoto (automatico)</h4>
                 <p>
                   Se inicia solo unos segundos despues de levantar el servidor.
-                  No necesitas apretar ningun boton.
                 </p>
+                {networkInfo.publicUrlIsFixed || tunnelStatus.fixedPublicUrl ? (
+                  <p style={{ fontWeight: 700 }}>
+                    URL fija configurada: no cambia al reiniciar.
+                  </p>
+                ) : (
+                  <p style={{ color: "#8a3f00" }}>
+                    Tunel rapido Cloudflare: la URL tecnica puede cambiar al
+                    reiniciar. El link multi-sede del dueno NO cambia; solo hay
+                    que escanear el QR de sede otra vez si reiniciaste el
+                    servidor (para actualizar datos en vivo en el celular).
+                  </p>
+                )}
                 <p style={{ wordBreak: "break-all" }}>
                   {publicApiDraft || networkInfo.publicApiUrl || "Esperando URL publica..."}
                 </p>
@@ -4940,6 +4984,11 @@ function App() {
                       </button>
                     </div>
                   </div>
+                ) : !branchSiteConfigured ? (
+                  <p>
+                    Primero confirma la sede de esta laptop. Luego espera la URL
+                    publica del tunel automatico para generar el enlace y QR.
+                  </p>
                 ) : publicDashboardUrl ? (
                   <div
                     style={{
@@ -4968,9 +5017,9 @@ function App() {
                       </div>
                     </div>
                     <p>
-                      Comparte este QR o enlace solo con el administrador. Al
-                      abrirlo se registra esta sede (
-                      {PUBLIC_SITES.find((site) => site.id === branchSiteId)?.name}).
+                      Escanea este QR en el celular del dueno para registrar{" "}
+                      {PUBLIC_SITES.find((site) => site.id === branchSiteId)?.name}.
+                      Hazlo en cada laptop (Portoviejo y Chone).
                     </p>
                     <div className="actions">
                       <button
@@ -5061,9 +5110,9 @@ function App() {
                       </div>
                     </div>
                     <p>
-                      Enlace unico para ver Portoviejo y Chone. Al escanearlo
-                      pedira PIN de administrador. Se oculta solo al salir de
-                      Conectividad o tras 90 segundos.
+                      Este link nunca cambia. El dueno lo guarda en favoritos.
+                      Despues de registrar cada sede con el QR de arriba, vera
+                      Portoviejo y Chone aqui.
                     </p>
                     <div className="actions">
                       <button
