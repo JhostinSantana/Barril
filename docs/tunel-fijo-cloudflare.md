@@ -1,95 +1,103 @@
-# Tunel fijo Cloudflare (ver dashboard desde casa)
+# Tunel fijo Cloudflare — link permanente para las dos sedes
 
-Con esto el dueno puede abrir el dashboard desde cualquier internet (casa, celular, otro pais). Cada sede mantiene su propia base de datos.
+Con URLs fijas, el dueno usa **un solo favorito** y funciona siempre, aunque apagues y enciendas el servidor mil veces.
 
-## Que necesitas
+## Que necesitas (una sola vez)
 
-- Laptop del local encendida con Barril activo
-- Cuenta gratis en Cloudflare: https://dash.cloudflare.com/sign-up
-- Un dominio propio en Cloudflare (ej. `ahumadosalbarril.com`) — unico costo opcional (~USD 10/anio)
+1. Cuenta gratis Cloudflare: https://dash.cloudflare.com/sign-up
+2. Un dominio en Cloudflare (ej. `ahumadosalbarril.com`) — ~USD 10/año
+3. Dos subdominios:
+   - `https://portoviejo.tudominio.com` → laptop Portoviejo
+   - `https://chone.tudominio.com` → laptop Chone
 
-## Paso 0 — Dos laptops (prueba en el mismo lugar)
+---
 
-En **cada laptop** crea `apps/server/.env`:
-
-Laptop A (simula Portoviejo):
-
-```env
-BARRIL_BRANCH_SITE_ID=portoviejo
-BARRIL_AUTO_START_TUNNEL=1
-```
-
-Laptop B (simula Chone):
-
-```env
-BARRIL_BRANCH_SITE_ID=chone
-BARRIL_AUTO_START_TUNNEL=1
-```
-
-Reinicia el servidor en ambas. Cada una abrira su tunel solo. En Conectividad verifica que la sede sea la correcta. El dueno abre una vez el QR de cada sede (PIN admin) para registrar ambas URLs en su celular.
-
-## Paso 1 — Crear tunel por sede
+## Paso 1 — Tunel Cloudflare por sede
 
 Repite en **Portoviejo** y **Chone**:
 
-1. Entra a Cloudflare → **Zero Trust** → **Networks** → **Tunnels**.
-2. **Create a tunnel** → nombre: `barril-portoviejo` o `barril-chone`.
-3. Instala el conector (o usa el token que te da Cloudflare).
-4. En **Public Hostname** agrega:
-   - Subdominio: `portoviejo` (o `chone`)
-   - Domain: tu dominio
+1. Cloudflare → **Zero Trust** → **Networks** → **Tunnels** → **Create a tunnel**
+2. Nombre: `barril-portoviejo` o `barril-chone`
+3. **Public Hostname**:
+   - Subdominio: `portoviejo` o `chone`
    - Service: `http://localhost:4000`
-5. Guarda la URL fija, por ejemplo:
-   - `https://portoviejo.tudominio.com`
-   - `https://chone.tudominio.com`
-6. Copia el **Tunnel token** de esa sede.
+4. Copia el **Tunnel token**
 
-## Paso 2 — Variables en la laptop de cada sede
+---
 
-Crea `apps/server/.env` (no se sube a git):
+## Paso 2 — `.env` en cada laptop
 
-**Portoviejo**
+**Portoviejo** (`apps/server/.env`):
 
 ```env
 BARRIL_PUBLIC_URL=https://portoviejo.tudominio.com
-CLOUDFLARE_TUNNEL_TOKEN=pega_aqui_el_token_de_portoviejo
+CLOUDFLARE_TUNNEL_TOKEN=token_de_portoviejo
 BARRIL_AUTO_START_TUNNEL=1
 ```
 
-**Chone**
+**Chone** (`apps/server/.env`):
 
 ```env
 BARRIL_PUBLIC_URL=https://chone.tudominio.com
-CLOUDFLARE_TUNNEL_TOKEN=pega_aqui_el_token_de_chone
+CLOUDFLARE_TUNNEL_TOKEN=token_de_chone
 BARRIL_AUTO_START_TUNNEL=1
 ```
 
-Reinicia el servidor Barril. El tunel arranca solo y la URL publica ya no cambia.
+Reinicia el servidor. El tunel arranca solo. La URL **no cambia**.
 
-## Paso 3 — Link fijo del dueno (GitHub Pages)
+En cada laptop: **Conectividad → confirmar sede** (Portoviejo o Chone).
 
-Guarda este enlace en favoritos del celular del dueno:
+---
+
+## Paso 3 — Link permanente del dueno
+
+### Opcion A — Desde la laptop (mas facil)
+
+1. Conectividad → PIN admin → **Link fijo multi-sede**
+2. Pega las dos URLs fijas
+3. **Guardar URLs fijas del dueno**
+4. Copia o escanea el **QR permanente**
+
+Ese link incluye las dos sedes y **nunca cambia**.
+
+### Opcion B — GitHub Pages (favorito aun mas simple)
+
+En GitHub → **Settings → Secrets → Actions**, agrega:
+
+| Secret | Valor |
+|--------|--------|
+| `VITE_SITE_URL_PORTOVIEJO` | `https://portoviejo.tudominio.com` |
+| `VITE_SITE_URL_CHONE` | `https://chone.tudominio.com` |
+
+Haz un push o re-ejecuta el workflow **Deploy laptop to GitHub Pages**.
+
+El dueno guarda solo:
+
+```
+https://jhostinsantana.github.io/Barril/?multi=1
+```
+
+GitHub Pages ya conoce las dos URLs fijas por dentro.
+
+### Opcion C — Link manual (sin tocar GitHub)
 
 ```
 https://jhostinsantana.github.io/Barril/?multi=1&api_portoviejo=https://portoviejo.tudominio.com&api_chone=https://chone.tudominio.com
 ```
 
-Reemplaza `tudominio.com` por tu dominio real.
+Reemplaza `tudominio.com`. Este string **no cambia nunca**.
 
-## Paso 4 — Probar desde casa
+---
 
-1. En el local: laptop encendida, servidor activo, tunel en verde.
-2. En casa: abre el link multi-sede.
-3. Debes ver **Ambas sedes**, **Portoviejo** y **Chone** con ultima sync.
+## Paso 4 — Probar
 
-Si un local esta cerrado, veras la ultima informacion guardada en ese navegador.
+1. Enciende ambas laptops (servidor activo)
+2. Abre el link permanente en el celular del dueno + PIN
+3. Debes ver **Portoviejo** y **Chone**
+4. Apaga y enciende un servidor → el mismo link sigue funcionando
 
-## Sin dominio propio (temporal)
+---
 
-Puedes usar el tunel rapido desde la laptop (**Conectividad → Iniciar tunel**). La URL cambia al reiniciar; abre el enlace de sede una vez por reinicio para actualizar el celular del dueno.
+## Sin dominio (temporal)
 
-## Seguridad
-
-- No compartas el token del tunel.
-- El dashboard administrativo sigue protegido por PIN en la laptop.
-- GitHub Pages solo muestra estadisticas; no expone la caja completa sin el backend activo.
+El tunel rapido `trycloudflare.com` **cambia** al reiniciar. Solo sirve para pruebas. Para produccion usa dominio + tunel con nombre.

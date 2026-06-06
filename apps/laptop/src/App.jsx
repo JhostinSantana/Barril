@@ -28,7 +28,9 @@ import {
   createInitialPublicSiteRuntime,
   fetchPublicDashboardSnapshot,
   formatPublicSyncLabel,
+  getPresetFixedSiteUrls,
   getPublicDashboardMode,
+  hasPresetFixedSiteUrls,
   isPublicDashboardPinSessionValid,
   isPublicPagesView,
   isBranchSiteId,
@@ -1201,6 +1203,10 @@ function App() {
   const [branchSiteId, setBranchSiteId] = useState("");
   const [branchSiteDraft, setBranchSiteDraft] = useState("");
   const [branchSiteConfigured, setBranchSiteConfigured] = useState(false);
+  const [ownerUrlDrafts, setOwnerUrlDrafts] = useState({
+    portoviejo: "",
+    chone: "",
+  });
   const [activePublicSite, setActivePublicSite] = useState(
     COMBINED_PUBLIC_SITE_ID,
   );
@@ -1217,7 +1223,11 @@ function App() {
     branchSiteConfigured && publicBackendUrl
       ? buildBranchPublicDashboardUrl(publicBackendUrl, branchSiteId)
       : "";
-  const masterPublicDashboardUrl = buildMasterPublicDashboardUrl();
+  const masterPublicDashboardUrl =
+    networkInfo.permanentMasterDashboardUrl ||
+    buildMasterPublicDashboardUrl(networkInfo.ownerDashboardUrls ?? {});
+  const permanentLinkReady =
+    Boolean(networkInfo.permanentLinkReady) || hasPresetFixedSiteUrls();
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -2757,7 +2767,34 @@ function App() {
     if (info.tunnel) {
       setTunnelStatus(info.tunnel);
     }
+    setOwnerUrlDrafts({
+      portoviejo: info.ownerDashboardUrls?.portoviejo ?? "",
+      chone: info.ownerDashboardUrls?.chone ?? "",
+    });
   }, [getJson]);
+
+  async function saveOwnerDashboardUrls() {
+    try {
+      const result = await getJson("/api/network-info/owner-dashboard-urls", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ownerUrlDrafts),
+      });
+      setNetworkInfo((current) => ({
+        ...current,
+        ownerDashboardUrls: result.ownerDashboardUrls ?? {},
+        permanentMasterDashboardUrl: result.permanentMasterDashboardUrl ?? "",
+        permanentLinkReady: Boolean(result.permanentLinkReady),
+      }));
+      setNetworkStatus(
+        result.permanentLinkReady
+          ? "Link permanente del dueno listo. Ya no cambia al reiniciar."
+          : "URLs guardadas. Falta completar la otra sede para el link permanente.",
+      );
+    } catch (error) {
+      setNetworkStatus(`No se pudieron guardar las URLs fijas: ${error.message}`);
+    }
+  }
 
   async function confirmBranchSiteOnServer() {
     if (!isBranchSiteId(branchSiteDraft)) {
@@ -5092,61 +5129,104 @@ function App() {
                       gap: 12,
                     }}
                   >
-                    <p style={{ wordBreak: "break-all" }}>{masterPublicDashboardUrl}</p>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <div
-                        style={{
-                          background: "#fff",
-                          padding: 12,
-                          borderRadius: 8,
-                        }}
-                      >
-                        <QRCode value={masterPublicDashboardUrl} />
-                      </div>
-                    </div>
                     <p>
-                      Este link nunca cambia. El dueno lo guarda en favoritos.
-                      Despues de registrar cada sede con el QR de arriba, vera
-                      Portoviejo y Chone aqui.
+                      Pega las URLs fijas HTTPS de cada sede (las de tu dominio
+                      Cloudflare). Cuando las dos esten guardadas, el link del
+                      dueno no cambia aunque reinicies el servidor.
                     </p>
+                    <label htmlFor="owner-url-portoviejo">URL fija Portoviejo</label>
+                    <input
+                      id="owner-url-portoviejo"
+                      value={ownerUrlDrafts.portoviejo}
+                      onChange={(event) =>
+                        setOwnerUrlDrafts((current) => ({
+                          ...current,
+                          portoviejo: event.target.value,
+                        }))
+                      }
+                      placeholder="https://portoviejo.tudominio.com"
+                    />
+                    <label htmlFor="owner-url-chone">URL fija Chone</label>
+                    <input
+                      id="owner-url-chone"
+                      value={ownerUrlDrafts.chone}
+                      onChange={(event) =>
+                        setOwnerUrlDrafts((current) => ({
+                          ...current,
+                          chone: event.target.value,
+                        }))
+                      }
+                      placeholder="https://chone.tudominio.com"
+                    />
                     <div className="actions">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          copyToClipboard(
-                            masterPublicDashboardUrl,
-                            "link fijo multi-sede",
-                          )
-                        }
-                      >
-                        Copiar link fijo
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() =>
-                          window.open(
-                            masterPublicDashboardUrl,
-                            "_blank",
-                            "noopener,noreferrer",
-                          )
-                        }
-                      >
-                        Abrir multi-sede
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={lockSensitiveDashboardLinks}
-                      >
-                        Ocultar enlaces
+                      <button type="button" onClick={saveOwnerDashboardUrls}>
+                        Guardar URLs fijas del dueno
                       </button>
                     </div>
+                    {permanentLinkReady ? (
+                      <>
+                        <p style={{ fontWeight: 700 }}>
+                          Link permanente listo (no cambia al reiniciar):
+                        </p>
+                        <p style={{ wordBreak: "break-all" }}>
+                          {masterPublicDashboardUrl}
+                        </p>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <div
+                            style={{
+                              background: "#fff",
+                              padding: 12,
+                              borderRadius: 8,
+                            }}
+                          >
+                            <QRCode value={masterPublicDashboardUrl} />
+                          </div>
+                        </div>
+                        <div className="actions">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              copyToClipboard(
+                                masterPublicDashboardUrl,
+                                "link permanente multi-sede",
+                              )
+                            }
+                          >
+                            Copiar link permanente
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() =>
+                              window.open(
+                                masterPublicDashboardUrl,
+                                "_blank",
+                                "noopener,noreferrer",
+                              )
+                            }
+                          >
+                            Abrir dashboard
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={lockSensitiveDashboardLinks}
+                          >
+                            Ocultar enlaces
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <p style={{ color: "#8a3f00" }}>
+                        Completa y guarda las dos URLs fijas para generar el QR
+                        permanente del dueno.
+                      </p>
+                    )}
                   </div>
                 )}
               </article>

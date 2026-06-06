@@ -118,6 +118,7 @@ async function registerTunnelUrl(publicUrl) {
   const branchSiteId = await resolveBranchSiteId();
   if (branchSiteId) {
     await setSetting(`sitePublicUrl_${branchSiteId}`, publicUrl);
+    await updateOwnerDashboardUrlForSite(branchSiteId, publicUrl);
   }
   io.emit("tunnel:updated", getTunnelStatus());
   notifyTunnelWaiters();
@@ -128,6 +129,57 @@ async function resolveBranchSiteId() {
   return VALID_BRANCH_SITE_IDS.has(stored) ? stored : null;
 }
 
+async function updateOwnerDashboardUrlForSite(siteId, publicUrl) {
+  if (!VALID_BRANCH_SITE_IDS.has(siteId) || !publicUrl) return;
+
+  const raw = `${(await getSetting("ownerDashboardUrls")) ?? ""}`.trim();
+  let map = {};
+  if (raw) {
+    try {
+      map = JSON.parse(raw);
+    } catch {
+      map = {};
+    }
+  }
+
+  map[siteId] = publicUrl;
+  await setSetting("ownerDashboardUrls", JSON.stringify(map));
+}
+
+async function readOwnerDashboardUrls() {
+  const raw = `${(await getSetting("ownerDashboardUrls")) ?? ""}`.trim();
+  if (!raw) return {};
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([siteId, value]) =>
+          VALID_BRANCH_SITE_IDS.has(siteId) &&
+          typeof value === "string" &&
+          value.trim(),
+      ).map(([siteId, value]) => [siteId, value.trim().replace(/\/+$/, "")]),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function buildPermanentMasterDashboardUrl(siteUrls = {}) {
+  const url = new URL("https://jhostinsantana.github.io/Barril/");
+  url.searchParams.set("multi", "1");
+
+  for (const siteId of VALID_BRANCH_SITE_IDS) {
+    const apiUrl = `${siteUrls[siteId] ?? ""}`.trim().replace(/\/+$/, "");
+    if (apiUrl) {
+      url.searchParams.set(`api_${siteId}`, apiUrl);
+    }
+  }
+
+  return url.toString();
+}
+
 async function bootstrapBranchSiteId() {
   return resolveBranchSiteId();
 }
@@ -136,6 +188,10 @@ async function bootstrapPublicAccess() {
   if (FIXED_PUBLIC_URL) {
     await setSetting("publicApiUrl", FIXED_PUBLIC_URL);
     tunnelState.publicUrl = FIXED_PUBLIC_URL;
+    const branchSiteId = await resolveBranchSiteId();
+    if (branchSiteId) {
+      await updateOwnerDashboardUrlForSite(branchSiteId, FIXED_PUBLIC_URL);
+    }
   } else {
     const persistedPublicUrl = `${(await getSetting("publicApiUrl")) ?? ""}`.trim();
     if (persistedPublicUrl) {
@@ -453,6 +509,12 @@ app.get("/api/network-info", async (_, res, next) => {
     const publicApiUrl = (await getSetting("publicApiUrl")) ?? "";
     const branchSiteId = await resolveBranchSiteId();
     const tunnel = getTunnelStatus();
+    const ownerDashboardUrls = await readOwnerDashboardUrls();
+    const permanentMasterDashboardUrl =
+      buildPermanentMasterDashboardUrl(ownerDashboardUrls);
+    const permanentLinkReady = VALID_BRANCH_SITE_IDS.every(
+      (siteId) => ownerDashboardUrls[siteId],
+    );
     res.json({
       localIp,
       localApiUrl: `http://${localIp}:4000`,
@@ -460,6 +522,9 @@ app.get("/api/network-info", async (_, res, next) => {
       branchSiteId,
       branchSiteConfigured: Boolean(branchSiteId),
       publicUrlIsFixed: Boolean(FIXED_PUBLIC_URL),
+      ownerDashboardUrls,
+      permanentMasterDashboardUrl,
+      permanentLinkReady,
       tunnel,
     });
   } catch (error) {
@@ -509,6 +574,38 @@ app.patch("/api/network-info/public-url", async (req, res, next) => {
   }
 });
 
+app.patch("/api/network-info/owner-dashboard-urls", async (req, res, next) => {
+  try {
+    const current = await readOwnerDashboardUrls();
+
+    for (const siteId of VALID_BRANCH_SITE_IDS) {
+      const raw = req.body?.[siteId];
+      if (typeof raw !== "string") continue;
+      const normalized = raw.trim().replace(/\/+$/, "");
+      if (!normalized) continue;
+      if (!/^https:\/\//i.test(normalized)) {
+        res.status(400).json({
+          message: `La URL de ${siteId} debe iniciar con https://.`,
+        });
+        return;
+      }
+      current[siteId] = normalized;
+    }
+
+    await setSetting("ownerDashboardUrls", JSON.stringify(current));
+    res.json({
+      ok: true,
+      ownerDashboardUrls: current,
+      permanentMasterDashboardUrl: buildPermanentMasterDashboardUrl(current),
+      permanentLinkReady: [...VALID_BRANCH_SITE_IDS].every(
+        (siteId) => current[siteId],
+      ),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.patch("/api/network-info/branch-site", async (req, res, next) => {
   try {
     const branchSiteId = `${req.body?.branchSiteId ?? ""}`.trim();
@@ -521,9 +618,21 @@ app.patch("/api/network-info/branch-site", async (req, res, next) => {
     const publicApiUrl = `${(await getSetting("publicApiUrl")) ?? ""}`.trim();
     if (publicApiUrl) {
       await setSetting(`sitePublicUrl_${branchSiteId}`, publicApiUrl);
+      await updateOwnerDashboardUrlForSite(branchSiteId, publicApiUrl);
     }
 
-    res.json({ ok: true, branchSiteId, publicApiUrl });
+    const ownerDashboardUrls = await readOwnerDashboardUrls();
+    res.json({
+      ok: true,
+      branchSiteId,
+      publicApiUrl,
+      ownerDashboardUrls,
+      permanentMasterDashboardUrl:
+        buildPermanentMasterDashboardUrl(ownerDashboardUrls),
+      permanentLinkReady: [...VALID_BRANCH_SITE_IDS].every(
+        (siteId) => ownerDashboardUrls[siteId],
+      ),
+    });
   } catch (error) {
     next(error);
   }

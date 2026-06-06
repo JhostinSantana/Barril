@@ -12,6 +12,47 @@ const BRANCH_SITE_STORAGE_KEY = "barril.branchSiteId";
 const SITE_API_PREFIX = "barril.publicApiBaseUrl.";
 const SITE_SNAPSHOT_PREFIX = "barril.publicDashboardSnapshot.";
 
+export function getPresetFixedSiteUrls() {
+  return {
+    portoviejo: normalizePublicBackendUrl(
+      import.meta.env.VITE_SITE_URL_PORTOVIEJO ?? "",
+    ),
+    chone: normalizePublicBackendUrl(import.meta.env.VITE_SITE_URL_CHONE ?? ""),
+  };
+}
+
+export function hasPresetFixedSiteUrls() {
+  const preset = getPresetFixedSiteUrls();
+  return Boolean(preset.portoviejo || preset.chone);
+}
+
+export function buildMasterPublicDashboardUrl(siteUrls = {}) {
+  const url = new URL(PUBLIC_DASHBOARD_URL);
+  url.searchParams.set("multi", "1");
+
+  const preset = getPresetFixedSiteUrls();
+  for (const site of PUBLIC_SITES) {
+    const apiUrl = normalizePublicBackendUrl(
+      siteUrls[site.id] || preset[site.id] || "",
+    );
+    if (apiUrl) {
+      url.searchParams.set(`api_${site.id}`, apiUrl);
+    }
+  }
+
+  return url.toString();
+}
+
+export function resolveSiteApiUrl(siteId, queryValue = "") {
+  const fromQuery = normalizePublicBackendUrl(queryValue);
+  if (fromQuery) return fromQuery;
+
+  const stored = readSiteApiUrl(siteId);
+  if (stored) return stored;
+
+  return getPresetFixedSiteUrls()[siteId] || "";
+}
+
 export function isPublicPagesHost() {
   if (typeof window === "undefined") return false;
 
@@ -158,22 +199,17 @@ export function parsePublicSiteEntriesFromUrl() {
   }
 
   return PUBLIC_SITES.map((site) => {
-    const fromQuery = normalizePublicBackendUrl(params.get(`api_${site.id}`));
-    if (fromQuery) {
-      writeSiteApiUrl(site.id, fromQuery);
+    const fromQuery = params.get(`api_${site.id}`);
+    const apiUrl = resolveSiteApiUrl(site.id, fromQuery);
+    if (apiUrl) {
+      writeSiteApiUrl(site.id, apiUrl);
     }
 
     return {
       ...site,
-      apiUrl: fromQuery || readSiteApiUrl(site.id),
+      apiUrl,
     };
   });
-}
-
-export function buildMasterPublicDashboardUrl() {
-  const url = new URL(PUBLIC_DASHBOARD_URL);
-  url.searchParams.set("multi", "1");
-  return url.toString();
 }
 
 export function buildBranchPublicDashboardUrl(backendUrl, siteId) {
