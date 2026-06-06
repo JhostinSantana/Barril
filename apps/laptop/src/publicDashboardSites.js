@@ -26,7 +26,21 @@ export function hasPresetFixedSiteUrls() {
   return Boolean(preset.portoviejo || preset.chone);
 }
 
+export function buildFreeMasterPublicDashboardUrl() {
+  const url = new URL(PUBLIC_DASHBOARD_URL);
+  url.searchParams.set("multi", "1");
+  return url.toString();
+}
+
+export function hasTunnelRegistryUrl() {
+  return Boolean(getTunnelRegistryPublicUrl());
+}
+
 export function buildMasterPublicDashboardUrl(siteUrls = {}) {
+  if (hasTunnelRegistryUrl()) {
+    return buildFreeMasterPublicDashboardUrl();
+  }
+
   const url = new URL(PUBLIC_DASHBOARD_URL);
   url.searchParams.set("multi", "1");
 
@@ -51,6 +65,76 @@ export function resolveSiteApiUrl(siteId, queryValue = "") {
   if (stored) return stored;
 
   return getPresetFixedSiteUrls()[siteId] || "";
+}
+
+export function getTunnelRegistryPublicUrl() {
+  return normalizePublicBackendUrl(
+    import.meta.env.VITE_TUNNEL_REGISTRY_URL ?? "",
+  );
+}
+
+export async function fetchTunnelRegistryUrls() {
+  const registryUrl = getTunnelRegistryPublicUrl();
+  if (!registryUrl) return {};
+
+  try {
+    const response = await fetch(registryUrl, { cache: "no-store" });
+    if (!response.ok) return {};
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object") return {};
+
+    return Object.fromEntries(
+      PUBLIC_SITES.map((site) => [
+        site.id,
+        normalizePublicBackendUrl(payload[site.id] ?? ""),
+      ]).filter(([, value]) => Boolean(value)),
+    );
+  } catch {
+    return {};
+  }
+}
+
+export async function resolvePublicSiteEntries() {
+  migrateLegacyPublicDashboardStorage();
+  const registryUrls = await fetchTunnelRegistryUrls();
+  const params = new URLSearchParams(
+    typeof window !== "undefined" ? window.location.search : "",
+  );
+  const mode = getPublicDashboardMode();
+
+  if (mode === "single") {
+    const api = normalizePublicBackendUrl(params.get("api"));
+    const siteParam = params.get("site")?.trim();
+    const siteId = isBranchSiteId(siteParam) ? siteParam : "";
+
+    if (api && siteId) {
+      writeSiteApiUrl(siteId, api);
+    }
+
+    const site = getPublicSiteById(siteId);
+    if (!site) return [];
+
+    return [
+      {
+        ...site,
+        apiUrl: api || registryUrls[site.id] || readSiteApiUrl(site.id),
+      },
+    ];
+  }
+
+  return PUBLIC_SITES.map((site) => {
+    const fromQuery = params.get(`api_${site.id}`);
+    const apiUrl = registryUrls[site.id] || resolveSiteApiUrl(site.id, fromQuery);
+
+    if (apiUrl) {
+      writeSiteApiUrl(site.id, apiUrl);
+    }
+
+    return {
+      ...site,
+      apiUrl,
+    };
+  });
 }
 
 export function isPublicPagesHost() {

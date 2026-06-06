@@ -164,12 +164,12 @@ Antes de desplegar:
 
 La URL del sitio en este repositorio queda bajo `/Barril/`.
 
-## Dashboard del dueno (multi-sede)
+## Dashboard del dueno (multi-sede) — 100% gratis
 
-Link fijo para ver Portoviejo y Chone desde cualquier internet:
+Link fijo del dueno:
 
 `https://jhostinsantana.github.io/Barril/?multi=1`
 
-El tunel remoto arranca solo al levantar el servidor (sin botones). En cada laptop crea `apps/server/.env` con `BARRIL_BRANCH_SITE_ID=portoviejo` o `chone`. Para que la URL no cambie al reiniciar, configura `BARRIL_PUBLIC_URL` y `CLOUDFLARE_TUNNEL_TOKEN` (guia abajo).
+Setup gratis sin pagar dominio: [docs/setup-gratis.md](docs/setup-gratis.md)
 
-Guia para tunel HTTPS fijo (ver desde casa sin URL que cambie): [docs/tunel-fijo-cloudflare.md](docs/tunel-fijo-cloudflare.md)
+Tunel con dominio fijo (opcional, de pago): [docs/tunel-fijo-cloudflare.md](docs/tunel-fijo-cloudflare.md)

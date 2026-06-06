@@ -24,6 +24,7 @@ jobs:
       VITE_SOCKET_URL: ${{ secrets.VITE_SOCKET_URL }}
       VITE_SITE_URL_PORTOVIEJO: ${{ secrets.VITE_SITE_URL_PORTOVIEJO }}
       VITE_SITE_URL_CHONE: ${{ secrets.VITE_SITE_URL_CHONE }}
+      VITE_TUNNEL_REGISTRY_URL: ${{ secrets.VITE_TUNNEL_REGISTRY_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

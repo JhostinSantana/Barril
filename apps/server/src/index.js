@@ -37,6 +37,7 @@ import {
     vacuumDatabase,
 } from "./database.js";
 import { printKitchenTicket } from "./printer.js";
+import { publishTunnelUrlToRegistry } from "./tunnelRegistry.js";
 import {
     calculateOrderTotal,
     defaultTableForServiceType,
@@ -119,6 +120,10 @@ async function registerTunnelUrl(publicUrl) {
   if (branchSiteId) {
     await setSetting(`sitePublicUrl_${branchSiteId}`, publicUrl);
     await updateOwnerDashboardUrlForSite(branchSiteId, publicUrl);
+    publishTunnelUrlToRegistry(branchSiteId, publicUrl).catch((error) => {
+      // eslint-disable-next-line no-console
+      console.error("Tunnel registry update failed", error);
+    });
   }
   io.emit("tunnel:updated", getTunnelStatus());
   notifyTunnelWaiters();
@@ -166,7 +171,24 @@ async function readOwnerDashboardUrls() {
   }
 }
 
+function buildFreeMasterPublicDashboardUrl() {
+  const url = new URL("https://jhostinsantana.github.io/Barril/");
+  url.searchParams.set("multi", "1");
+  return url.toString();
+}
+
+function isTunnelRegistryConfigured() {
+  return Boolean(
+    `${process.env.GITHUB_TUNNEL_GIST_ID ?? ""}`.trim() &&
+      `${process.env.GITHUB_TUNNEL_GIST_TOKEN ?? ""}`.trim(),
+  );
+}
+
 function buildPermanentMasterDashboardUrl(siteUrls = {}) {
+  if (isTunnelRegistryConfigured()) {
+    return buildFreeMasterPublicDashboardUrl();
+  }
+
   const url = new URL("https://jhostinsantana.github.io/Barril/");
   url.searchParams.set("multi", "1");
 
@@ -512,9 +534,10 @@ app.get("/api/network-info", async (_, res, next) => {
     const ownerDashboardUrls = await readOwnerDashboardUrls();
     const permanentMasterDashboardUrl =
       buildPermanentMasterDashboardUrl(ownerDashboardUrls);
-    const permanentLinkReady = VALID_BRANCH_SITE_IDS.every(
-      (siteId) => ownerDashboardUrls[siteId],
-    );
+    const tunnelRegistryConfigured = isTunnelRegistryConfigured();
+    const permanentLinkReady =
+      tunnelRegistryConfigured ||
+      VALID_BRANCH_SITE_IDS.every((siteId) => ownerDashboardUrls[siteId]);
     res.json({
       localIp,
       localApiUrl: `http://${localIp}:4000`,
@@ -525,6 +548,9 @@ app.get("/api/network-info", async (_, res, next) => {
       ownerDashboardUrls,
       permanentMasterDashboardUrl,
       permanentLinkReady,
+      tunnelRegistryConfigured,
+      tunnelRegistryPublicUrl:
+        `${process.env.TUNNEL_REGISTRY_PUBLIC_URL ?? ""}`.trim() || null,
       tunnel,
     });
   } catch (error) {

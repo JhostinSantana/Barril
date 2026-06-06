@@ -21,6 +21,7 @@ import {
 } from "../../server/src/utils.js";
 import {
   buildBranchPublicDashboardUrl,
+  buildFreeMasterPublicDashboardUrl,
   buildMasterPublicDashboardUrl,
   buildMultiSiteStatusLabel,
   clearPublicDashboardPinSession,
@@ -31,12 +32,14 @@ import {
   getPresetFixedSiteUrls,
   getPublicDashboardMode,
   hasPresetFixedSiteUrls,
+  hasTunnelRegistryUrl,
   isPublicDashboardPinSessionValid,
   isPublicPagesView,
   isBranchSiteId,
   markPublicDashboardPinSession,
   normalizePublicBackendUrl,
-  parsePublicSiteEntriesFromUrl,
+  resolvePublicSiteEntries,
+  resolveSiteApiUrl,
   PUBLIC_SITES,
   readBranchSiteId,
   writeBranchSiteId,
@@ -1225,9 +1228,14 @@ function App() {
       : "";
   const masterPublicDashboardUrl =
     networkInfo.permanentMasterDashboardUrl ||
-    buildMasterPublicDashboardUrl(networkInfo.ownerDashboardUrls ?? {});
+    (networkInfo.tunnelRegistryConfigured || hasTunnelRegistryUrl()
+      ? buildFreeMasterPublicDashboardUrl()
+      : buildMasterPublicDashboardUrl(networkInfo.ownerDashboardUrls ?? {}));
   const permanentLinkReady =
-    Boolean(networkInfo.permanentLinkReady) || hasPresetFixedSiteUrls();
+    Boolean(networkInfo.permanentLinkReady) ||
+    Boolean(networkInfo.tunnelRegistryConfigured) ||
+    hasTunnelRegistryUrl() ||
+    hasPresetFixedSiteUrls();
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1993,7 +2001,7 @@ function App() {
   }, []);
 
   const refreshPublicMultiSiteDashboard = useCallback(async () => {
-    const entries = parsePublicSiteEntriesFromUrl();
+    const entries = await resolvePublicSiteEntries();
     const nextRuntime = createInitialPublicSiteRuntime();
     let anyConnected = false;
 
@@ -4974,11 +4982,13 @@ function App() {
                           ? "Error"
                           : "Preparando"}
                   </strong>
-                  {tunnelStatus.mode === "named" || tunnelStatus.fixedPublicUrl
-                    ? " · URL fija configurada"
-                    : tunnelStatus.publicUrl
-                      ? " · URL temporal Cloudflare"
-                      : ""}
+                  {networkInfo.tunnelRegistryConfigured
+                    ? " · Registro GitHub activo"
+                    : tunnelStatus.mode === "named" || tunnelStatus.fixedPublicUrl
+                      ? " · URL fija configurada"
+                      : tunnelStatus.publicUrl
+                        ? " · URL temporal Cloudflare"
+                        : ""}
                 </p>
                 {tunnelStatus.error ? (
                   <p style={{ color: "#b42318", fontWeight: 700 }}>
@@ -5118,6 +5128,75 @@ function App() {
                     <div className="actions">
                       <button type="button" onClick={requestDashboardLinkAccess}>
                         Mostrar con PIN admin
+                      </button>
+                    </div>
+                  </div>
+                ) : networkInfo.tunnelRegistryConfigured ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <p style={{ fontWeight: 700 }}>
+                      Modo gratis activo: las URLs se actualizan solas en GitHub.
+                    </p>
+                    <p style={{ wordBreak: "break-all" }}>
+                      {masterPublicDashboardUrl}
+                    </p>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: "#fff",
+                          padding: 12,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <QRCode value={masterPublicDashboardUrl} />
+                      </div>
+                    </div>
+                    <p>
+                      Guarda este favorito en el celular del dueno. Aunque
+                      reinicies el servidor, el dashboard encuentra las dos sedes
+                      leyendo el registro gratis de GitHub.
+                    </p>
+                    <div className="actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyToClipboard(
+                            masterPublicDashboardUrl,
+                            "link gratis multi-sede",
+                          )
+                        }
+                      >
+                        Copiar link del dueno
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() =>
+                          window.open(
+                            masterPublicDashboardUrl,
+                            "_blank",
+                            "noopener,noreferrer",
+                          )
+                        }
+                      >
+                        Abrir dashboard
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={lockSensitiveDashboardLinks}
+                      >
+                        Ocultar enlaces
                       </button>
                     </div>
                   </div>
