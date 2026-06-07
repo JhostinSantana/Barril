@@ -111,6 +111,14 @@ function notifyTunnelWaiters(error = null) {
   });
 }
 
+async function syncTunnelUrlToRegistry(siteId, publicUrl) {
+  if (!siteId || !publicUrl || !isTunnelRegistryConfigured()) return;
+  publishTunnelUrlToRegistry(siteId, publicUrl).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error("Tunnel registry update failed", error);
+  });
+}
+
 async function registerTunnelUrl(publicUrl) {
   tunnelState.status = "running";
   tunnelState.publicUrl = publicUrl;
@@ -120,10 +128,7 @@ async function registerTunnelUrl(publicUrl) {
   if (branchSiteId) {
     await setSetting(`sitePublicUrl_${branchSiteId}`, publicUrl);
     await updateOwnerDashboardUrlForSite(branchSiteId, publicUrl);
-    publishTunnelUrlToRegistry(branchSiteId, publicUrl).catch((error) => {
-      // eslint-disable-next-line no-console
-      console.error("Tunnel registry update failed", error);
-    });
+    await syncTunnelUrlToRegistry(branchSiteId, publicUrl);
   }
   io.emit("tunnel:updated", getTunnelStatus());
   notifyTunnelWaiters();
@@ -218,6 +223,10 @@ async function bootstrapPublicAccess() {
     const persistedPublicUrl = `${(await getSetting("publicApiUrl")) ?? ""}`.trim();
     if (persistedPublicUrl) {
       tunnelState.publicUrl = persistedPublicUrl;
+      const branchSiteId = await resolveBranchSiteId();
+      if (branchSiteId) {
+        await syncTunnelUrlToRegistry(branchSiteId, persistedPublicUrl);
+      }
     }
   }
 
@@ -645,6 +654,7 @@ app.patch("/api/network-info/branch-site", async (req, res, next) => {
     if (publicApiUrl) {
       await setSetting(`sitePublicUrl_${branchSiteId}`, publicApiUrl);
       await updateOwnerDashboardUrlForSite(branchSiteId, publicApiUrl);
+      await syncTunnelUrlToRegistry(branchSiteId, publicApiUrl);
     }
 
     const ownerDashboardUrls = await readOwnerDashboardUrls();
