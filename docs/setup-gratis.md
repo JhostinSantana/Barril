@@ -28,7 +28,15 @@ Ese link **nunca cambia**. Pide PIN de administrador al abrir.
 
 3. Guarda y copia el **ID del gist** (lo ultimo de la URL).
 4. Crea un token gratis: GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained token** con permiso **Gists: Read and write**.
-5. Abre el Gist → boton **Raw** → copia la URL raw (termina en `/raw/.../barril-tunnel-urls.json`).
+5. Abre el Gist → boton **Raw** → copia la URL raw (termina en `/raw/barril-tunnel-urls.json`).
+
+**Importante:** usa la URL **sin** el codigo largo del medio. Correcto:
+
+`https://gist.githubusercontent.com/TU_USUARIO/ID/raw/barril-tunnel-urls.json`
+
+Incorrecto (queda congelada en la version vieja):
+
+`https://gist.githubusercontent.com/TU_USUARIO/ID/raw/3d5eb031.../barril-tunnel-urls.json`
 
 ---
 

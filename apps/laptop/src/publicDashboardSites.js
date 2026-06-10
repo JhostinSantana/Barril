@@ -67,8 +67,18 @@ export function resolveSiteApiUrl(siteId, queryValue = "") {
   return getPresetFixedSiteUrls()[siteId] || "";
 }
 
+export function normalizeGistRawUrl(value) {
+  const url = normalizePublicBackendUrl(value);
+  if (!url.includes("gist.githubusercontent.com")) return url;
+
+  return url.replace(
+    /(\/raw\/)[0-9a-f]{40}(\/[^/?#]+)/i,
+    "$1$2",
+  );
+}
+
 export function getTunnelRegistryPublicUrl() {
-  return normalizePublicBackendUrl(
+  return normalizeGistRawUrl(
     import.meta.env.VITE_TUNNEL_REGISTRY_URL ?? "",
   );
 }
