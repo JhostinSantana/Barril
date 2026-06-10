@@ -31,6 +31,7 @@ import {
     restoreData,
     setSetting,
     setWaiterActive,
+    syncMenuForBranch,
     updateOrderKitchenStatus,
     updateOrderWithItems,
     upsertWaiter,
@@ -42,6 +43,7 @@ import {
     calculateOrderTotal,
     defaultTableForServiceType,
     detectDuplicateOrders,
+    getBranchMenuLabel,
     getCashClose,
     getDateKey,
     getStats,
@@ -503,11 +505,19 @@ app.get("/", (_, res) => {
 
 app.get("/api/menu", async (_, res, next) => {
   try {
-    const [restaurantName, menu] = await Promise.all([
+    const [restaurantName, menu, menuBranchId, menuVersion] = await Promise.all([
       getRestaurantName(),
       getMenu(),
+      getSetting("menuBranchId"),
+      getSetting("menuVersion"),
     ]);
-    res.json({ restaurantName, menu });
+    res.json({
+      restaurantName,
+      menu,
+      menuBranchId: menuBranchId ?? null,
+      menuVersion: menuVersion ?? null,
+      menuBranchLabel: getBranchMenuLabel(menuBranchId),
+    });
   } catch (error) {
     next(error);
   }
@@ -547,12 +557,19 @@ app.get("/api/network-info", async (_, res, next) => {
     const permanentLinkReady =
       tunnelRegistryConfigured ||
       VALID_BRANCH_SITE_IDS.every((siteId) => ownerDashboardUrls[siteId]);
+    const [menuBranchId, menuVersion] = await Promise.all([
+      getSetting("menuBranchId"),
+      getSetting("menuVersion"),
+    ]);
     res.json({
       localIp,
       localApiUrl: `http://${localIp}:4000`,
       publicApiUrl,
       branchSiteId,
       branchSiteConfigured: Boolean(branchSiteId),
+      menuBranchId: menuBranchId ?? branchSiteId ?? null,
+      menuVersion: menuVersion ?? null,
+      menuBranchLabel: getBranchMenuLabel(menuBranchId ?? branchSiteId),
       publicUrlIsFixed: Boolean(FIXED_PUBLIC_URL),
       ownerDashboardUrls,
       permanentMasterDashboardUrl,
@@ -650,6 +667,7 @@ app.patch("/api/network-info/branch-site", async (req, res, next) => {
     }
 
     await setSetting("branchSiteId", branchSiteId);
+    await syncMenuForBranch(branchSiteId);
     const publicApiUrl = `${(await getSetting("publicApiUrl")) ?? ""}`.trim();
     if (publicApiUrl) {
       await setSetting(`sitePublicUrl_${branchSiteId}`, publicApiUrl);
@@ -658,10 +676,14 @@ app.patch("/api/network-info/branch-site", async (req, res, next) => {
     }
 
     const ownerDashboardUrls = await readOwnerDashboardUrls();
+    const menuVersion = (await getSetting("menuVersion")) ?? null;
     res.json({
       ok: true,
       branchSiteId,
       publicApiUrl,
+      menuBranchId: branchSiteId,
+      menuVersion,
+      menuBranchLabel: getBranchMenuLabel(branchSiteId),
       ownerDashboardUrls,
       permanentMasterDashboardUrl:
         buildPermanentMasterDashboardUrl(ownerDashboardUrls),

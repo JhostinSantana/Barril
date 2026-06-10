@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sqlite3 from 'sqlite3';
 import {
-    DEFAULT_MENU,
-    DEFAULT_MENU_VERSION,
     DEFAULT_RESTAURANT_NAME,
+    getDefaultMenuForBranch,
+    getMenuVersionKey,
+    isValidBranchSiteId,
     calculateExpensesTotal,
     defaultTableForServiceType,
     inferServiceTypeFromTable,
@@ -525,31 +526,46 @@ export async function initializeDatabase() {
     await run('INSERT INTO settings(key, value) VALUES (?, ?)', ['restaurantName', DEFAULT_RESTAURANT_NAME]);
   }
 
+  const branchSiteId = await resolveMenuBranchId();
+  await syncMenuForBranch(branchSiteId);
+  await repairMispricedOpenOrders();
+}
+
+async function resolveMenuBranchId() {
+  const fromSettings = `${(await getSetting('branchSiteId')) ?? ''}`.trim();
+  if (isValidBranchSiteId(fromSettings)) return fromSettings;
+
+  const fromEnv = `${process.env.BARRIL_BRANCH_SITE_ID ?? ''}`.trim();
+  if (isValidBranchSiteId(fromEnv)) return fromEnv;
+
+  return 'chone';
+}
+
+export async function syncMenuForBranch(branchSiteId) {
+  const branchId = isValidBranchSiteId(branchSiteId) ? branchSiteId : 'chone';
+  const menu = getDefaultMenuForBranch(branchId);
+  const versionKey = getMenuVersionKey(branchId);
   const menuVersionRow = await get('SELECT value FROM settings WHERE key = ?', ['menuVersion']);
   const menuCount = await get('SELECT COUNT(*) AS count FROM menu_items');
-  if ((menuCount?.count ?? 0) === 0 || menuVersionRow?.value !== DEFAULT_MENU_VERSION) {
+
+  if ((menuCount?.count ?? 0) === 0 || menuVersionRow?.value !== versionKey) {
     await run('DELETE FROM menu_items');
-    for (const [index, item] of DEFAULT_MENU.entries()) {
+    for (const [index, item] of menu.entries()) {
       await run(
         'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [item.id, item.name, item.category, item.price, item.pricingMode ?? 'fixed', item.weightFormula ?? null, index]
       );
     }
-
-    await run(
-      `INSERT INTO settings(key, value) VALUES(?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      ['menuVersion', DEFAULT_MENU_VERSION]
-    );
   }
 
-  await syncMissingMenuItems();
-  await syncMenuItemsFromDefault();
-  await repairMispricedOpenOrders();
+  await syncMissingMenuItems(menu);
+  await syncMenuItemsFromDefault(menu, versionKey);
+  await setSetting('menuBranchId', branchId);
+  await setSetting('menuVersion', versionKey);
 }
 
-async function syncMenuItemsFromDefault() {
-  for (const [index, item] of DEFAULT_MENU.entries()) {
+async function syncMenuItemsFromDefault(menu, versionKey) {
+  for (const [index, item] of menu.entries()) {
     await run(
       `UPDATE menu_items
        SET name = ?, category = ?, price = ?, pricing_mode = ?, weight_formula = ?, sort_order = ?
@@ -566,20 +582,16 @@ async function syncMenuItemsFromDefault() {
     );
   }
 
-  await run(
-    `INSERT INTO settings(key, value) VALUES(?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    ['menuVersion', DEFAULT_MENU_VERSION]
-  );
+  await setSetting('menuVersion', versionKey);
 }
 
-async function syncMissingMenuItems() {
+async function syncMissingMenuItems(menu) {
   const existing = await all('SELECT id FROM menu_items');
   const existingIds = new Set(existing.map((row) => row.id));
   const maxSortRow = await get('SELECT COALESCE(MAX(sort_order), -1) AS maxSort FROM menu_items');
   let sortOrder = Number(maxSortRow?.maxSort ?? -1) + 1;
 
-  for (const item of DEFAULT_MENU) {
+  for (const item of menu) {
     if (existingIds.has(item.id)) continue;
 
     await run(

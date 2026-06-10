@@ -10,7 +10,10 @@ export {
 } from "./pricing.js";
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
-export const DEFAULT_MENU_VERSION = "2026-06-03-porciones-extra-moroclo-v1";
+export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
+export const MENU_VERSION_CHONE = "2026-06-03-porciones-extra-moroclo-v1";
+export const MENU_VERSION_PORTOVIEJO = "2026-06-07-portoviejo-menu-v1";
+export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
 
@@ -85,7 +88,7 @@ export function createContainerExpense(quantity = 1) {
   };
 }
 
-export const DEFAULT_MENU = [
+export const DEFAULT_MENU_CHONE = [
   {
     id: "picaditas-probar",
     name: "PARA PROBAR",
@@ -466,6 +469,83 @@ export const DEFAULT_MENU = [
     weightFormula: "corte-t-bone",
   },
 ];
+
+/** @deprecated Usa getDefaultMenuForBranch(branchSiteId) */
+export const DEFAULT_MENU = DEFAULT_MENU_CHONE;
+
+const PORTOVIEJO_PRICE_OVERRIDES = {
+  "picaditas-probar": 3.0,
+  "picaditas-picar": 4.0,
+  "picaditas-gozar": 5.5,
+  "picaditas-familiar": 10.5,
+  "picaditas-fritas": 1.5,
+  "picaditas-patacones": 1.5,
+  "fuerte-bestia": 24.5,
+  "bebida-agua": 0.75,
+  "bebida-jugo-frozen": 1.5,
+  "bebida-gaseosa-personal": 1.0,
+  "bebida-fuze-te": 1.0,
+  "bebida-del-valle": 0.75,
+  "bebida-gaseosa-1l": 2.0,
+  "postres-porcion": 2.25,
+  "fuerte-taco-taco": 3.25,
+  "fuerte-costillitas": 5.5,
+  "fuerte-come-solo": 5.0,
+  "fuerte-come-bien": 6.0,
+  "extra-chicloso": 3.0,
+  "extra-moro": 2.5,
+  "extra-moroclo": 1.75,
+  "extra-choclo": 2.5,
+  "extra-pan": 1.0,
+  "extra-ensalada": 1.0,
+  "extra-papa": 1.5,
+  "extra-pina": 1.5,
+  "extra-c-parri": 1.5,
+  "extra-longaniza": 2.0,
+  "extra-c-f-hierb": 2.0,
+  "extra-cerdo": 2.5,
+  "extra-costilla": 3.0,
+  "extra-papas-fritas": 3.0,
+  "extra-patacones": 2.5,
+  "entrada-salchipapa": 3.5,
+  "entrada-patacones-chicle": 3.5,
+  "entrada-papas-cheddar": 3.5,
+  "entrada-maduro-chicle": 3.5,
+};
+
+export const DEFAULT_MENU_PORTOVIEJO = DEFAULT_MENU_CHONE.map((item) => ({
+  ...item,
+  price: Object.hasOwn(PORTOVIEJO_PRICE_OVERRIDES, item.id)
+    ? PORTOVIEJO_PRICE_OVERRIDES[item.id]
+    : item.price,
+}));
+
+export function isValidBranchSiteId(branchSiteId) {
+  return BRANCH_SITE_IDS.includes(`${branchSiteId ?? ""}`.trim());
+}
+
+export function getDefaultMenuForBranch(branchSiteId) {
+  return branchSiteId === "portoviejo"
+    ? DEFAULT_MENU_PORTOVIEJO
+    : DEFAULT_MENU_CHONE;
+}
+
+export function getMenuVersionForBranch(branchSiteId) {
+  return branchSiteId === "portoviejo"
+    ? MENU_VERSION_PORTOVIEJO
+    : MENU_VERSION_CHONE;
+}
+
+export function getMenuVersionKey(branchSiteId) {
+  const branchId = isValidBranchSiteId(branchSiteId) ? branchSiteId : "chone";
+  return `${branchId}:${getMenuVersionForBranch(branchId)}`;
+}
+
+export function getBranchMenuLabel(branchSiteId) {
+  if (branchSiteId === "portoviejo") return "Barril Portoviejo";
+  if (branchSiteId === "chone") return "Barril Chone";
+  return "Sin sede";
+}
 
 function roundMoney(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;

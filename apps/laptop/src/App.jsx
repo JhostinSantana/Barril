@@ -2825,9 +2825,13 @@ function App() {
         ...current,
         branchSiteId: nextSiteId,
         branchSiteConfigured: true,
+        menuBranchId: result.menuBranchId ?? nextSiteId,
+        menuVersion: result.menuVersion ?? "",
+        menuBranchLabel: result.menuBranchLabel ?? "",
       }));
+      await loadCashView({ silent: true });
       setNetworkStatus(
-        `Sede confirmada: ${PUBLIC_SITES.find((site) => site.id === nextSiteId)?.name ?? nextSiteId}. Ya puedes mostrar los enlaces del dashboard.`,
+        `Sede confirmada: ${PUBLIC_SITES.find((site) => site.id === nextSiteId)?.name ?? nextSiteId}. Menu activo: ${result.menuBranchLabel ?? nextSiteId}.`,
       );
     } catch (error) {
       setNetworkStatus(`No se pudo guardar la sede: ${error.message}`);
@@ -4940,10 +4944,22 @@ function App() {
                   </button>
                 </div>
                 {branchSiteConfigured ? (
-                  <p style={{ marginTop: 10, fontWeight: 700 }}>
-                    Sede activa en este servidor:{" "}
-                    {PUBLIC_SITES.find((site) => site.id === branchSiteId)?.name}
-                  </p>
+                  <>
+                    <p style={{ marginTop: 10, fontWeight: 700 }}>
+                      Sede activa en este servidor:{" "}
+                      {PUBLIC_SITES.find((site) => site.id === branchSiteId)?.name}
+                    </p>
+                    {networkInfo.menuBranchLabel ? (
+                      <p style={{ marginTop: 6 }}>
+                        Menu activo: <strong>{networkInfo.menuBranchLabel}</strong>
+                        {networkInfo.menuVersion ? (
+                          <span style={{ display: "block", fontSize: "0.9em", color: "#5c4a32" }}>
+                            {networkInfo.menuVersion}
+                          </span>
+                        ) : null}
+                      </p>
+                    ) : null}
+                  </>
                 ) : (
                   <p style={{ marginTop: 10, color: "#b42318", fontWeight: 700 }}>
                     Aun no has confirmado la sede de esta laptop.
