@@ -1,0 +1,36 @@
+# =============================================================================
+# INSTRUCCIONES (leer antes de pegar)
+# =============================================================================
+#
+# 1. Este archivo NO se usa tal cual. Debes crear otro archivo llamado:
+#
+#       .env
+#
+#    en ESTA MISMA carpeta:
+#
+#       Barril\apps\server\
+#
+# 2. Copia SOLO las 4 lineas de abajo (sin estos comentarios) al archivo .env
+#
+# 3. Reemplaza PEGA_AQUI_TU_TOKEN por tu token de GitHub (permiso Gists)
+#
+# 4. Guarda .env y reinicia el servidor (npm run dev:hub)
+#
+# 5. Haz esto en AMBAS laptops de trabajo:
+#       - Laptop Portoviejo  -> luego confirmar sede "Barril Portoviejo"
+#       - Laptop Chone       -> luego confirmar sede "Barril Chone"
+#
+# 6. El contenido del .env es EL MISMO en las dos (mismo Gist, mismo token).
+#
+# 7. NO va en la carpeta raiz del proyecto. Va solo en apps\server\.env
+#
+# 8. Laptop de prueba: apagada o sin .env (para que no pise el Gist).
+#
+# =============================================================================
+# COPIA DESDE AQUI HASTA EL FINAL (4 lineas)
+# =============================================================================
+
+GITHUB_TUNNEL_GIST_ID=f2ce64f6b6c35caafac2dfbc99c45677
+GITHUB_TUNNEL_GIST_TOKEN=PEGA_AQUI_TU_TOKEN
+TUNNEL_REGISTRY_PUBLIC_URL=https://gist.githubusercontent.com/JhostinSantana/f2ce64f6b6c35caafac2dfbc99c45677/raw/barril-tunnel-urls.json
+BARRIL_AUTO_START_TUNNEL=1
