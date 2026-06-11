@@ -74,7 +74,12 @@ const CLOUDFLARE_TUNNEL_TOKEN = `${process.env.CLOUDFLARE_TUNNEL_TOKEN ?? ""}`.t
 const BRANCH_SITE_ID = `${process.env.BARRIL_BRANCH_SITE_ID ?? ""}`.trim();
 const AUTO_START_TUNNEL = `${process.env.BARRIL_AUTO_START_TUNNEL ?? "1"}`.trim() !== "0";
 const TUNNEL_AUTO_START_DELAY_MS = Number(process.env.BARRIL_TUNNEL_START_DELAY_MS ?? 4000);
-const VALID_BRANCH_SITE_IDS = new Set(["portoviejo", "chone"]);
+const BRANCH_SITE_ID_LIST = ["portoviejo", "chone"];
+const VALID_BRANCH_SITE_IDS = new Set(BRANCH_SITE_ID_LIST);
+
+function allBranchSitesHaveOwnerUrl(ownerDashboardUrls = {}) {
+  return BRANCH_SITE_ID_LIST.every((siteId) => ownerDashboardUrls[siteId]);
+}
 let tunnelStopRequested = false;
 let tunnelProcess = null;
 let tunnelUrlWaiters = [];
@@ -556,7 +561,7 @@ app.get("/api/network-info", async (_, res, next) => {
     const tunnelRegistryConfigured = isTunnelRegistryConfigured();
     const permanentLinkReady =
       tunnelRegistryConfigured ||
-      [...VALID_BRANCH_SITE_IDS].every((siteId) => ownerDashboardUrls[siteId]);
+      allBranchSitesHaveOwnerUrl(ownerDashboardUrls);
     const [menuBranchId, menuVersion] = await Promise.all([
       getSetting("menuBranchId"),
       getSetting("menuVersion"),
@@ -649,9 +654,7 @@ app.patch("/api/network-info/owner-dashboard-urls", async (req, res, next) => {
       ok: true,
       ownerDashboardUrls: current,
       permanentMasterDashboardUrl: buildPermanentMasterDashboardUrl(current),
-      permanentLinkReady: [...VALID_BRANCH_SITE_IDS].every(
-        (siteId) => current[siteId],
-      ),
+      permanentLinkReady: allBranchSitesHaveOwnerUrl(current),
     });
   } catch (error) {
     next(error);
@@ -687,9 +690,7 @@ app.patch("/api/network-info/branch-site", async (req, res, next) => {
       ownerDashboardUrls,
       permanentMasterDashboardUrl:
         buildPermanentMasterDashboardUrl(ownerDashboardUrls),
-      permanentLinkReady: [...VALID_BRANCH_SITE_IDS].every(
-        (siteId) => ownerDashboardUrls[siteId],
-      ),
+      permanentLinkReady: allBranchSitesHaveOwnerUrl(ownerDashboardUrls),
     });
   } catch (error) {
     next(error);
