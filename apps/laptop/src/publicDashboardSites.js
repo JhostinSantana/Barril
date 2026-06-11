@@ -4,6 +4,8 @@ export const PUBLIC_SITES = [
 ];
 
 export const PUBLIC_DASHBOARD_URL = "https://jhostinsantana.github.io/Barril/";
+export const DEFAULT_TUNNEL_REGISTRY_PUBLIC_URL =
+  "https://gist.githubusercontent.com/JhostinSantana/f2ce64f6b6c35caafac2dfbc99c45677/raw/barril-tunnel-urls.json";
 export const COMBINED_PUBLIC_SITE_ID = "combined";
 
 const LEGACY_SNAPSHOT_KEY = "barril.publicDashboardSnapshot";
@@ -79,7 +81,8 @@ export function normalizeGistRawUrl(value) {
 
 export function getTunnelRegistryPublicUrl() {
   return normalizeGistRawUrl(
-    import.meta.env.VITE_TUNNEL_REGISTRY_URL ?? "",
+    import.meta.env.VITE_TUNNEL_REGISTRY_URL ??
+      DEFAULT_TUNNEL_REGISTRY_PUBLIC_URL,
   );
 }
 
