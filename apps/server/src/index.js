@@ -556,7 +556,7 @@ app.get("/api/network-info", async (_, res, next) => {
     const tunnelRegistryConfigured = isTunnelRegistryConfigured();
     const permanentLinkReady =
       tunnelRegistryConfigured ||
-      VALID_BRANCH_SITE_IDS.every((siteId) => ownerDashboardUrls[siteId]);
+      [...VALID_BRANCH_SITE_IDS].every((siteId) => ownerDashboardUrls[siteId]);
     const [menuBranchId, menuVersion] = await Promise.all([
       getSetting("menuBranchId"),
       getSetting("menuVersion"),
