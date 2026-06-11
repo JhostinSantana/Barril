@@ -1,3 +1,13 @@
+html,
+body,
+.notranslate,
+input,
+textarea,
+select,
+button {
+  translate: no;
+}
+
 .counter {
   font-size: 16px;
   padding: 5px 10px;

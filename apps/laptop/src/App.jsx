@@ -2072,8 +2072,8 @@ function App() {
           runtime?.connected
             ? ""
             : runtime?.snapshot
-              ? "Sin backend activo. Mostrando el ultimo estado guardado."
-              : "Sin datos guardados para esta sede.",
+              ? "Sin conexion ahora (laptop apagada o tunel caido). Datos viejos en pantalla."
+              : "Sin datos para esta sede. Confirma la sede en la laptop y espera el tunel.",
         );
       }
     },
@@ -2099,7 +2099,12 @@ function App() {
       refreshPublicMultiSiteDashboard().catch(() => {
         setNetworkStatus("Sin conexion con las sedes. Mostrando ultimos estados guardados.");
       });
-      return;
+
+      const refreshTimer = window.setInterval(() => {
+        refreshPublicMultiSiteDashboard().catch(() => {});
+      }, 45000);
+
+      return () => window.clearInterval(refreshTimer);
     }
 
     loadPublicDashboardSnapshot().catch(() => {
@@ -3321,7 +3326,10 @@ function App() {
 
 
   return (
-    <div className={publicPagesView ? "public-shell" : "layout"}>
+    <div
+      className={`${publicPagesView ? "public-shell" : "layout"} notranslate`}
+      translate="no"
+    >
       {publicPagesView && !publicRemoteAccessUnlocked ? (
         <section className="public-setup-panel public-pin-gate">
           <p className="security-flag">Acceso restringido</p>
@@ -3403,16 +3411,42 @@ function App() {
               >
                 Ambas sedes
               </button>
-              {PUBLIC_SITES.map((site) => (
-                <button
-                  key={site.id}
-                  type="button"
-                  className={activePublicSite === site.id ? "active" : ""}
-                  onClick={() => handlePublicSiteChange(site.id)}
-                >
-                  {site.shortName}
-                </button>
-              ))}
+              {PUBLIC_SITES.map((site) => {
+                const runtime = publicSiteRuntime[site.id];
+                const siteOnline = Boolean(runtime?.connected);
+                const siteStatus = siteOnline
+                  ? "en linea"
+                  : runtime?.snapshot
+                    ? "sin conexion"
+                    : "sin datos";
+
+                return (
+                  <button
+                    key={site.id}
+                    type="button"
+                    className={activePublicSite === site.id ? "active" : ""}
+                    onClick={() => handlePublicSiteChange(site.id)}
+                    title={`${site.name}: ${siteStatus}`}
+                  >
+                    {site.shortName}
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: "inline-block",
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        marginLeft: 6,
+                        background: siteOnline
+                          ? "#1f8b4c"
+                          : runtime?.snapshot
+                            ? "#c58b00"
+                            : "#b42318",
+                      }}
+                    />
+                  </button>
+                );
+              })}
             </div>
           ) : null}
 
@@ -3536,6 +3570,10 @@ function App() {
                   placeholder="Buscar por cliente, mesa o ID"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  translate="no"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
               </div>
               <button
