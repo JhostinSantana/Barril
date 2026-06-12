@@ -7,6 +7,7 @@ export default defineConfig({
   base: "/Barril/",
   server: {
     port: 5173,
+    host: true,
     proxy: {
       '/api': 'http://localhost:4000',
       '/health': 'http://localhost:4000'
