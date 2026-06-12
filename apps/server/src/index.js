@@ -528,17 +528,71 @@ app.get("/api/menu", async (_, res, next) => {
   }
 });
 
+function isPrivateLanIpv4(ip) {
+  if (ip.startsWith("192.168.")) return true;
+  if (ip.startsWith("10.")) return true;
+  return /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+}
+
+function isVirtualNetworkAdapter(name = "") {
+  return /virtual|vmware|hyper-v|vethernet|loopback|anydesk|tailscale|hamachi|wsl|docker|npcap|bluetooth|vpn|tap|tun/i.test(
+    name,
+  );
+}
+
 function resolveLocalIp() {
   const interfaces = networkInterfaces();
-  for (const values of Object.values(interfaces)) {
-    if (!values) continue;
+  const candidates = [];
+
+  for (const [adapterName, values] of Object.entries(interfaces)) {
+    if (!values || isVirtualNetworkAdapter(adapterName)) continue;
+
     for (const detail of values) {
-      if (detail.family === "IPv4" && !detail.internal) {
-        return detail.address;
+      const family = detail.family;
+      if ((family !== "IPv4" && family !== 4) || detail.internal) continue;
+
+      const ip = detail.address;
+      if (!ip || ip.startsWith("169.254.")) continue;
+
+      let score = 0;
+      if (isPrivateLanIpv4(ip)) score += 100;
+      if (/wi-?fi|wlan|wireless|eth|ethernet|en0|en1/i.test(adapterName)) {
+        score += 20;
       }
+
+      candidates.push({ ip, score, adapterName });
     }
   }
-  return "127.0.0.1";
+
+  candidates.sort((left, right) => right.score - left.score);
+  return candidates[0]?.ip ?? "127.0.0.1";
+}
+
+function resolveLocalIpCandidates() {
+  const interfaces = networkInterfaces();
+  const seen = new Set();
+  const candidates = [];
+
+  for (const [adapterName, values] of Object.entries(interfaces)) {
+    if (!values) continue;
+
+    for (const detail of values) {
+      const family = detail.family;
+      if ((family !== "IPv4" && family !== 4) || detail.internal) continue;
+
+      const ip = detail.address;
+      if (!ip || ip.startsWith("169.254.") || seen.has(ip)) continue;
+
+      seen.add(ip);
+      candidates.push({
+        ip,
+        adapterName,
+        preferred: ip === resolveLocalIp(),
+      });
+    }
+  }
+
+  return candidates;
 }
 
 app.get("/api/dashboard/snapshot", async (_, res, next) => {
@@ -569,6 +623,9 @@ app.get("/api/network-info", async (_, res, next) => {
     res.json({
       localIp,
       localApiUrl: `http://${localIp}:4000`,
+      localApiUrlCandidates: resolveLocalIpCandidates().map(
+        ({ ip }) => `http://${ip}:4000`,
+      ),
       publicApiUrl,
       branchSiteId,
       branchSiteConfigured: Boolean(branchSiteId),
@@ -1522,9 +1579,12 @@ setInterval(performPeriodicBackup, 15 * 60 * 1000);
 // Also run one at startup
 performPeriodicBackup();
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, "0.0.0.0", () => {
+  const localIp = resolveLocalIp();
   // eslint-disable-next-line no-console
   console.log(`Server running on http://localhost:${PORT}`);
+  // eslint-disable-next-line no-console
+  console.log(`LAN access: http://${localIp}:${PORT}`);
 
   bootstrapPublicAccess().catch((error) => {
     // eslint-disable-next-line no-console
