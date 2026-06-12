@@ -130,6 +130,8 @@ async function registerTunnelUrl(publicUrl) {
   tunnelState.status = "running";
   tunnelState.publicUrl = publicUrl;
   tunnelState.error = "";
+  // eslint-disable-next-line no-console
+  console.log(`Tunel activo para meseros/cocina: ${publicUrl}`);
   await setSetting("publicApiUrl", publicUrl);
   const branchSiteId = await resolveBranchSiteId();
   if (branchSiteId) {
@@ -1585,6 +1587,10 @@ httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on http://localhost:${PORT}`);
   // eslint-disable-next-line no-console
   console.log(`LAN access: http://${localIp}:${PORT}`);
+  if (tunnelState.publicUrl) {
+    // eslint-disable-next-line no-console
+    console.log(`Meseros/cocina (tunel): ${tunnelState.publicUrl}`);
+  }
 
   bootstrapPublicAccess().catch((error) => {
     // eslint-disable-next-line no-console
