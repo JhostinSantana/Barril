@@ -9,6 +9,10 @@ if errorlevel 1 (
   exit /b
 )
 
+echo [Barril] Cerrando instancias anteriores...
+taskkill /F /IM node.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
+
 echo [Barril] Abriendo red local para meseros y cocina...
 powershell -NoProfile -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private" 2>nul
 netsh advfirewall firewall delete rule name="Barril API 4000" >nul 2>&1
