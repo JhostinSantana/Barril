@@ -72,7 +72,7 @@ const TUNNEL_PUBLIC_URL_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 const FIXED_PUBLIC_URL = `${process.env.BARRIL_PUBLIC_URL ?? ""}`.trim().replace(/\/+$/, "");
 const CLOUDFLARE_TUNNEL_TOKEN = `${process.env.CLOUDFLARE_TUNNEL_TOKEN ?? ""}`.trim();
 const BRANCH_SITE_ID = `${process.env.BARRIL_BRANCH_SITE_ID ?? ""}`.trim();
-const AUTO_START_TUNNEL = `${process.env.BARRIL_AUTO_START_TUNNEL ?? "1"}`.trim() !== "0";
+const AUTO_START_TUNNEL = `${process.env.BARRIL_AUTO_START_TUNNEL ?? "0"}`.trim() !== "0";
 const TUNNEL_AUTO_START_DELAY_MS = Number(process.env.BARRIL_TUNNEL_START_DELAY_MS ?? 4000);
 const BRANCH_SITE_ID_LIST = ["portoviejo", "chone"];
 const VALID_BRANCH_SITE_IDS = new Set(BRANCH_SITE_ID_LIST);
@@ -130,8 +130,6 @@ async function registerTunnelUrl(publicUrl) {
   tunnelState.status = "running";
   tunnelState.publicUrl = publicUrl;
   tunnelState.error = "";
-  // eslint-disable-next-line no-console
-  console.log(`Tunel activo para meseros/cocina: ${publicUrl}`);
   await setSetting("publicApiUrl", publicUrl);
   const branchSiteId = await resolveBranchSiteId();
   if (branchSiteId) {
@@ -1585,16 +1583,12 @@ setInterval(performPeriodicBackup, 15 * 60 * 1000);
 // Also run one at startup
 performPeriodicBackup();
 
-httpServer.listen(PORT, "0.0.0.0", () => {
+httpServer.listen(PORT, () => {
   const localIp = resolveLocalIp();
   // eslint-disable-next-line no-console
   console.log(`Server running on http://localhost:${PORT}`);
   // eslint-disable-next-line no-console
-  console.log(`LAN access: http://${localIp}:${PORT}`);
-  if (tunnelState.publicUrl) {
-    // eslint-disable-next-line no-console
-    console.log(`Meseros/cocina (tunel): ${tunnelState.publicUrl}`);
-  }
+  console.log(`Meseros/cocina: http://${localIp}:${PORT}`);
 
   bootstrapPublicAccess().catch((error) => {
     // eslint-disable-next-line no-console
