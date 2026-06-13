@@ -558,9 +558,9 @@ function resolveLocalIp() {
 
       let score = 0;
       if (isPrivateLanIpv4(ip)) score += 100;
-      if (/wi-?fi|wlan|wireless|eth|ethernet|en0|en1/i.test(adapterName)) {
-        score += 20;
-      }
+      const name = adapterName.toLowerCase();
+      if (/wi-?fi|wlan|wireless/i.test(name)) score += 80;
+      else if (/eth|ethernet/i.test(name)) score += 10;
 
       candidates.push({ ip, score, adapterName });
     }
@@ -626,7 +626,11 @@ app.get("/api/network-info", async (_, res, next) => {
       localIp,
       localApiUrl: `http://${localIp}:4000`,
       localApiUrlCandidates: resolveLocalIpCandidates().map(
-        ({ ip }) => `http://${ip}:4000`,
+        ({ ip, adapterName }) => ({
+          ip,
+          adapterName,
+          localApiUrl: `http://${ip}:4000`,
+        }),
       ),
       publicApiUrl,
       branchSiteId,

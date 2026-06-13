@@ -1222,14 +1222,6 @@ function App() {
   const publicBackendUrl = normalizePublicBackendUrl(
     publicApiDraft || networkInfo.publicApiUrl,
   );
-  const meseroConnectionUrl =
-    tunnelStatus.status === "running" && publicBackendUrl
-      ? publicBackendUrl
-      : networkInfo.localApiUrl || "";
-  const meseroUsesTunnel =
-    Boolean(publicBackendUrl) &&
-    meseroConnectionUrl === publicBackendUrl &&
-    tunnelStatus.status === "running";
   const publicDashboardUrl =
     branchSiteConfigured && publicBackendUrl
       ? buildBranchPublicDashboardUrl(publicBackendUrl, branchSiteId)
@@ -4924,28 +4916,33 @@ function App() {
               </article>
 
               <article className="order-card">
-                <h4>URL para meseros y cocina</h4>
-                <p>{meseroConnectionUrl || "Cargando..."}</p>
-                {meseroUsesTunnel ? (
-                  <p style={{ marginTop: 8 }}>
-                    Modo tunel HTTPS (el router no deja usar la IP local).
+                <h4>URL local para meseros</h4>
+                <p>{networkInfo.localApiUrl || "Cargando..."}</p>
+                {Array.isArray(networkInfo.localApiUrlCandidates) &&
+                networkInfo.localApiUrlCandidates.length > 1 ? (
+                  <p style={{ marginTop: 8, fontSize: "0.92em" }}>
+                    Si un celular no conecta, prueba otra IP de esta laptop:{" "}
+                    {networkInfo.localApiUrlCandidates
+                      .map((entry) => entry.localApiUrl)
+                      .filter((url) => url !== networkInfo.localApiUrl)
+                      .join(" · ")}
                   </p>
                 ) : null}
                 <div className="actions">
                   <button
                     type="button"
                     onClick={() =>
-                      copyToClipboard(meseroConnectionUrl, "URL de conexion")
+                      copyToClipboard(networkInfo.localApiUrl, "URL local")
                     }
                   >
-                    Copiar URL
+                    Copiar URL local
                   </button>
                 </div>
               </article>
 
               <article className="order-card">
                 <h4>Código QR</h4>
-                {meseroConnectionUrl ? (
+                {networkInfo.localApiUrl ? (
                   <div
                     style={{
                       display: "flex",
@@ -4960,31 +4957,15 @@ function App() {
                         borderRadius: 8,
                       }}
                     >
-                      <QRCode value={meseroConnectionUrl} />
+                      <QRCode value={networkInfo.localApiUrl} />
                     </div>
                     <p style={{ marginTop: 8 }}>
-                      Escanea con meseros o cocina. Si la IP local falla, usa
-                      este QR cuando el tunel este activo.
+                      Escanea este codigo con la app movil para conectar
                     </p>
                   </div>
                 ) : (
                   <p>Cargando...</p>
                 )}
-              </article>
-
-              <article className="order-card">
-                <h4>URL local (solo misma red WiFi)</h4>
-                <p>{networkInfo.localApiUrl || "Cargando..."}</p>
-                <div className="actions">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      copyToClipboard(networkInfo.localApiUrl, "URL local")
-                    }
-                  >
-                    Copiar URL local
-                  </button>
-                </div>
               </article>
 
               <article className="order-card">
