@@ -11,7 +11,18 @@ Proyecto con 3 modulos conectados:
 - Node.js 20+
 - npm 10+
 
-## Instalacion
+## Instalacion en laptop de produccion (ZIP desde GitHub)
+
+Para Portoviejo o Chone por AnyDesk:
+
+1. Descarga ZIP: https://github.com/JhostinSantana/Barril
+2. Extrae en `C:\Barril`
+3. Clic derecho en **`INSTALAR.bat`** → Ejecutar como administrador
+4. Guia completa: [LEEME-INSTALAR.txt](LEEME-INSTALAR.txt)
+
+Cada dia: doble clic en **Iniciar Barril** (Escritorio).
+
+## Instalacion (desarrollo)
 
 ```bash
 npm install
@@ -169,6 +180,8 @@ La URL del sitio en este repositorio queda bajo `/Barril/`.
 Link fijo del dueno:
 
 `https://jhostinsantana.github.io/Barril/?multi=1`
+
+Manual de uso completo: [docs/manual-sistema.md](docs/manual-sistema.md)
 
 Setup gratis sin pagar dominio: [docs/setup-gratis.md](docs/setup-gratis.md)
 

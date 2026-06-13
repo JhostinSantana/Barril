@@ -1,0 +1,65 @@
+================================================================================
+  BARRIL - INSTALACION DESDE ZIP (Portoviejo / Chone)
+================================================================================
+
+REQUISITO: Node.js LTS instalado -> https://nodejs.org
+
+--------------------------------------------------------------------------------
+PASO 1 - Descargar
+--------------------------------------------------------------------------------
+  GitHub: https://github.com/JhostinSantana/Barril
+  Clic en Code -> Download ZIP
+
+--------------------------------------------------------------------------------
+PASO 2 - Extraer
+--------------------------------------------------------------------------------
+  Extrae el ZIP en:  C:\Barril
+
+  Debe quedar asi:
+    C:\Barril\INSTALAR.bat
+    C:\Barril\package.json
+    C:\Barril\apps\...
+
+  NO uses carpetas viejas en Descargas (Barril-master (7), (8), (9)...)
+
+--------------------------------------------------------------------------------
+PASO 3 - Instalar
+--------------------------------------------------------------------------------
+  Clic derecho en INSTALAR.bat -> Ejecutar como administrador
+  Espera a que termine (npm install puede tardar varios minutos).
+
+--------------------------------------------------------------------------------
+PASO 4 - Configurar sede (una vez por laptop)
+--------------------------------------------------------------------------------
+  Se abre el navegador en http://localhost:5173/Barril/
+  Ve a Conectividad:
+    - Portoviejo -> Barril Portoviejo -> Confirmar sede
+    - Chone      -> Barril Chone      -> Confirmar sede
+
+--------------------------------------------------------------------------------
+PASO 5 - Meseros y cocina
+--------------------------------------------------------------------------------
+  Misma WiFi que la laptop.
+  Escanean el QR de Conectividad.
+  O escriben la URL local (ej: http://192.168.100.17:4000)
+
+  Prueba en celular: http://IP_DE_LA_LAPTOP:4000/health
+  Debe mostrar: {"ok":true,"service":"asados-en-el-barril-server"}
+
+--------------------------------------------------------------------------------
+CADA DIA
+--------------------------------------------------------------------------------
+  Doble clic en el Escritorio: Iniciar Barril.bat
+
+--------------------------------------------------------------------------------
+PANEL DEL DUENO (opcional)
+--------------------------------------------------------------------------------
+  Edita apps\server\.env y pon tu token de GitHub en GITHUB_TUNNEL_GIST_TOKEN
+  Link: https://jhostinsantana.github.io/Barril/?multi=1
+  PIN: 040420
+
+--------------------------------------------------------------------------------
+MISMO .env EN LAS DOS LAPTOPS (Portoviejo y Chone)
+  Solo cambia la sede que confirmas en Conectividad.
+
+================================================================================

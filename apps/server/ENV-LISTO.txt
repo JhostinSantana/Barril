@@ -1,0 +1,7 @@
+# Copia este archivo como apps/server/.env
+# Cambia PEGA_AQUI_TU_TOKEN por tu token de GitHub (permiso Gists)
+
+GITHUB_TUNNEL_GIST_ID=f2ce64f6b6c35caafac2dfbc99c45677
+GITHUB_TUNNEL_GIST_TOKEN=PEGA_AQUI_TU_TOKEN
+TUNNEL_REGISTRY_PUBLIC_URL=https://gist.githubusercontent.com/JhostinSantana/f2ce64f6b6c35caafac2dfbc99c45677/raw/barril-tunnel-urls.json
+BARRIL_AUTO_START_TUNNEL=0
