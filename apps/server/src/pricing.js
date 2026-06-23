@@ -48,6 +48,7 @@ const MENU_ID_FORMULA_FALLBACK = {
   'corte-costillas-baby-back': WEIGHT_FORMULA_CORTE_AHUMADO,
   'corte-matambre-cerdo': WEIGHT_FORMULA_CORTE_AHUMADO,
   'corte-t-bone-steak': WEIGHT_FORMULA_T_BONE,
+  'corte-ribeye': WEIGHT_FORMULA_T_BONE,
   'corte-filete-pechuga-pollo': WEIGHT_FORMULA_PECHUGA_POLLO,
   'corte-piernitas-pollo': WEIGHT_FORMULA_PECHUGA_POLLO,
   'corte-panceta-cerdo': WEIGHT_FORMULA_PANCETA

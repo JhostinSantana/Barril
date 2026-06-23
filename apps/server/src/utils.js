@@ -11,7 +11,7 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-06-03-porciones-extra-moroclo-v1";
+export const MENU_VERSION_CHONE = "2026-06-23-chone-precios-ribeye-v1";
 export const MENU_VERSION_PORTOVIEJO = "2026-06-07-portoviejo-menu-v1";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
@@ -135,7 +135,7 @@ export const DEFAULT_MENU_CHONE = [
     id: "fuerte-bestia",
     name: "PICADITA ESPECIAL LA BESTIA",
     category: "PICADITAS CERDO",
-    price: 24.0,
+    price: 22.0,
     pricingMode: "fixed",
   },
 
@@ -143,7 +143,7 @@ export const DEFAULT_MENU_CHONE = [
     id: "bebida-agua",
     name: "AGUA NATURAL",
     category: "BEBIDAS",
-    price: 0.5,
+    price: 0.75,
     pricingMode: "fixed",
   },
   {
@@ -293,7 +293,7 @@ export const DEFAULT_MENU_CHONE = [
     id: "extra-pan",
     name: "PORCION DE PAN",
     category: "PORCIONES EXTRA",
-    price: 0.5,
+    price: 0.75,
     pricingMode: "fixed",
   },
   {
@@ -335,7 +335,7 @@ export const DEFAULT_MENU_CHONE = [
     id: "extra-cerdo",
     name: "PORCION DE CERDO",
     category: "PORCIONES EXTRA",
-    price: 2.0,
+    price: 2.25,
     pricingMode: "fixed",
   },
   {
@@ -468,6 +468,14 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "weight",
     weightFormula: "corte-t-bone",
   },
+  {
+    id: "corte-ribeye",
+    name: "RIBEYE",
+    category: "CORTES - RES ASADA",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-t-bone",
+  },
 ];
 
 /** @deprecated Usa getDefaultMenuForBranch(branchSiteId) */
@@ -513,7 +521,11 @@ const PORTOVIEJO_PRICE_OVERRIDES = {
   "entrada-maduro-chicle": 3.5,
 };
 
-export const DEFAULT_MENU_PORTOVIEJO = DEFAULT_MENU_CHONE.map((item) => ({
+const PORTOVIEJO_EXCLUDED_ITEM_IDS = ["corte-ribeye"];
+
+export const DEFAULT_MENU_PORTOVIEJO = DEFAULT_MENU_CHONE.filter(
+  (item) => !PORTOVIEJO_EXCLUDED_ITEM_IDS.includes(item.id),
+).map((item) => ({
   ...item,
   price: Object.hasOwn(PORTOVIEJO_PRICE_OVERRIDES, item.id)
     ? PORTOVIEJO_PRICE_OVERRIDES[item.id]
