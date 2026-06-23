@@ -495,6 +495,46 @@ async function publishDashboardSnapshot() {
   io.emit("dashboard:snapshot", await buildDashboardSnapshot());
 }
 
+// El snapshot del dashboard recalcula todo el historial (estadisticas, cierres,
+// etc.). Recalcularlo en cada comanda satura el servidor cuando hay mucho
+// trafico. Con este "debounce" agrupamos rafagas de pedidos y publicamos como
+// maximo una vez cada DASHBOARD_SNAPSHOT_DEBOUNCE_MS, sin bloquear la respuesta
+// al mesero ni el aviso a cocina.
+const DASHBOARD_SNAPSHOT_DEBOUNCE_MS = 1200;
+let dashboardSnapshotTimer = null;
+let dashboardSnapshotPending = false;
+let dashboardSnapshotRunning = false;
+
+async function runDashboardSnapshot() {
+  if (dashboardSnapshotRunning) {
+    dashboardSnapshotPending = true;
+    return;
+  }
+  dashboardSnapshotRunning = true;
+  try {
+    await publishDashboardSnapshot();
+  } catch (error) {
+    console.error("No se pudo publicar el snapshot del dashboard:", error);
+  } finally {
+    dashboardSnapshotRunning = false;
+    if (dashboardSnapshotPending) {
+      dashboardSnapshotPending = false;
+      scheduleDashboardSnapshot();
+    }
+  }
+}
+
+function scheduleDashboardSnapshot(delayMs = DASHBOARD_SNAPSHOT_DEBOUNCE_MS) {
+  if (dashboardSnapshotTimer) {
+    dashboardSnapshotPending = true;
+    return;
+  }
+  dashboardSnapshotTimer = setTimeout(() => {
+    dashboardSnapshotTimer = null;
+    void runDashboardSnapshot();
+  }, delayMs);
+}
+
 app.get("/health", (_, res) => {
   res.json({ ok: true, service: "asados-en-el-barril-server" });
 });
@@ -824,7 +864,7 @@ app.patch("/api/settings/cash-session", async (req, res, next) => {
     };
 
     await setSetting("cashSession", JSON.stringify(nextValue));
-    await publishDashboardSnapshot();
+    scheduleDashboardSnapshot();
     res.json(nextValue);
   } catch (error) {
     next(error);
@@ -1019,7 +1059,8 @@ app.post("/api/orders", async (req, res, next) => {
     };
 
       await createOrder(order);
-      await publishDashboardSnapshot();
+    // Avisar a cocina y responder al mesero de inmediato; el snapshot del
+    // dashboard (pesado) se publica en segundo plano para no demorar la comanda.
     io.emit("order:new", order);
     res
       .status(201)
@@ -1027,6 +1068,7 @@ app.post("/api/orders", async (req, res, next) => {
         ...order,
         printer: { printed: false, reason: "awaiting-laptop-auto-print" },
       });
+    scheduleDashboardSnapshot();
   } catch (error) {
     next(error);
   }
@@ -1137,8 +1179,8 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
     if (updatedOrder.status === "paid") {
       io.emit("order:paid", updatedOrder);
     }
-      await publishDashboardSnapshot();
     res.json(updatedOrder);
+    scheduleDashboardSnapshot();
   } catch (error) {
     if (error?.code === "ORDER_LOCKED") {
       res.status(409).json({ message: error.message });
@@ -1186,8 +1228,8 @@ app.patch("/api/orders/:orderId/kitchen-status", async (req, res, next) => {
 
     const updatedOrder = await updateOrderKitchenStatus(orderId, kitchenStatus);
     io.emit("order:kitchen-updated", updatedOrder);
-      await publishDashboardSnapshot();
     res.json(updatedOrder);
+    scheduleDashboardSnapshot();
   } catch (error) {
     if (error?.code === "INVALID_KITCHEN_STATUS") {
       res.status(400).json({ message: error.message });
@@ -1215,8 +1257,8 @@ app.patch("/api/orders/:orderId/dispatch", async (req, res, next) => {
 
     io.emit("order:dispatched", updatedOrder);
     io.emit("order:updated", updatedOrder);
-      await publishDashboardSnapshot();
     res.json(updatedOrder);
+    scheduleDashboardSnapshot();
   } catch (error) {
     if (
       error?.code === "NOT_PICKUP_ORDER" ||
@@ -1360,8 +1402,8 @@ app.patch("/api/orders/:orderId/pay", async (req, res, next) => {
       io.emit("order:paid", updatedOrder);
     }
 
-    await publishDashboardSnapshot();
     res.json(updatedOrder);
+    scheduleDashboardSnapshot();
   } catch (error) {
     next(error);
   }
@@ -1401,6 +1443,7 @@ app.delete("/api/orders/:orderId", async (req, res, next) => {
 
     io.emit("order:updated", { id: orderId, deleted: true });
     res.json({ ok: true, orderId });
+    scheduleDashboardSnapshot();
   } catch (error) {
     next(error);
   }
@@ -1426,8 +1469,8 @@ app.get("/api/stats-summary", async (req, res, next) => {
   try {
     const menu = await getMenu();
     const orders = await listOrders();
-        await publishDashboardSnapshot();
     res.json(getStatsSummary(orders, menu));
+    scheduleDashboardSnapshot();
   } catch (error) {
     next(error);
   }
@@ -1561,7 +1604,7 @@ try {
   // ignore
 }
 
-function performPeriodicBackup() {
+async function performPeriodicBackup() {
   try {
     const src = path.join(DATA_DIR, "barril.sqlite");
     if (!fs.existsSync(src)) return;
@@ -1569,7 +1612,9 @@ function performPeriodicBackup() {
     const dest = path.join(BACKUPS_DIR, `barril-${new Date()
       .toISOString()
       .replace(/[:.]/g, "-")}.sqlite`);
-    fs.copyFileSync(src, dest);
+    // Copia asincrona para NO bloquear el event loop mientras se copia toda la
+    // base (importante cuando hay muchos pedidos en simultaneo).
+    await fs.promises.copyFile(src, dest);
     // eslint-disable-next-line no-console
     console.log("Backup saved to", dest);
   } catch (err) {

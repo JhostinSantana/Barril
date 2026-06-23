@@ -344,6 +344,13 @@ export async function initializeDatabase() {
     )
   `);
 
+  // Indices para acelerar las consultas mas usadas (cola de cocina, listados,
+  // carga de items/pagos por pedido). Critico cuando hay muchos pedidos.
+  await run('CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)');
+  await run('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id)');
+  await run('CREATE INDEX IF NOT EXISTS idx_order_payments_order_id ON order_payments(order_id)');
+
   const orderColumns = await all('PRAGMA table_info(orders)');
   if (!orderColumns.some((column) => column.name === 'waiter_name')) {
     await run("ALTER TABLE orders ADD COLUMN waiter_name TEXT NOT NULL DEFAULT ''");
@@ -982,6 +989,34 @@ async function listOrderItemsByOrderIds(orderIds) {
   return itemsByOrderId;
 }
 
+async function listOrderPaymentsByOrderIds(orderIds) {
+  const paymentsByOrderId = new Map();
+  if (!orderIds.length) {
+    return paymentsByOrderId;
+  }
+
+  const placeholders = orderIds.map(() => '?').join(', ');
+  const rows = await all(
+    `SELECT order_id AS orderId, id, payment_method AS paymentMethod, amount, tendered_amount AS tenderedAmount, change_given AS changeGiven, transfer_number AS transferenceNumber, created_at AS createdAt
+     FROM order_payments
+     WHERE order_id IN (${placeholders})
+     ORDER BY order_id ASC, id ASC`,
+    orderIds
+  );
+
+  for (const row of rows) {
+    const { orderId, ...payment } = row;
+    const bucket = paymentsByOrderId.get(orderId);
+    if (bucket) {
+      bucket.push(payment);
+    } else {
+      paymentsByOrderId.set(orderId, [payment]);
+    }
+  }
+
+  return paymentsByOrderId;
+}
+
 export async function listOrdersForKitchen() {
   const rows = await all(
     `SELECT * FROM orders
@@ -1018,11 +1053,14 @@ export async function listOrders({ status, query } = {}) {
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = await all(`SELECT * FROM orders ${where} ORDER BY created_at DESC`, params);
 
-  return Promise.all(
-    rows.map(async (row) => {
-      const [items, payments] = await Promise.all([listOrderItems(row.id), listOrderPayments(row.id)]);
-      return mapOrderRow(row, items, payments);
-    })
+  const orderIds = rows.map((row) => row.id);
+  const [itemsByOrderId, paymentsByOrderId] = await Promise.all([
+    listOrderItemsByOrderIds(orderIds),
+    listOrderPaymentsByOrderIds(orderIds),
+  ]);
+
+  return rows.map((row) =>
+    mapOrderRow(row, itemsByOrderId.get(row.id) ?? [], paymentsByOrderId.get(row.id) ?? [])
   );
 }
 
