@@ -5,10 +5,10 @@ function roundMoney(value) {
 /** 0.00666666666 x gramos x 2 + 2.75 */
 export const WEIGHT_FORMULA_CORTE_AHUMADO = 'corte-ahumado';
 
-/** 0.01265217391 x gramos x 1.50 + 2.75 */
+/** 0.01265217391 x gramos x 2 + 2.75 */
 export const WEIGHT_FORMULA_T_BONE = 'corte-t-bone';
 
-/** 0.00555555555 x gramos x 1.50 + 2.75 */
+/** 0.00555555555 x gramos x 2 + 2.75 */
 export const WEIGHT_FORMULA_PECHUGA_POLLO = 'corte-pechuga-pollo';
 
 /** 0.00777777777 x gramos x 2 + 2.75 */
@@ -20,11 +20,11 @@ export const WEIGHT_FORMULAS = {
     basePrice: 2.75
   },
   [WEIGHT_FORMULA_T_BONE]: {
-    ratePerGram: 0.01265217391 * 1.5,
+    ratePerGram: 0.01265217391 * 2,
     basePrice: 2.75
   },
   [WEIGHT_FORMULA_PECHUGA_POLLO]: {
-    ratePerGram: 0.00555555555 * 1.5,
+    ratePerGram: 0.00555555555 * 2,
     basePrice: 2.75
   },
   [WEIGHT_FORMULA_PANCETA]: {
@@ -35,8 +35,8 @@ export const WEIGHT_FORMULAS = {
 
 export const WEIGHT_FORMULA_LABELS = {
   [WEIGHT_FORMULA_CORTE_AHUMADO]: '0.00666666666 x gramos x 2 + 2.75',
-  [WEIGHT_FORMULA_T_BONE]: '0.01265217391 x gramos x 1.50 + 2.75',
-  [WEIGHT_FORMULA_PECHUGA_POLLO]: '0.00555555555 x gramos x 1.50 + 2.75',
+  [WEIGHT_FORMULA_T_BONE]: '0.01265217391 x gramos x 2 + 2.75',
+  [WEIGHT_FORMULA_PECHUGA_POLLO]: '0.00555555555 x gramos x 2 + 2.75',
   [WEIGHT_FORMULA_PANCETA]: '0.00777777777 x gramos x 2 + 2.75'
 };
 
@@ -50,7 +50,6 @@ const MENU_ID_FORMULA_FALLBACK = {
   'corte-t-bone-steak': WEIGHT_FORMULA_T_BONE,
   'corte-ribeye': WEIGHT_FORMULA_T_BONE,
   'corte-filete-pechuga-pollo': WEIGHT_FORMULA_PECHUGA_POLLO,
-  'corte-piernitas-pollo': WEIGHT_FORMULA_PECHUGA_POLLO,
   'corte-panceta-cerdo': WEIGHT_FORMULA_PANCETA
 };
 

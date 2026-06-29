@@ -1445,6 +1445,25 @@ function App() {
   async function confirmClosingCash() {
     if (!closingCashModal) return;
 
+    if (pendingOrders.length > 0) {
+      const pendingLabels = pendingOrders
+        .slice(0, 5)
+        .map((order) => order.clientName || order.id)
+        .join(", ");
+      const extra =
+        pendingOrders.length > 5 ? ` y ${pendingOrders.length - 5} más` : "";
+      setClosingCashModal((current) =>
+        current
+          ? {
+              ...current,
+              loading: false,
+              error: `No se puede cerrar la caja: hay ${pendingOrders.length} cuenta(s) pendiente(s) por cobrar (${pendingLabels}${extra}). Marca cada cuenta como pagada antes de hacer el cierre.`,
+            }
+          : current,
+      );
+      return;
+    }
+
     if (
       `${closingCashModal.openingCash ?? ""}`.trim() === "" ||
       `${closingCashModal.countedCash ?? ""}`.trim() === "" ||
@@ -3602,7 +3621,12 @@ function App() {
                 const expensesTotal = getOrderExpensesTotal(order);
 
                 return (
-                  <article key={order.id} className="order-card">
+                  <article
+                    key={order.id}
+                    className={`order-card${
+                      needsWeightEntry ? " order-card-needs-weight" : ""
+                    }`}
+                  >
                     <div className="order-head">
                       <span>{order.id}</span>
                       <span>{formatOrderLocation(order)}</span>
@@ -6046,6 +6070,30 @@ function App() {
               </p>
             </div>
 
+            {pendingOrders.length > 0 ? (
+              <div className="closing-blocked-notice">
+                <strong>
+                  No puedes cerrar la caja: hay {pendingOrders.length} cuenta(s)
+                  pendiente(s) por cobrar.
+                </strong>
+                <p>
+                  Marca cada cuenta como pagada en la vista de Caja antes de
+                  realizar el cierre.
+                </p>
+                <ul>
+                  {pendingOrders.slice(0, 6).map((order) => (
+                    <li key={order.id}>
+                      {order.clientName || order.id} ·{" "}
+                      {formatCurrency(order.balanceDue ?? order.total)}
+                    </li>
+                  ))}
+                  {pendingOrders.length > 6 ? (
+                    <li>y {pendingOrders.length - 6} más…</li>
+                  ) : null}
+                </ul>
+              </div>
+            ) : null}
+
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -6123,7 +6171,12 @@ function App() {
               ) : null}
 
               <div className="actions security-actions">
-                <button type="submit" disabled={closingCashModal.loading}>
+                <button
+                  type="submit"
+                  disabled={
+                    closingCashModal.loading || pendingOrders.length > 0
+                  }
+                >
                   Cerrar jornada
                 </button>
                 <button

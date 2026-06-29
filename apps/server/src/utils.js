@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-06-23-chone-precios-ribeye-v1";
-export const MENU_VERSION_PORTOVIEJO = "2026-06-07-portoviejo-menu-v1";
+export const MENU_VERSION_CHONE = "2026-06-28-chone-mix-parrillero-v1";
+export const MENU_VERSION_PORTOVIEJO = "2026-06-28-portoviejo-mix-parrillero-v1";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -253,13 +253,6 @@ export const DEFAULT_MENU_CHONE = [
     price: 5.5,
     pricingMode: "fixed",
   },
-  {
-    id: "fuerte-piernitas-pollo",
-    name: "PIERNITAS DE POLLO",
-    category: "PLATOS FUERTES",
-    price: 6.0,
-    pricingMode: "fixed",
-  },
 
   {
     id: "extra-chicloso",
@@ -476,6 +469,21 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "weight",
     weightFormula: "corte-t-bone",
   },
+
+  {
+    id: "corte-mix-parrillero-uno",
+    name: "MIX PARRILLERO UNO",
+    category: "CORTES DE ASADO",
+    price: 10.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "corte-mix-parrillero-dos",
+    name: "MIX PARRILLERO DOS",
+    category: "CORTES DE ASADO",
+    price: 16.0,
+    pricingMode: "fixed",
+  },
 ];
 
 /** @deprecated Usa getDefaultMenuForBranch(branchSiteId) */
@@ -519,6 +527,8 @@ const PORTOVIEJO_PRICE_OVERRIDES = {
   "entrada-patacones-chicle": 3.5,
   "entrada-papas-cheddar": 3.5,
   "entrada-maduro-chicle": 3.5,
+  "corte-mix-parrillero-uno": 12.0,
+  "corte-mix-parrillero-dos": 18.0,
 };
 
 const PORTOVIEJO_EXCLUDED_ITEM_IDS = ["corte-ribeye"];
