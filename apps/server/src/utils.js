@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-06-28-chone-mix-parrillero-v1";
-export const MENU_VERSION_PORTOVIEJO = "2026-06-28-portoviejo-mix-parrillero-v1";
+export const MENU_VERSION_CHONE = "2026-06-29-chone-reorden-cortes-asado-v1";
+export const MENU_VERSION_PORTOVIEJO = "2026-06-29-portoviejo-reorden-cortes-asado-v1";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -89,6 +89,131 @@ export function createContainerExpense(quantity = 1) {
 }
 
 export const DEFAULT_MENU_CHONE = [
+  {
+    id: "fuerte-taco-taco",
+    name: "TACO TACO",
+    category: "PLATOS FUERTES",
+    price: 2.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "fuerte-costillitas",
+    name: "COSTILLITAS",
+    category: "PLATOS FUERTES",
+    price: 5.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "fuerte-come-solo",
+    name: "COME SOLO",
+    category: "PLATOS FUERTES",
+    price: 4.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "fuerte-come-bien",
+    name: "COME BIEN",
+    category: "PLATOS FUERTES",
+    price: 5.5,
+    pricingMode: "fixed",
+  },
+
+  {
+    id: "corte-panceta-cerdo",
+    name: "PANCETA DE CERDO",
+    category: "CORTES DE ASADO",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-panceta",
+  },
+  {
+    id: "corte-filete-pechuga-pollo",
+    name: "FILETE DE PECHUGA DE POLLO",
+    category: "CORTES DE ASADO",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-pechuga-pollo",
+  },
+  {
+    id: "corte-medallones-bondiola",
+    name: "MEDALLONES DE BONDIOLA",
+    category: "CORTES DE ASADO",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-chuleta-cerdo",
+    name: "CHULETA DE CERDO",
+    category: "CORTES DE ASADO",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-mix-parrillero-uno",
+    name: "MIX PARRILLERO UNO",
+    category: "CORTES DE ASADO",
+    price: 10.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "corte-mix-parrillero-dos",
+    name: "MIX PARRILLERO DOS",
+    category: "CORTES DE ASADO",
+    price: 16.0,
+    pricingMode: "fixed",
+  },
+
+  {
+    id: "corte-lomo-fino",
+    name: "LOMO FINO",
+    category: "CORTES AHUMADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-costillas-san-luis",
+    name: "COSTILLAS SAN LUIS",
+    category: "CORTES AHUMADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-costillas-baby-back",
+    name: "COSTILLAS BABY BACK",
+    category: "CORTES AHUMADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-matambre-cerdo",
+    name: "MATAMBRE",
+    category: "CORTES AHUMADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-t-bone-steak",
+    name: "T BONE STEAK",
+    category: "CORTES - RES ASADA",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-t-bone",
+  },
+  {
+    id: "corte-ribeye",
+    name: "RIBEYE",
+    category: "CORTES - RES ASADA",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-t-bone",
+  },
+
   {
     id: "picaditas-probar",
     name: "PARA PROBAR",
@@ -216,41 +341,11 @@ export const DEFAULT_MENU_CHONE = [
     price: 0.75,
     pricingMode: "fixed",
   },
-
   {
     id: "postres-porcion",
     name: "POSTRES",
-    category: "POSTRES",
+    category: "BEBIDAS",
     price: 1.5,
-    pricingMode: "fixed",
-  },
-
-  {
-    id: "fuerte-taco-taco",
-    name: "TACO TACO",
-    category: "PLATOS FUERTES",
-    price: 2.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-costillitas",
-    name: "COSTILLITAS",
-    category: "PLATOS FUERTES",
-    price: 5.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-come-solo",
-    name: "COME SOLO",
-    category: "PLATOS FUERTES",
-    price: 4.5,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-come-bien",
-    name: "COME BIEN",
-    category: "PLATOS FUERTES",
-    price: 5.5,
     pricingMode: "fixed",
   },
 
@@ -386,102 +481,6 @@ export const DEFAULT_MENU_CHONE = [
     name: "MADURO CON CHICLE",
     category: "ENTRADAS Y ACOMPAÑANTES",
     price: 3.0,
-    pricingMode: "fixed",
-  },
-
-  {
-    id: "corte-medallones-bondiola",
-    name: "MEDALLONES DE BONDIOLA",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-chuleta-cerdo",
-    name: "CHULETA DE CERDO",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-lomo-fino",
-    name: "LOMO FINO",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-costillas-san-luis",
-    name: "COSTILLAS SAN LUIS",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-costillas-baby-back",
-    name: "COSTILLAS BABY BACK",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-matambre-cerdo",
-    name: "MATAMBRE",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-filete-pechuga-pollo",
-    name: "FILETE DE PECHUGA DE POLLO",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-pechuga-pollo",
-  },
-  {
-    id: "corte-panceta-cerdo",
-    name: "PANCETA DE CERDO",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-panceta",
-  },
-  {
-    id: "corte-t-bone-steak",
-    name: "T BONE STEAK",
-    category: "CORTES - RES ASADA",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-t-bone",
-  },
-  {
-    id: "corte-ribeye",
-    name: "RIBEYE",
-    category: "CORTES - RES ASADA",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-t-bone",
-  },
-
-  {
-    id: "corte-mix-parrillero-uno",
-    name: "MIX PARRILLERO UNO",
-    category: "CORTES DE ASADO",
-    price: 10.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "corte-mix-parrillero-dos",
-    name: "MIX PARRILLERO DOS",
-    category: "CORTES DE ASADO",
-    price: 16.0,
     pricingMode: "fixed",
   },
 ];
