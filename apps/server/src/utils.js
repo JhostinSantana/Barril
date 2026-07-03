@@ -12,7 +12,7 @@ export {
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
 export const MENU_VERSION_CHONE = "2026-06-29-chone-reorden-cortes-asado-v1";
-export const MENU_VERSION_PORTOVIEJO = "2026-06-29-portoviejo-reorden-cortes-asado-v1";
+export const MENU_VERSION_PORTOVIEJO = "2026-07-02-portoviejo-precios-picaditas-v1";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -491,19 +491,17 @@ export const DEFAULT_MENU = DEFAULT_MENU_CHONE;
 const PORTOVIEJO_PRICE_OVERRIDES = {
   "picaditas-probar": 3.0,
   "picaditas-picar": 4.0,
-  "picaditas-gozar": 5.5,
-  "picaditas-familiar": 10.5,
+  "picaditas-gozar": 6.0,
+  "picaditas-familiar": 11.0,
   "picaditas-fritas": 1.5,
   "picaditas-patacones": 1.5,
-  "fuerte-bestia": 24.5,
+  "fuerte-bestia": 23.0,
   "bebida-agua": 0.75,
   "bebida-jugo-frozen": 1.5,
   "bebida-gaseosa-personal": 1.0,
   "bebida-fuze-te": 1.0,
-  "bebida-del-valle": 0.75,
-  "bebida-gaseosa-1l": 2.0,
   "postres-porcion": 2.25,
-  "fuerte-taco-taco": 3.25,
+  "fuerte-taco-taco": 3.0,
   "fuerte-costillitas": 5.5,
   "fuerte-come-solo": 5.0,
   "fuerte-come-bien": 6.0,
