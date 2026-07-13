@@ -12,7 +12,7 @@ export {
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
 export const MENU_VERSION_CHONE = "2026-06-29-chone-reorden-cortes-asado-v1";
-export const MENU_VERSION_PORTOVIEJO = "2026-07-02-portoviejo-precios-picaditas-v1";
+export const MENU_VERSION_PORTOVIEJO = "2026-07-13-portoviejo-costillitas-6-v1";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -502,7 +502,7 @@ const PORTOVIEJO_PRICE_OVERRIDES = {
   "bebida-fuze-te": 1.0,
   "postres-porcion": 2.25,
   "fuerte-taco-taco": 3.0,
-  "fuerte-costillitas": 5.5,
+  "fuerte-costillitas": 6.0,
   "fuerte-come-solo": 5.0,
   "fuerte-come-bien": 6.0,
   "extra-chicloso": 3.0,
