@@ -885,9 +885,41 @@ function buildReverseRanking(bucketMap, limit = 10) {
     .slice(0, limit);
 }
 
+export function resolveOrderPaymentCap(order) {
+  const total = roundMoney(order?.total ?? 0);
+  const paidAmount = roundMoney(order?.paidAmount ?? order?.paid_amount ?? 0);
+
+  if (paidAmount > 0) {
+    return total > 0 ? roundMoney(Math.min(paidAmount, total)) : paidAmount;
+  }
+
+  if (`${order?.status ?? ""}` === "paid" && total > 0) return total;
+  if (total > 0) return total;
+  return Number.POSITIVE_INFINITY;
+}
+
+/** Evita que pagos duplicados inflen caja/resumen por encima de lo cobrado. */
+export function capPaymentsToOrderLimit(payments, order) {
+  const list = Array.isArray(payments) ? payments : [];
+  const cap = resolveOrderPaymentCap(order);
+  if (!Number.isFinite(cap)) return list;
+
+  let remaining = cap;
+  const capped = [];
+  for (const payment of list) {
+    if (remaining <= 0) break;
+    const raw = roundMoney(payment?.amount ?? 0);
+    if (raw <= 0) continue;
+    const amount = roundMoney(Math.min(raw, remaining));
+    capped.push({ ...payment, amount });
+    remaining = roundMoney(remaining - amount);
+  }
+  return capped;
+}
+
 function getPaymentEntries(order) {
   const payments = Array.isArray(order.payments) ? order.payments : [];
-  if (payments.length > 0) return payments;
+  if (payments.length > 0) return capPaymentsToOrderLimit(payments, order);
 
   if (order.status !== "paid") return [];
 
@@ -900,7 +932,7 @@ function getPaymentMovements(order) {
   const payments = Array.isArray(order?.payments) ? order.payments : [];
 
   if (payments.length > 0) {
-    return payments.map((payment) => ({
+    return capPaymentsToOrderLimit(payments, order).map((payment) => ({
       orderId: order.id,
       paymentMethod: payment.paymentMethod ?? order.paymentMethod ?? "efectivo",
       amount: roundMoney(payment.amount ?? 0),

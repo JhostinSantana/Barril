@@ -1576,6 +1576,11 @@ app.post("/api/cleanup/all", async (req, res, next) => {
 app.use((error, _, res, __) => {
   // eslint-disable-next-line no-console
   console.error(error);
+  const status = Number(error?.status);
+  if (Number.isInteger(status) && status >= 400 && status < 600) {
+    res.status(status).json({ message: error.message || "Solicitud invalida." });
+    return;
+  }
   res.status(500).json({ message: "Error interno del servidor." });
 });
 

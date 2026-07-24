@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { QRCode } from "react-qr-code";
 import { io } from "socket.io-client";
@@ -500,6 +500,37 @@ function getOrderExpensesTotal(order) {
   );
 }
 
+function resolveOrderPaymentCap(order) {
+  const total = roundMoney(order?.total ?? 0);
+  const paidAmount = roundMoney(order?.paidAmount ?? 0);
+
+  if (paidAmount > 0) {
+    return total > 0 ? roundMoney(Math.min(paidAmount, total)) : paidAmount;
+  }
+
+  if (order?.status === "paid" && total > 0) return total;
+  if (total > 0) return total;
+  return Number.POSITIVE_INFINITY;
+}
+
+function capPaymentsToOrderLimit(payments, order) {
+  const list = Array.isArray(payments) ? payments : [];
+  const cap = resolveOrderPaymentCap(order);
+  if (!Number.isFinite(cap)) return list;
+
+  let remaining = cap;
+  const capped = [];
+  for (const payment of list) {
+    if (remaining <= 0) break;
+    const raw = roundMoney(payment?.amount ?? 0);
+    if (raw <= 0) continue;
+    const amount = roundMoney(Math.min(raw, remaining));
+    capped.push({ ...payment, amount });
+    remaining = roundMoney(remaining - amount);
+  }
+  return capped;
+}
+
 function getOrderPaymentTotals(order) {
   return {
     efectivo: Number(order?.paymentSummary?.efectivo ?? 0),
@@ -515,7 +546,10 @@ function normalizeStatsPaymentMethod(value) {
 }
 
 function getDashboardPaymentMovements(order) {
-  const payments = Array.isArray(order?.payments) ? order.payments : [];
+  const payments = capPaymentsToOrderLimit(
+    Array.isArray(order?.payments) ? order.payments : [],
+    order,
+  );
 
   if (payments.length > 0) {
     return payments
@@ -548,7 +582,13 @@ function getDashboardPaymentMovements(order) {
       createdAt: order.paidAt ?? order.createdAt ?? null,
     }));
 
-  if (summaryMovements.length > 0) return summaryMovements;
+  if (summaryMovements.length > 0) {
+    return capPaymentsToOrderLimit(summaryMovements, order).map((movement) => ({
+      ...movement,
+      orderId: order.id,
+      createdAt: movement.createdAt ?? order.paidAt ?? order.createdAt ?? null,
+    }));
+  }
 
   const fallbackPaymentMethod = normalizeStatsPaymentMethod(order.paymentMethod);
   if (!fallbackPaymentMethod) return [];
@@ -1074,6 +1114,7 @@ function App() {
   const [waiterNameDraft, setWaiterNameDraft] = useState("");
   const [query, setQuery] = useState("");
   const [payingOrder, setPayingOrder] = useState(null);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [selectedPaidOrder, setSelectedPaidOrder] = useState(null);
   const [paymentDraft, setPaymentDraft] = useState({
     paymentMethod: "efectivo",
@@ -2425,6 +2466,7 @@ function App() {
 
   function closePayModal() {
     setPayingOrder(null);
+    setPaymentSubmitting(false);
     setPaymentDraft({
       paymentMethod: "efectivo",
       amount: "",
@@ -2686,7 +2728,7 @@ function App() {
   }
 
   async function registerPayment() {
-    if (!payingOrder || !paymentPreview.canSubmit) return;
+    if (!payingOrder || !paymentPreview.canSubmit || paymentSubmitting) return;
 
     const payload = {
       paymentMethod: paymentDraft.paymentMethod,
@@ -2702,29 +2744,36 @@ function App() {
           : undefined,
     };
 
-    const updatedOrder = await getJson(`/api/orders/${payingOrder.id}/pay`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    setPaymentSubmitting(true);
+    try {
+      const updatedOrder = await getJson(`/api/orders/${payingOrder.id}/pay`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-    if (updatedOrder.status === "paid") {
-      closePayModal();
-    } else {
-      const nextBalance = Number(updatedOrder.balanceDue ?? 0);
-      setPayingOrder(updatedOrder);
-      setPaymentDraft((current) => ({
-        ...current,
-        amount: `${nextBalance}`,
-        tenderedAmount: `${nextBalance}`,
-      }));
+      if (updatedOrder.status === "paid") {
+        closePayModal();
+      } else {
+        const nextBalance = Number(updatedOrder.balanceDue ?? 0);
+        setPayingOrder(updatedOrder);
+        setPaymentDraft((current) => ({
+          ...current,
+          amount: `${nextBalance}`,
+          tenderedAmount: `${nextBalance}`,
+        }));
+      }
+
+      await Promise.all([
+        loadCashView(),
+        loadStatsView(),
+        loadHistoryView(historyDate),
+      ]);
+    } catch (error) {
+      setNetworkStatus(error.message ?? "No se pudo registrar el abono.");
+    } finally {
+      setPaymentSubmitting(false);
     }
-
-    await Promise.all([
-      loadCashView(),
-      loadStatsView(),
-      loadHistoryView(historyDate),
-    ]);
   }
 
   function openDeleteOrderModal(order) {
@@ -5643,9 +5692,9 @@ function App() {
               <button
                 type="button"
                 onClick={registerPayment}
-                disabled={!paymentPreview.canSubmit}
+                disabled={!paymentPreview.canSubmit || paymentSubmitting}
               >
-                Registrar abono
+                {paymentSubmitting ? "Registrando..." : "Registrar abono"}
               </button>
               <button type="button" className="ghost" onClick={closePayModal}>
                 Cerrar

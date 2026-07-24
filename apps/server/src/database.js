@@ -7,6 +7,7 @@ import {
     getMenuVersionKey,
     isValidBranchSiteId,
     calculateExpensesTotal,
+    capPaymentsToOrderLimit,
     defaultTableForServiceType,
     inferServiceTypeFromTable,
     isPickupServiceType,
@@ -106,7 +107,12 @@ function resolvePaymentMethod(paymentSummary, fallback) {
 function mapOrderRow(row, items, payments) {
   const paidAmount = roundMoney(row.paid_amount ?? 0);
   const balanceDue = roundMoney(Math.max(Number(row.total ?? 0) - paidAmount, 0));
-  const paymentSummary = getPaymentSummary(payments);
+  const cappedPayments = capPaymentsToOrderLimit(payments, {
+    total: row.total,
+    paidAmount,
+    status: row.status
+  });
+  const paymentSummary = getPaymentSummary(cappedPayments);
   const editSummary = parseJsonArray(row.edit_summary_json);
   const kitchenFulfilledItems = parseJsonArray(row.kitchen_fulfilled_items_json);
   const comments = parseJsonArray(row.comments_json);
@@ -125,6 +131,7 @@ function mapOrderRow(row, items, payments) {
     kitchenFulfilledItems,
     paymentMethod: resolvePaymentMethod(paymentSummary, row.payment_method),
     paymentSummary,
+    payments: cappedPayments,
     paidAmount,
     balanceDue,
     total: row.total,
@@ -136,8 +143,7 @@ function mapOrderRow(row, items, payments) {
     editSummary,
     editedAt: row.edited_at,
     comments,
-    items,
-    payments
+    items
   };
 }
 
@@ -1087,53 +1093,92 @@ export async function getOrderById(orderId) {
 }
 
 export async function addOrderPayment(orderId, paymentMethod, amount, tenderedAmount, changeGiven, paidAt, transferenceNumber, serviceType) {
-  const order = await getOrderById(orderId);
-  if (!order) return null;
-
-  if (serviceType != null) {
-    const normalizedServiceType = normalizeServiceType(serviceType);
-    if (isPickupServiceType(normalizedServiceType)) {
-      await run(
-        'UPDATE orders SET service_type = ?, table_number = ? WHERE id = ?',
-        [
-          normalizedServiceType,
-          defaultTableForServiceType(normalizedServiceType),
-          orderId
-        ]
-      );
-    } else {
-      await run('UPDATE orders SET service_type = ? WHERE id = ?', [
-        normalizedServiceType,
-        orderId
-      ]);
+  await run('BEGIN IMMEDIATE');
+  try {
+    const order = await getOrderById(orderId);
+    if (!order) {
+      await run('ROLLBACK');
+      return null;
     }
+
+    if (serviceType != null) {
+      const normalizedServiceType = normalizeServiceType(serviceType);
+      if (isPickupServiceType(normalizedServiceType)) {
+        await run(
+          'UPDATE orders SET service_type = ?, table_number = ? WHERE id = ?',
+          [
+            normalizedServiceType,
+            defaultTableForServiceType(normalizedServiceType),
+            orderId
+          ]
+        );
+      } else {
+        await run('UPDATE orders SET service_type = ? WHERE id = ?', [
+          normalizedServiceType,
+          orderId
+        ]);
+      }
+    }
+
+    const remaining = roundMoney(order.balanceDue);
+    const normalizedAmount = roundMoney(amount);
+    const normalizedTendered = roundMoney(tenderedAmount);
+    const normalizedChange = roundMoney(changeGiven);
+
+    if (remaining <= 0) {
+      const error = new Error('La cuenta ya esta completamente pagada.');
+      error.status = 400;
+      throw error;
+    }
+
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      const error = new Error('El monto del abono debe ser mayor a cero.');
+      error.status = 400;
+      throw error;
+    }
+
+    if (normalizedAmount > remaining) {
+      const error = new Error('El abono no puede superar el saldo pendiente.');
+      error.status = 400;
+      throw error;
+    }
+
+    await run(
+      `INSERT INTO order_payments(order_id, payment_method, amount, tendered_amount, change_given, transfer_number, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, paymentMethod, normalizedAmount, normalizedTendered, normalizedChange, transferenceNumber || null, paidAt]
+    );
+
+    const nextPaidAmount = roundMoney(Math.min(order.total, order.paidAmount + normalizedAmount));
+    const nextStatus = nextPaidAmount >= order.total ? 'paid' : 'partial';
+
+    const currentPayments = await listOrderPayments(orderId);
+    const summary = getPaymentSummary(
+      capPaymentsToOrderLimit(currentPayments, {
+        total: order.total,
+        paidAmount: nextPaidAmount,
+        status: nextStatus
+      })
+    );
+    const resolvedMethod = resolvePaymentMethod(summary, paymentMethod);
+
+    await run(
+      `UPDATE orders
+       SET status = ?, payment_method = ?, paid_amount = ?, paid_at = ?
+       WHERE id = ?`,
+      [nextStatus, resolvedMethod, nextPaidAmount, nextStatus === 'paid' ? paidAt : null, orderId]
+    );
+
+    await run('COMMIT');
+    return getOrderById(orderId);
+  } catch (error) {
+    try {
+      await run('ROLLBACK');
+    } catch {
+      // ignore rollback errors
+    }
+    throw error;
   }
-
-  const normalizedAmount = roundMoney(amount);
-  const normalizedTendered = roundMoney(tenderedAmount);
-  const normalizedChange = roundMoney(changeGiven);
-
-  await run(
-    `INSERT INTO order_payments(order_id, payment_method, amount, tendered_amount, change_given, transfer_number, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [orderId, paymentMethod, normalizedAmount, normalizedTendered, normalizedChange, transferenceNumber || null, paidAt]
-  );
-
-  const nextPaidAmount = roundMoney(Math.min(order.total, order.paidAmount + normalizedAmount));
-  const nextStatus = nextPaidAmount >= order.total ? 'paid' : 'partial';
-
-  const currentPayments = await listOrderPayments(orderId);
-  const summary = getPaymentSummary(currentPayments);
-  const resolvedMethod = resolvePaymentMethod(summary, paymentMethod);
-
-  await run(
-    `UPDATE orders
-     SET status = ?, payment_method = ?, paid_amount = ?, paid_at = ?
-     WHERE id = ?`,
-    [nextStatus, resolvedMethod, nextPaidAmount, nextStatus === 'paid' ? paidAt : null, orderId]
-  );
-
-  return getOrderById(orderId);
 }
 
 export async function updateOrderPayment(orderId, paymentMethod, paidAt) {
