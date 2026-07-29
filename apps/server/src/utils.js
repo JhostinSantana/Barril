@@ -11,7 +11,7 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-06-29-chone-reorden-cortes-asado-v1";
+export const MENU_VERSION_CHONE = "2026-07-29-chone-porciones-moro-choclo-v2";
 export const MENU_VERSION_PORTOVIEJO = "2026-07-13-portoviejo-costillitas-6-v1";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
@@ -89,32 +89,90 @@ export function createContainerExpense(quantity = 1) {
 }
 
 export const DEFAULT_MENU_CHONE = [
+  // PICADITAS CERDO primero
+  {
+    id: "picaditas-probar",
+    name: "PARA PROBAR",
+    category: "PICADITAS CERDO",
+    price: 3.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "picaditas-picar",
+    name: "PARA PICAR",
+    category: "PICADITAS CERDO",
+    price: 4.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "picaditas-gozar",
+    name: "PARA GOZAR",
+    category: "PICADITAS CERDO",
+    price: 6.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "picaditas-familiar",
+    name: "PARA ENAMORAR",
+    category: "PICADITAS CERDO",
+    price: 10.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "fuerte-bestia",
+    name: "PICADITA ESPECIAL LA BESTIA",
+    category: "PICADITAS CERDO",
+    price: 25.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "picaditas-fritas",
+    name: "FRITAS",
+    category: "PICADITAS CERDO",
+    price: 1.25,
+    pricingMode: "fixed",
+  },
+  {
+    id: "picaditas-patacones",
+    name: "PATACONES",
+    category: "PICADITAS CERDO",
+    price: 1.25,
+    pricingMode: "fixed",
+  },
+
   {
     id: "fuerte-taco-taco",
-    name: "TACO TACO",
+    name: "TACO",
     category: "PLATOS FUERTES",
-    price: 2.75,
+    price: 3.0,
     pricingMode: "fixed",
   },
   {
     id: "fuerte-costillitas",
-    name: "COSTILLITAS",
+    name: "COSTILLAS",
     category: "PLATOS FUERTES",
-    price: 5.0,
+    price: 6.0,
     pricingMode: "fixed",
   },
   {
     id: "fuerte-come-solo",
     name: "COME SOLO",
     category: "PLATOS FUERTES",
-    price: 4.5,
+    price: 5.0,
     pricingMode: "fixed",
   },
   {
     id: "fuerte-come-bien",
     name: "COME BIEN",
     category: "PLATOS FUERTES",
-    price: 5.5,
+    price: 6.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "fuerte-cambio-arroz",
+    name: "CAMBIO DE ARROZ",
+    category: "PLATOS FUERTES",
+    price: 0.5,
     pricingMode: "fixed",
   },
 
@@ -214,80 +272,10 @@ export const DEFAULT_MENU_CHONE = [
     weightFormula: "corte-t-bone",
   },
 
+  // Bebidas ordenadas de menor a mayor precio
   {
-    id: "picaditas-probar",
-    name: "PARA PROBAR",
-    category: "PICADITAS CERDO",
-    price: 2.5,
-    pricingMode: "fixed",
-  },
-  {
-    id: "picaditas-picar",
-    name: "PARA PICAR",
-    category: "PICADITAS CERDO",
-    price: 3.5,
-    pricingMode: "fixed",
-  },
-  {
-    id: "picaditas-gozar",
-    name: "PARA GOZAR",
-    category: "PICADITAS CERDO",
-    price: 5.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "picaditas-familiar",
-    name: "FAMILIAR",
-    category: "PICADITAS CERDO",
-    price: 10.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "picaditas-fritas",
-    name: "FRITAS",
-    category: "PICADITAS CERDO",
-    price: 1.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "picaditas-patacones",
-    name: "PATACONES",
-    category: "PICADITAS CERDO",
-    price: 1.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-bestia",
-    name: "PICADITA ESPECIAL LA BESTIA",
-    category: "PICADITAS CERDO",
-    price: 22.0,
-    pricingMode: "fixed",
-  },
-
-  {
-    id: "bebida-agua",
-    name: "AGUA NATURAL",
-    category: "BEBIDAS",
-    price: 0.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "bebida-jugo-frozen",
-    name: "JUGO FROZEN",
-    category: "BEBIDAS",
-    price: 1.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "bebida-gaseosa-personal",
-    name: "GASEOSA PERSONAL",
-    category: "BEBIDAS",
-    price: 0.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "bebida-fuze-te",
-    name: "FUZE TE",
+    id: "bebida-cafe",
+    name: "CAFE PASADO",
     category: "BEBIDAS",
     price: 0.75,
     pricingMode: "fixed",
@@ -296,26 +284,68 @@ export const DEFAULT_MENU_CHONE = [
     id: "bebida-del-valle",
     name: "DEL VALLE",
     category: "BEBIDAS",
-    price: 0.5,
+    price: 0.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-agua",
+    name: "AGUA NATURAL",
+    category: "BEBIDAS",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-gaseosa-personal",
+    name: "GASEOSA PERSONAL",
+    category: "BEBIDAS",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-fuze-te",
+    name: "FUZE TE",
+    category: "BEBIDAS",
+    price: 1.0,
     pricingMode: "fixed",
   },
   {
     id: "bebida-gaseosa-1l",
-    name: "GASEOSA DE 1L",
+    name: "GASEOSA DE SABORES 1L",
+    category: "BEBIDAS",
+    price: 1.25,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-jugo-frozen",
+    name: "JUGO FROZEN",
+    category: "BEBIDAS",
+    price: 1.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "postres-porcion",
+    name: "POSTRE",
     category: "BEBIDAS",
     price: 1.75,
     pricingMode: "fixed",
   },
   {
-    id: "bebida-cerveza-sol",
-    name: "CERVEZA SOL",
+    id: "bebida-gaseosa-coca-1-3l",
+    name: "GASEOSA COCA DE 1.3L",
+    category: "BEBIDAS",
+    price: 2.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-cerveza-club",
+    name: "CLUB VERDE PLATINO",
     category: "BEBIDAS",
     price: 2.25,
     pricingMode: "fixed",
   },
   {
-    id: "bebida-cerveza-club",
-    name: "CERVEZA CLUB",
+    id: "bebida-cerveza-sol",
+    name: "CERVEZA AMSTEL",
     category: "BEBIDAS",
     price: 2.25,
     pricingMode: "fixed",
@@ -328,32 +358,53 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
   {
+    id: "bebida-monster",
+    name: "MONSTER",
+    category: "BEBIDAS",
+    price: 2.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-copa-sangria",
+    name: "COPA DE SANGRIA",
+    category: "BEBIDAS",
+    price: 3.5,
+    pricingMode: "fixed",
+  },
+  {
     id: "bebida-jarra-sangria",
     name: "JARRA DE SANGRIA",
     category: "BEBIDAS",
-    price: 10.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "bebida-cafe",
-    name: "CAFE",
-    category: "BEBIDAS",
-    price: 0.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "postres-porcion",
-    name: "POSTRES",
-    category: "BEBIDAS",
-    price: 1.5,
+    price: 11.0,
     pricingMode: "fixed",
   },
 
   {
-    id: "extra-chicloso",
-    name: "PORCION EXTRA CHICLOSO",
+    id: "extra-pina",
+    name: "PORCION DE PINA",
     category: "PORCIONES EXTRA",
-    price: 2.5,
+    price: 1.25,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-papa",
+    name: "PORCION DE PAPA CECILIA",
+    category: "PORCIONES EXTRA",
+    price: 0.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-c-f-hierb",
+    name: "PORCION DE FINAS HIERBAS",
+    category: "PORCIONES EXTRA",
+    price: 1.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-patacones",
+    name: "PORCION DE PATACONES",
+    category: "PORCIONES EXTRA",
+    price: 1.75,
     pricingMode: "fixed",
   },
   {
@@ -364,17 +415,52 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
   {
-    id: "extra-moroclo",
-    name: "PORCION DE MOROCLO",
-    category: "PORCIONES EXTRA",
-    price: 2.25,
-    pricingMode: "fixed",
-  },
-  {
     id: "extra-choclo",
     name: "PORCION DE CHOCLO",
     category: "PORCIONES EXTRA",
-    price: 2.0,
+    price: 2.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moroclo",
+    name: "PORCION DE MOROCLO",
+    category: "PORCIONES EXTRA",
+    price: 3.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-maduro",
+    name: "PORCION DE MADURO",
+    category: "PORCIONES EXTRA",
+    price: 1.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moro-extrachicloso",
+    name: "PORCION DE MORO EXTRACHICLOSO",
+    category: "PORCIONES EXTRA",
+    price: 2.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-choclo-extrachicloso",
+    name: "PORCION DE CHOCLO EXTRACHICLOSO",
+    category: "PORCIONES EXTRA",
+    price: 3.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moroclo-extrachicloso",
+    name: "PORCION DE MOROCLO EXTRACHICLOSO",
+    category: "PORCIONES EXTRA",
+    price: 3.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-chicloso",
+    name: "PORCION EXTRA CHICLOSO",
+    category: "PORCIONES EXTRA",
+    price: 2.5,
     pricingMode: "fixed",
   },
   {
@@ -392,31 +478,10 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
   {
-    id: "extra-papa",
-    name: "PORCION DE PAPA",
-    category: "PORCIONES EXTRA",
-    price: 1.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-pina",
-    name: "PORCION DE PINA",
-    category: "PORCIONES EXTRA",
-    price: 1.0,
-    pricingMode: "fixed",
-  },
-  {
     id: "extra-c-parri",
     name: "PORCION DE C. PARRI",
     category: "PORCIONES EXTRA",
     price: 1.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-c-f-hierb",
-    name: "PORCION DE C. F. HIERB",
-    category: "PORCIONES EXTRA",
-    price: 1.5,
     pricingMode: "fixed",
   },
   {
@@ -447,26 +512,12 @@ export const DEFAULT_MENU_CHONE = [
     price: 2.5,
     pricingMode: "fixed",
   },
-  {
-    id: "extra-patacones",
-    name: "PORCION DE PATACONES",
-    category: "PORCIONES EXTRA",
-    price: 2.0,
-    pricingMode: "fixed",
-  },
 
   {
     id: "entrada-salchipapa",
     name: "SALCHIPAPA",
     category: "ENTRADAS Y ACOMPAÑANTES",
-    price: 3.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "entrada-patacones-chicle",
-    name: "PATACONES CON CHICLE",
-    category: "ENTRADAS Y ACOMPAÑANTES",
-    price: 3.0,
+    price: 3.5,
     pricingMode: "fixed",
   },
   {
@@ -477,10 +528,17 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
   {
+    id: "entrada-patacones-chicle",
+    name: "PATACONES CON CHICLE",
+    category: "ENTRADAS Y ACOMPAÑANTES",
+    price: 3.5,
+    pricingMode: "fixed",
+  },
+  {
     id: "entrada-maduro-chicle",
     name: "MADURO CON CHICLE",
     category: "ENTRADAS Y ACOMPAÑANTES",
-    price: 3.0,
+    price: 3.5,
     pricingMode: "fixed",
   },
 ];
@@ -500,6 +558,9 @@ const PORTOVIEJO_PRICE_OVERRIDES = {
   "bebida-jugo-frozen": 1.5,
   "bebida-gaseosa-personal": 1.0,
   "bebida-fuze-te": 1.0,
+  "bebida-del-valle": 0.5,
+  "bebida-gaseosa-1l": 1.75,
+  "bebida-jarra-sangria": 10.0,
   "postres-porcion": 2.25,
   "fuerte-taco-taco": 3.0,
   "fuerte-costillitas": 6.0,
@@ -528,12 +589,39 @@ const PORTOVIEJO_PRICE_OVERRIDES = {
   "corte-mix-parrillero-dos": 18.0,
 };
 
-const PORTOVIEJO_EXCLUDED_ITEM_IDS = ["corte-ribeye"];
+/** Nombres antiguos de Portoviejo (Chone cambió varios labels). */
+const PORTOVIEJO_NAME_OVERRIDES = {
+  "picaditas-familiar": "FAMILIAR",
+  "fuerte-taco-taco": "TACO TACO",
+  "fuerte-costillitas": "COSTILLITAS",
+  "extra-papa": "PORCION DE PAPA",
+  "extra-c-f-hierb": "PORCION DE C. F. HIERB",
+  "bebida-cafe": "CAFE",
+  "bebida-gaseosa-1l": "GASEOSA DE 1L",
+  "postres-porcion": "POSTRES",
+  "bebida-cerveza-club": "CERVEZA CLUB",
+  "bebida-cerveza-sol": "CERVEZA SOL",
+};
+
+const PORTOVIEJO_EXCLUDED_ITEM_IDS = [
+  "corte-ribeye",
+  "fuerte-cambio-arroz",
+  "extra-maduro",
+  "extra-moro-extrachicloso",
+  "extra-choclo-extrachicloso",
+  "extra-moroclo-extrachicloso",
+  "bebida-gaseosa-coca-1-3l",
+  "bebida-monster",
+  "bebida-copa-sangria",
+];
 
 export const DEFAULT_MENU_PORTOVIEJO = DEFAULT_MENU_CHONE.filter(
   (item) => !PORTOVIEJO_EXCLUDED_ITEM_IDS.includes(item.id),
 ).map((item) => ({
   ...item,
+  name: Object.hasOwn(PORTOVIEJO_NAME_OVERRIDES, item.id)
+    ? PORTOVIEJO_NAME_OVERRIDES[item.id]
+    : item.name,
   price: Object.hasOwn(PORTOVIEJO_PRICE_OVERRIDES, item.id)
     ? PORTOVIEJO_PRICE_OVERRIDES[item.id]
     : item.price,
