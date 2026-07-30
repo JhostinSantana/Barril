@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-07-29-chone-porciones-moro-choclo-v2";
-export const MENU_VERSION_PORTOVIEJO = "2026-07-13-portoviejo-costillitas-6-v1";
+export const MENU_VERSION_CHONE = "2026-07-30-menu-unificado-v1";
+export const MENU_VERSION_PORTOVIEJO = "2026-07-30-menu-unificado-v1";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -546,86 +546,8 @@ export const DEFAULT_MENU_CHONE = [
 /** @deprecated Usa getDefaultMenuForBranch(branchSiteId) */
 export const DEFAULT_MENU = DEFAULT_MENU_CHONE;
 
-const PORTOVIEJO_PRICE_OVERRIDES = {
-  "picaditas-probar": 3.0,
-  "picaditas-picar": 4.0,
-  "picaditas-gozar": 6.0,
-  "picaditas-familiar": 11.0,
-  "picaditas-fritas": 1.5,
-  "picaditas-patacones": 1.5,
-  "fuerte-bestia": 23.0,
-  "bebida-agua": 0.75,
-  "bebida-jugo-frozen": 1.5,
-  "bebida-gaseosa-personal": 1.0,
-  "bebida-fuze-te": 1.0,
-  "bebida-del-valle": 0.5,
-  "bebida-gaseosa-1l": 1.75,
-  "bebida-jarra-sangria": 10.0,
-  "postres-porcion": 2.25,
-  "fuerte-taco-taco": 3.0,
-  "fuerte-costillitas": 6.0,
-  "fuerte-come-solo": 5.0,
-  "fuerte-come-bien": 6.0,
-  "extra-chicloso": 3.0,
-  "extra-moro": 2.5,
-  "extra-moroclo": 1.75,
-  "extra-choclo": 2.5,
-  "extra-pan": 1.0,
-  "extra-ensalada": 1.0,
-  "extra-papa": 1.5,
-  "extra-pina": 1.5,
-  "extra-c-parri": 1.5,
-  "extra-longaniza": 2.0,
-  "extra-c-f-hierb": 2.0,
-  "extra-cerdo": 2.5,
-  "extra-costilla": 3.0,
-  "extra-papas-fritas": 3.0,
-  "extra-patacones": 2.5,
-  "entrada-salchipapa": 3.5,
-  "entrada-patacones-chicle": 3.5,
-  "entrada-papas-cheddar": 3.5,
-  "entrada-maduro-chicle": 3.5,
-  "corte-mix-parrillero-uno": 12.0,
-  "corte-mix-parrillero-dos": 18.0,
-};
-
-/** Nombres antiguos de Portoviejo (Chone cambió varios labels). */
-const PORTOVIEJO_NAME_OVERRIDES = {
-  "picaditas-familiar": "FAMILIAR",
-  "fuerte-taco-taco": "TACO TACO",
-  "fuerte-costillitas": "COSTILLITAS",
-  "extra-papa": "PORCION DE PAPA",
-  "extra-c-f-hierb": "PORCION DE C. F. HIERB",
-  "bebida-cafe": "CAFE",
-  "bebida-gaseosa-1l": "GASEOSA DE 1L",
-  "postres-porcion": "POSTRES",
-  "bebida-cerveza-club": "CERVEZA CLUB",
-  "bebida-cerveza-sol": "CERVEZA SOL",
-};
-
-const PORTOVIEJO_EXCLUDED_ITEM_IDS = [
-  "corte-ribeye",
-  "fuerte-cambio-arroz",
-  "extra-maduro",
-  "extra-moro-extrachicloso",
-  "extra-choclo-extrachicloso",
-  "extra-moroclo-extrachicloso",
-  "bebida-gaseosa-coca-1-3l",
-  "bebida-monster",
-  "bebida-copa-sangria",
-];
-
-export const DEFAULT_MENU_PORTOVIEJO = DEFAULT_MENU_CHONE.filter(
-  (item) => !PORTOVIEJO_EXCLUDED_ITEM_IDS.includes(item.id),
-).map((item) => ({
-  ...item,
-  name: Object.hasOwn(PORTOVIEJO_NAME_OVERRIDES, item.id)
-    ? PORTOVIEJO_NAME_OVERRIDES[item.id]
-    : item.name,
-  price: Object.hasOwn(PORTOVIEJO_PRICE_OVERRIDES, item.id)
-    ? PORTOVIEJO_PRICE_OVERRIDES[item.id]
-    : item.price,
-}));
+/** Mismo catálogo y precios que Chone (menú unificado). */
+export const DEFAULT_MENU_PORTOVIEJO = DEFAULT_MENU_CHONE;
 
 export function isValidBranchSiteId(branchSiteId) {
   return BRANCH_SITE_IDS.includes(`${branchSiteId ?? ""}`.trim());
