@@ -2,14 +2,14 @@
   "expo": {
     "name": "Ahumados Al Barril",
     "slug": "asados-en-el-barril",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "jsEngine": "jsc",
     "entryPoint": "./index.js",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.asadosenelbarril.mobile",
-      "versionCode": 4,
+      "versionCode": 5,
       "permissions": [
         "android.permission.CAMERA"
       ]

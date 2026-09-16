@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Dimensions,
     Linking,
     Pressable,
     SafeAreaView,
@@ -174,6 +175,7 @@ export default function App() {
   const [originalQuantities, setOriginalQuantities] = useState({});
   const [pendingOrders, setPendingOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [summaryMinimized, setSummaryMinimized] = useState(false);
   const [status, setStatus] = useState('');
   const [hasDraft, setHasDraft] = useState(false);
   const [showOpenOrders, setShowOpenOrders] = useState(true);
@@ -197,6 +199,7 @@ export default function App() {
     'PANCETA',
     'ENTRADAS Y ACOMPAÑANTES',
     'PORCIONES',
+    'CORTES DE ASADO',
   ];
 
   const menuSections = useMemo(() => {
@@ -255,6 +258,41 @@ export default function App() {
   const editingOrder = useMemo(
     () => pendingOrders.find((order) => order.id === selectedOrderId) ?? null,
     [pendingOrders, selectedOrderId]
+  );
+
+  const liveOrderSummary = useMemo(() => {
+    if (!selectedOrderId) return [];
+    const menuById = new Map((menu || []).map((item) => [item.id, item]));
+    const ids = new Set([
+      ...Object.keys(quantities || {}),
+      ...Object.keys(originalQuantities || {}),
+    ]);
+    return [...ids]
+      .map((id) => {
+        const qty = Number(quantities[id] ?? 0);
+        const original = Number(originalQuantities[id] ?? 0);
+        if (qty <= 0 && original <= 0) return null;
+        const menuItem = menuById.get(id);
+        return {
+          id,
+          name: menuItem?.name ?? id,
+          category: menuItem?.category ?? '',
+          quantity: qty,
+          original,
+          delta: qty - original,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.quantity <= 0 && b.quantity > 0) return 1;
+        if (b.quantity <= 0 && a.quantity > 0) return -1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [selectedOrderId, quantities, originalQuantities, menu]);
+
+  const liveSummaryCount = useMemo(
+    () => liveOrderSummary.reduce((sum, row) => sum + Math.max(0, Number(row.quantity || 0)), 0),
+    [liveOrderSummary]
   );
 
   async function loadMenu() {
@@ -571,6 +609,7 @@ export default function App() {
         : 'mesa');
 
     setSelectedOrderId(order.id);
+    setSummaryMinimized(false);
     setClientName(order.clientName ?? '');
     setServiceType(inferredService);
     setTableNumber(order.tableNumber ?? '');
@@ -583,6 +622,7 @@ export default function App() {
 
   function resetDraft() {
     setSelectedOrderId(null);
+    setSummaryMinimized(false);
     setClientName('');
     setServiceType('mesa');
     setTableNumber('');
@@ -1100,6 +1140,90 @@ export default function App() {
           </Pressable>
         </View>
       </ScrollView>
+      {editingOrder ? (
+        summaryMinimized ? (
+          <Pressable
+            style={styles.summaryDock}
+            onPress={() => setSummaryMinimized(false)}
+          >
+            <Text style={styles.summaryDockTitle}>Resumen</Text>
+            <Text style={styles.summaryDockCount}>{liveSummaryCount}</Text>
+            <Text style={styles.summaryDockHint}>Abrir</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.summaryFloat} pointerEvents="box-none">
+            <View style={styles.summaryCard}>
+              <View style={styles.summaryHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.summaryEyebrow}>Resumen en vivo</Text>
+                  <Text style={styles.summaryTitle} numberOfLines={1}>
+                    {editingOrder.clientName || editingOrder.id}
+                  </Text>
+                  <Text style={styles.summaryMeta}>
+                    {editingOrder.id} · {editingOrder.tableNumber || 'Sin mesa'} · {liveSummaryCount} items
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.summaryMinimizeBtn}
+                  onPress={() => setSummaryMinimized(true)}
+                >
+                  <Text style={styles.summaryMinimizeText}>Minimizar</Text>
+                </Pressable>
+              </View>
+
+              <ScrollView
+                style={styles.summaryList}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
+                {liveOrderSummary.length === 0 ? (
+                  <Text style={styles.summaryEmpty}>Sin productos en la comanda.</Text>
+                ) : (
+                  liveOrderSummary.map((row) => {
+                    const removed = row.quantity <= 0 && row.original > 0;
+                    const added = row.delta > 0;
+                    const lowered = row.delta < 0 && row.quantity > 0;
+                    return (
+                      <View
+                        key={row.id}
+                        style={[
+                          styles.summaryRow,
+                          removed ? styles.summaryRowRemoved : null,
+                          added ? styles.summaryRowAdded : null,
+                          lowered ? styles.summaryRowChanged : null,
+                        ]}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={[
+                              styles.summaryItemName,
+                              removed ? styles.summaryItemRemoved : null,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {row.name}
+                          </Text>
+                          {row.category ? (
+                            <Text style={styles.summaryItemCategory}>{row.category}</Text>
+                          ) : null}
+                        </View>
+                        <Text style={styles.summaryQty}>
+                          {removed ? 0 : row.quantity}
+                          {row.delta !== 0 ? (
+                            <Text style={styles.summaryDelta}>
+                              {row.delta > 0 ? ` +${row.delta}` : ` ${row.delta}`}
+                            </Text>
+                          ) : null}
+                        </Text>
+                      </View>
+                    );
+                  })
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        )
+      ) : null}
       {scanning ? (
         <View style={styles.scannerOverlay}>
           <CameraView
@@ -1640,5 +1764,155 @@ const styles = StyleSheet.create({
     right: 0,
     justifyContent: 'center',
     alignItems: 'center'
-  }
+  },
+  summaryFloat: {
+    position: 'absolute',
+    right: 12,
+    bottom: 18,
+    left: 12,
+    alignItems: 'flex-end',
+    zIndex: 40,
+  },
+  summaryCard: {
+    width: '100%',
+    maxWidth: 360,
+    maxHeight: Math.min(320, Dimensions.get('window').height * 0.42),
+    backgroundColor: '#1f1712',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(248, 217, 184, 0.28)',
+    padding: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 8,
+  },
+  summaryEyebrow: {
+    color: '#f8d9b8',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  summaryTitle: {
+    color: '#fff7ef',
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  summaryMeta: {
+    color: '#d7c3b1',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  summaryMinimizeBtn: {
+    backgroundColor: 'rgba(255,247,239,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  summaryMinimizeText: {
+    color: '#fff7ef',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  summaryList: {
+    maxHeight: 220,
+  },
+  summaryEmpty: {
+    color: '#cbb8a6',
+    fontSize: 13,
+    paddingVertical: 8,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,247,239,0.12)',
+  },
+  summaryRowAdded: {
+    backgroundColor: 'rgba(31, 143, 115, 0.18)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+  },
+  summaryRowChanged: {
+    backgroundColor: 'rgba(240, 138, 36, 0.16)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+  },
+  summaryRowRemoved: {
+    backgroundColor: 'rgba(180, 35, 24, 0.18)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+  },
+  summaryItemName: {
+    color: '#fff7ef',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  summaryItemRemoved: {
+    textDecorationLine: 'line-through',
+    color: '#e7b4ad',
+  },
+  summaryItemCategory: {
+    color: '#b9a594',
+    fontSize: 10,
+    marginTop: 1,
+  },
+  summaryQty: {
+    color: '#fff7ef',
+    fontSize: 15,
+    fontWeight: '800',
+    minWidth: 42,
+    textAlign: 'right',
+  },
+  summaryDelta: {
+    color: '#f8d9b8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  summaryDock: {
+    position: 'absolute',
+    right: 10,
+    top: '38%',
+    width: 58,
+    borderRadius: 16,
+    backgroundColor: '#1f1712',
+    borderWidth: 1,
+    borderColor: 'rgba(248, 217, 184, 0.35)',
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    gap: 4,
+    zIndex: 40,
+    elevation: 10,
+  },
+  summaryDockTitle: {
+    color: '#f8d9b8',
+    fontSize: 10,
+    fontWeight: '700',
+    transform: [{ rotate: '-90deg' }],
+    width: 70,
+    textAlign: 'center',
+    marginVertical: 18,
+  },
+  summaryDockCount: {
+    color: '#fff7ef',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  summaryDockHint: {
+    color: '#cbb8a6',
+    fontSize: 9,
+    fontWeight: '600',
+  },
 });
