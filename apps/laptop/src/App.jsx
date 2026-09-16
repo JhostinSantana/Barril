@@ -4181,58 +4181,50 @@ function App() {
                   </table>
                 </div>
               </section>
-
-              <section className={`stats-panel cash-status ${dashboardStats.cashSummary.status ?? "idle"}`}>
-                <div className="section-header stats-panel-head">
-                  <div>
-                    <h3>Cierre de caja automático</h3>
-                    <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                      La caja inicial se muestra aparte; la diferencia compara ventas cobradas contra lo contado.
-                    </p>
-                  </div>
-                  {dashboardStats.cashSummary.status ? (
-                    <span className="stats-chip">
-                      {getCashCloseStatusLabel(dashboardStats.cashSummary.status)}
-                    </span>
-                  ) : null}
-                </div>
-
-                <div className="stats-item-list">
-                  <div className="stats-item-row">
-                    <div>
-                      <strong>Caja inicial</strong>
-                      <p>Valor pedido al comenzar el día</p>
-                    </div>
-                    <span>{formatCurrency(dashboardStats.cashSummary.openingCash)}</span>
-                  </div>
-                  <div className="stats-item-row">
-                    <div>
-                      <strong>Dinero registrado</strong>
-                      <p>Efectivo + transferencia cobrados</p>
-                    </div>
-                    <span>{formatCurrency(dashboardStats.cashSummary.registeredTotal)}</span>
-                  </div>
-                  <div className="stats-item-row">
-                    <div>
-                      <strong>Ventas esperadas</strong>
-                      <p>Efectivo + transferencia, sin sumar caja inicial</p>
-                    </div>
-                    <span>{formatCurrency(dashboardStats.cashSummary.expectedTotal)}</span>
-                  </div>
-                  <div className="stats-item-row">
-                    <div>
-                      <strong>Diferencia último cierre</strong>
-                      <p>Verde coincide, amarillo sobra, rojo falta</p>
-                    </div>
-                    <span>
-                      {dashboardStats.cashSummary.differenceTotal == null
-                        ? "Sin cierre"
-                        : formatSignedCurrency(dashboardStats.cashSummary.differenceTotal)}
-                    </span>
-                  </div>
-                </div>
-              </section>
             </div>
+
+            <section className="stats-panel">
+              <div className="section-header stats-panel-head">
+                <div>
+                  <h3>Platos</h3>
+                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                    Picadas, cortes, porciones, platos fuertes y demás categorías
+                    (sin bebidas).
+                  </p>
+                </div>
+                <span className="stats-chip">
+                  {dashboardStats.allDishes.reduce((acc, item) => acc + item.quantity, 0)}{" "}
+                  vendidos
+                </span>
+              </div>
+
+              <div className="stats-table-card">
+                <table className="stats-table">
+                  <thead>
+                    <tr>
+                      <th>Plato</th>
+                      <th>Cantidad</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboardStats.allDishes.length > 0 ? (
+                      dashboardStats.allDishes.map((item) => (
+                        <tr key={`plato-${item.key}`}>
+                          <td>{item.label}</td>
+                          <td>{item.quantity}</td>
+                          <td>{formatCurrency(item.total)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="3">Sin platos pagados en esta jornada.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
             <section className="stats-panel">
               <div className="section-header stats-panel-head">
