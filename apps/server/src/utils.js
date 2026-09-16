@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-09-16-menu-orden-carta-v2";
-export const MENU_VERSION_PORTOVIEJO = "2026-09-16-menu-orden-carta-v2";
+export const MENU_VERSION_CHONE = "2026-09-16-menu-orden-carta-v3";
+export const MENU_VERSION_PORTOVIEJO = "2026-09-16-menu-orden-carta-v3";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -233,13 +233,6 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
   {
-    id: "bebida-copa-sangria",
-    name: "COPA DE SANGRIA",
-    category: "BEBIDAS",
-    price: 3.5,
-    pricingMode: "fixed",
-  },
-  {
     id: "bebida-jarra-sangria",
     name: "JARRA DE SANGRIA",
     category: "BEBIDAS",
@@ -400,23 +393,6 @@ export const DEFAULT_MENU_CHONE = [
     price: 8.0,
     pricingMode: "fixed",
   },
-  {
-    id: "corte-medallones-bondiola",
-    name: "MEDALLONES DE BONDIOLA",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-chuleta-cerdo",
-    name: "CHULETA DE CERDO",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-
   // 10. PANCETA
   {
     id: "corte-panceta-cerdo",
@@ -585,21 +561,6 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
 
-  // Extra (disponibles aunque no estén en la carta impresa)
-  {
-    id: "corte-mix-parrillero-uno",
-    name: "MIX PARRILLERO UNO",
-    category: "CORTES DE ASADO",
-    price: 10.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "corte-mix-parrillero-dos",
-    name: "MIX PARRILLERO DOS",
-    category: "CORTES DE ASADO",
-    price: 16.0,
-    pricingMode: "fixed",
-  },
 ];
 
 /** Orden fijo de categorías en la carta (app mesero / caja). */
@@ -616,7 +577,6 @@ export const MENU_CATEGORY_ORDER = [
   "PANCETA",
   "ENTRADAS Y ACOMPAÑANTES",
   "PORCIONES",
-  "CORTES DE ASADO",
 ];
 
 /** @deprecated Usa getDefaultMenuForBranch(branchSiteId) */

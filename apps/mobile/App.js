@@ -199,7 +199,6 @@ export default function App() {
     'PANCETA',
     'ENTRADAS Y ACOMPAÑANTES',
     'PORCIONES',
-    'CORTES DE ASADO',
   ];
 
   const menuSections = useMemo(() => {
