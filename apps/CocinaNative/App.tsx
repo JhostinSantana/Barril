@@ -376,6 +376,7 @@ export default function App(): React.JSX.Element {
   const [completadosHoy, setCompletadosHoy] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
   const [nowUpdating, setNowUpdating] = useState<string | null>(null);
+  const [modalEditAlertCollapsed, setModalEditAlertCollapsed] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const timeoutRefs = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -769,6 +770,13 @@ export default function App(): React.JSX.Element {
   const pedidoModal = pedidoActivo
     ? pedidos.find(pedido => pedido.id === pedidoActivo.id) ?? pedidoActivo
     : null;
+  const pedidoModalEditSignature = pedidoModal?.editSummary
+    .map(change => `${change.menuItemId}:${change.type}:${change.quantity}`)
+    .join('|');
+
+  useEffect(() => {
+    setModalEditAlertCollapsed(false);
+  }, [pedidoModal?.id, pedidoModalEditSignature]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -844,7 +852,8 @@ export default function App(): React.JSX.Element {
             initialNumToRender={3}
             maxToRenderPerBatch={4}
             windowSize={5}
-            removeClippedSubviews={Platform.OS === 'android'}
+            nestedScrollEnabled
+            removeClippedSubviews={false}
             getItemLayout={getOrderCardLayout}
             extraData={nowUpdating}
             style={styles.ordersList}
@@ -917,7 +926,11 @@ export default function App(): React.JSX.Element {
             <ScrollView style={{maxHeight: 360}} contentContainerStyle={{gap: 12}}>
               {pedidoModal && pedidoTieneHistorialPreparado(pedidoModal) ? <PreparedReopenBanner /> : null}
               {pedidoModal && pedidoFueModificado(pedidoModal) ? (
-                <EditChangesPanel editSummary={pedidoModal.editSummary} />
+                <EditChangesPanel
+                  editSummary={pedidoModal.editSummary}
+                  collapsed={modalEditAlertCollapsed}
+                  onToggleCollapsed={() => setModalEditAlertCollapsed(current => !current)}
+                />
               ) : null}
 
               {pedidoModal?.items.map((item, index) => (
@@ -1024,9 +1037,9 @@ function PlateNote({notas, muted}: {notas?: string; muted?: boolean}) {
   );
 }
 
-function PreparedReopenBanner() {
+function PreparedReopenBanner({edgeToEdge}: {edgeToEdge?: boolean}) {
   return (
-    <View style={styles.reopenBanner}>
+    <View style={[styles.reopenBanner, edgeToEdge && styles.bannerInScroll]}>
       <Text style={styles.reopenBannerTitle}>Comanda ampliada</Text>
       <Text style={styles.reopenBannerHint}>Gris = ya preparado · Resaltado = preparar ahora</Text>
     </View>
@@ -1083,24 +1096,51 @@ function KitchenItemRows({item}: {item: PedidoItem}) {
   );
 }
 
-function EditChangesPanel({editSummary}: {editSummary: EditChange[]}) {
+function EditChangesPanel({
+  editSummary,
+  collapsed,
+  onToggleCollapsed,
+  edgeToEdge,
+}: {
+  editSummary: EditChange[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  edgeToEdge?: boolean;
+}) {
   if (!editSummary.length) {
     return null;
   }
 
+  const changeCountLabel =
+    editSummary.length === 1 ? '1 cambio' : `${editSummary.length} cambios`;
+
   return (
-    <View style={styles.editAlertBanner}>
-      <Text style={styles.editAlertIcon}>⚠️</Text>
-      <View style={styles.editAlertBody}>
-        <Text style={styles.editAlertTitle}>Comanda modificada</Text>
-        <Text style={styles.editAlertHint}>Revisa los cambios antes de preparar</Text>
-        {editSummary.map((change, index) => (
-          <View key={`${change.menuItemId}-${change.type}-${index}`} style={styles.editAlertItem}>
-            <Text style={styles.editAlertItemName}>{change.nombre}</Text>
-            <Text style={styles.editAlertItemChange}>{getEditChangeLabel(change)}</Text>
-          </View>
-        ))}
-      </View>
+    <View style={[styles.editAlertBanner, edgeToEdge && styles.bannerInScroll]}>
+      <Pressable
+        style={({pressed}) => [styles.editAlertToggle, pressed && styles.buttonPressed]}
+        onPress={onToggleCollapsed}
+        accessibilityRole="button"
+        accessibilityLabel={collapsed ? 'Expandir cambios de la comanda' : 'Minimizar cambios de la comanda'}
+      >
+        <Text style={styles.editAlertIcon}>⚠️</Text>
+        <View style={styles.editAlertBody}>
+          <Text style={styles.editAlertTitle}>Comanda modificada</Text>
+          <Text style={styles.editAlertHint}>
+            {collapsed
+              ? `${changeCountLabel} · Toca para ver detalle`
+              : 'Revisa los cambios antes de preparar'}
+          </Text>
+        </View>
+        <Text style={styles.editAlertChevron}>{collapsed ? '▼' : '▲'}</Text>
+      </Pressable>
+      {!collapsed
+        ? editSummary.map((change, index) => (
+            <View key={`${change.menuItemId}-${change.type}-${index}`} style={styles.editAlertItem}>
+              <Text style={styles.editAlertItemName}>{change.nombre}</Text>
+              <Text style={styles.editAlertItemChange}>{getEditChangeLabel(change)}</Text>
+            </View>
+          ))
+        : null}
     </View>
   );
 }
@@ -1120,8 +1160,15 @@ const OrderCard = memo(function OrderCard({
   const latestCommentDate = latestComment ? formatCommentDate(latestComment.createdAt) : '';
   const showDetailLink = item.items.length > 4 || item.comments.length > 1;
   const fueModificado = pedidoFueModificado(item);
-  const esReapertura = pedidoEsReapertura(item);
   const tieneHistorialPreparado = pedidoTieneHistorialPreparado(item);
+  const [editAlertCollapsed, setEditAlertCollapsed] = useState(false);
+  const editSummarySignature = item.editSummary
+    .map(change => `${change.menuItemId}:${change.type}:${change.quantity}`)
+    .join('|');
+
+  useEffect(() => {
+    setEditAlertCollapsed(false);
+  }, [editSummarySignature]);
 
   return (
     <View
@@ -1160,15 +1207,26 @@ const OrderCard = memo(function OrderCard({
         </View>
       </View>
 
-      {tieneHistorialPreparado ? <PreparedReopenBanner /> : null}
-      {fueModificado ? <EditChangesPanel editSummary={item.editSummary} /> : null}
-
       <ScrollView
         style={styles.cardScroll}
         contentContainerStyle={styles.cardScrollContent}
         nestedScrollEnabled
+        directionalLockEnabled
         showsVerticalScrollIndicator
+        keyboardShouldPersistTaps="handled"
       >
+        {tieneHistorialPreparado ? (
+          <PreparedReopenBanner edgeToEdge />
+        ) : null}
+        {fueModificado ? (
+          <EditChangesPanel
+            editSummary={item.editSummary}
+            collapsed={editAlertCollapsed}
+            onToggleCollapsed={() => setEditAlertCollapsed(current => !current)}
+            edgeToEdge
+          />
+        ) : null}
+
         {item.items.map((orderItem, index) => (
           <KitchenItemRows key={`${item.id}-item-${index}`} item={orderItem} />
         ))}
@@ -1485,14 +1543,21 @@ const styles = StyleSheet.create({
   editBadgeIcon: {
     fontSize: 18,
   },
+  bannerInScroll: {
+    marginHorizontal: -16,
+  },
   editAlertBanner: {
-    flexDirection: 'row',
-    gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     backgroundColor: '#fff7ed',
     borderBottomWidth: 1,
     borderBottomColor: '#fdba74',
+    gap: 4,
+  },
+  editAlertToggle: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
   },
   editAlertIcon: {
     fontSize: 22,
@@ -1501,6 +1566,13 @@ const styles = StyleSheet.create({
   editAlertBody: {
     flex: 1,
     gap: 4,
+  },
+  editAlertChevron: {
+    color: '#c2410c',
+    fontSize: 14,
+    fontWeight: '900',
+    marginTop: 4,
+    paddingLeft: 4,
   },
   editAlertTitle: {
     color: '#9a3412',
@@ -1518,6 +1590,7 @@ const styles = StyleSheet.create({
   editAlertItem: {
     marginTop: 4,
     paddingTop: 6,
+    paddingLeft: 32,
     borderTopWidth: 1,
     borderTopColor: 'rgba(251, 146, 60, 0.35)',
   },

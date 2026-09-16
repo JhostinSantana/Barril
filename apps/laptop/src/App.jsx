@@ -83,8 +83,8 @@ function isDashboardSnapshot(value) {
   );
 }
 
-const DELETE_ACCOUNT_PIN = "040420";
-const STATS_ACCESS_PIN = "040420";
+const PUBLIC_DASHBOARD_PIN = "040420";
+const ADMIN_ACCESS_PIN = "0409";
 const ADMIN_DASHBOARD_LINK_TARGET = "__admin-dashboard-link__";
 const PROTECTED_NAV_VIEW_IDS = new Set(["stats", "history"]);
 const PROTECTED_VIEW_COPY = {
@@ -1225,6 +1225,7 @@ function App() {
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
   const [confirmModal, setConfirmModal] = useState(null);
   const [protectedViewModal, setProtectedViewModal] = useState(null);
+  const [adminPinModal, setAdminPinModal] = useState(null);
   const [dashboardLinkUnlocked, setDashboardLinkUnlocked] = useState(false);
   const [publicRemoteAccessUnlocked, setPublicRemoteAccessUnlocked] = useState(
     () => isPublicDashboardPinSessionValid(),
@@ -1379,9 +1380,37 @@ function App() {
     setDashboardLinkUnlocked(false);
   }
 
+  function requestAdminPinAction({ title, note, onSuccess }) {
+    setAdminPinModal({
+      title,
+      note,
+      pin: "",
+      error: "",
+      onSuccess,
+    });
+  }
+
+  function confirmAdminPinAction() {
+    if (!adminPinModal) return;
+
+    const pin = `${adminPinModal.pin ?? ""}`.trim();
+    if (pin !== ADMIN_ACCESS_PIN) {
+      setAdminPinModal((current) =>
+        current
+          ? { ...current, error: "PIN incorrecto. Vuelve a intentarlo." }
+          : current,
+      );
+      return;
+    }
+
+    const { onSuccess } = adminPinModal;
+    setAdminPinModal(null);
+    onSuccess();
+  }
+
   function confirmPublicRemoteAccess() {
     const pin = `${publicAccessPin ?? ""}`.trim();
-    if (pin !== STATS_ACCESS_PIN) {
+    if (pin !== PUBLIC_DASHBOARD_PIN) {
       setPublicAccessError("PIN incorrecto. Solo el administrador puede entrar.");
       return;
     }
@@ -1412,7 +1441,7 @@ function App() {
     if (!protectedViewModal) return;
 
     const pin = `${protectedViewModal.pin ?? ""}`.trim();
-    if (pin !== STATS_ACCESS_PIN) {
+    if (pin !== ADMIN_ACCESS_PIN) {
       setProtectedViewModal((current) =>
         current
           ? { ...current, error: "PIN incorrecto. Vuelve a intentarlo." }
@@ -2794,7 +2823,7 @@ function App() {
     if (!deleteOrderModal?.order) return;
 
     const pin = `${deleteOrderModal.pin ?? ""}`.trim();
-    if (pin !== DELETE_ACCOUNT_PIN) {
+    if (pin !== ADMIN_ACCESS_PIN) {
       setDeleteOrderModal((current) =>
         current
           ? { ...current, error: "PIN incorrecto. Vuelve a intentarlo." }
@@ -3579,7 +3608,13 @@ function App() {
           <div className="sidebar-actions" style={{ marginTop: 8 }}>
             <button
               type="button"
-              onClick={downloadJsonBackup}
+              onClick={() =>
+                requestAdminPinAction({
+                  title: "Exportar datos",
+                  note: "Ingresa el PIN de administrador para exportar el backup.",
+                  onSuccess: downloadJsonBackup,
+                })
+              }
               title="Exportar backup JSON"
             >
               Exportar
@@ -3593,7 +3628,13 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={openCleanupModal}
+              onClick={() =>
+                requestAdminPinAction({
+                  title: "Limpiar datos",
+                  note: "Ingresa el PIN de administrador para eliminar pedidos antiguos.",
+                  onSuccess: openCleanupModal,
+                })
+              }
               title="Eliminar pedidos antiguos"
             >
               Limpieza
@@ -3601,7 +3642,13 @@ function App() {
             <button
               type="button"
               className="danger"
-              onClick={openCleanupAllModal}
+              onClick={() =>
+                requestAdminPinAction({
+                  title: "Limpiar todo",
+                  note: "Ingresa el PIN de administrador para borrar toda la base de datos.",
+                  onSuccess: openCleanupAllModal,
+                })
+              }
               title="Limpiar TODO - punto cero"
               style={{ fontSize: "0.75rem" }}
             >
@@ -6241,7 +6288,7 @@ function App() {
                         : current,
                     )
                   }
-                  placeholder="⬢⬢⬢⬢⬢⬢"
+                  placeholder="⬢⬢⬢⬢"
                   disabled={protectedViewModal.loading}
                 />
               </div>
@@ -6259,6 +6306,62 @@ function App() {
                   className="ghost"
                   onClick={() => setProtectedViewModal(null)}
                   disabled={protectedViewModal.loading}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
+      ) : null}
+
+      {adminPinModal ? (
+        <div className="modal-backdrop" onClick={() => setAdminPinModal(null)}>
+          <article
+            className="modal modal-security"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="security-flag">Acceso restringido</p>
+            <h3>{adminPinModal.title}</h3>
+            <p className="security-note">{adminPinModal.note}</p>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                confirmAdminPinAction();
+              }}
+            >
+              <div className="security-field">
+                <label htmlFor="admin-action-pin">PIN de acceso</label>
+                <input
+                  id="admin-action-pin"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  autoFocus
+                  maxLength={6}
+                  value={adminPinModal.pin}
+                  onChange={(event) =>
+                    setAdminPinModal((current) =>
+                      current
+                        ? { ...current, pin: event.target.value, error: "" }
+                        : current,
+                    )
+                  }
+                  placeholder="⬢⬢⬢⬢"
+                />
+              </div>
+
+              {adminPinModal.error ? (
+                <p className="security-error">{adminPinModal.error}</p>
+              ) : null}
+
+              <div className="actions security-actions">
+                <button type="submit">Continuar</button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setAdminPinModal(null)}
                 >
                   Cancelar
                 </button>
