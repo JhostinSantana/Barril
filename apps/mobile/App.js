@@ -184,6 +184,21 @@ export default function App() {
     [quantities]
   );
 
+  const MENU_CATEGORY_ORDER = [
+    'PICADITAS CERDO',
+    'BEBIDAS',
+    'PLATOS FUERTES',
+    'PICADITA ESPECIAL',
+    'GUESAS AL BARRIL',
+    'EXTRA DE SALSAS',
+    'CORTES - RES ASADA',
+    'ASADOS',
+    'CORTES AHUMADOS',
+    'PANCETA',
+    'ENTRADAS Y ACOMPAÑANTES',
+    'PORCIONES',
+  ];
+
   const menuSections = useMemo(() => {
     const grouped = menu.reduce((acc, item) => {
       const category = item.category || 'Sin categoria';
@@ -192,10 +207,19 @@ export default function App() {
       return acc;
     }, {});
 
-    return Object.entries(grouped).map(([category, items]) => ({
-      category,
-      items
-    }));
+    return Object.entries(grouped)
+      .sort(([a], [b]) => {
+        const ia = MENU_CATEGORY_ORDER.indexOf(a);
+        const ib = MENU_CATEGORY_ORDER.indexOf(b);
+        const ra = ia === -1 ? 999 : ia;
+        const rb = ib === -1 ? 999 : ib;
+        if (ra !== rb) return ra - rb;
+        return a.localeCompare(b);
+      })
+      .map(([category, items]) => ({
+        category,
+        items,
+      }));
   }, [menu]);
 
   const [menuQuery, setMenuQuery] = useState('');

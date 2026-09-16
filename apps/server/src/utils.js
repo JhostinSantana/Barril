@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-07-30-menu-unificado-v1";
-export const MENU_VERSION_PORTOVIEJO = "2026-07-30-menu-unificado-v1";
+export const MENU_VERSION_CHONE = "2026-09-16-menu-orden-carta-v1";
+export const MENU_VERSION_PORTOVIEJO = "2026-09-16-menu-orden-carta-v1";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -89,7 +89,7 @@ export function createContainerExpense(quantity = 1) {
 }
 
 export const DEFAULT_MENU_CHONE = [
-  // PICADITAS CERDO primero
+  // 1. PICADITAS CERDO
   {
     id: "picaditas-probar",
     name: "PARA PROBAR",
@@ -119,15 +119,8 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
   {
-    id: "fuerte-bestia",
-    name: "PICADITA ESPECIAL LA BESTIA",
-    category: "PICADITAS CERDO",
-    price: 25.0,
-    pricingMode: "fixed",
-  },
-  {
     id: "picaditas-fritas",
-    name: "FRITAS",
+    name: "PAPAS FRITAS",
     category: "PICADITAS CERDO",
     price: 1.25,
     pricingMode: "fixed",
@@ -140,139 +133,7 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
 
-  {
-    id: "fuerte-taco-taco",
-    name: "TACO",
-    category: "PLATOS FUERTES",
-    price: 3.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-costillitas",
-    name: "COSTILLAS",
-    category: "PLATOS FUERTES",
-    price: 6.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-come-solo",
-    name: "COME SOLO",
-    category: "PLATOS FUERTES",
-    price: 5.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-come-bien",
-    name: "COME BIEN",
-    category: "PLATOS FUERTES",
-    price: 6.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "fuerte-cambio-arroz",
-    name: "CAMBIO DE ARROZ",
-    category: "PLATOS FUERTES",
-    price: 0.5,
-    pricingMode: "fixed",
-  },
-
-  {
-    id: "corte-panceta-cerdo",
-    name: "PANCETA DE CERDO",
-    category: "CORTES DE ASADO",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-panceta",
-  },
-  {
-    id: "corte-filete-pechuga-pollo",
-    name: "FILETE DE PECHUGA DE POLLO",
-    category: "CORTES DE ASADO",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-pechuga-pollo",
-  },
-  {
-    id: "corte-medallones-bondiola",
-    name: "MEDALLONES DE BONDIOLA",
-    category: "CORTES DE ASADO",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-chuleta-cerdo",
-    name: "CHULETA DE CERDO",
-    category: "CORTES DE ASADO",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-mix-parrillero-uno",
-    name: "MIX PARRILLERO UNO",
-    category: "CORTES DE ASADO",
-    price: 10.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "corte-mix-parrillero-dos",
-    name: "MIX PARRILLERO DOS",
-    category: "CORTES DE ASADO",
-    price: 16.0,
-    pricingMode: "fixed",
-  },
-
-  {
-    id: "corte-lomo-fino",
-    name: "LOMO FINO",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-costillas-san-luis",
-    name: "COSTILLAS SAN LUIS",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-costillas-baby-back",
-    name: "COSTILLAS BABY BACK",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-matambre-cerdo",
-    name: "MATAMBRE",
-    category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
-  },
-  {
-    id: "corte-t-bone-steak",
-    name: "T BONE STEAK",
-    category: "CORTES - RES ASADA",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-t-bone",
-  },
-  {
-    id: "corte-ribeye",
-    name: "RIBEYE",
-    category: "CORTES - RES ASADA",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-t-bone",
-  },
-
-  // Bebidas ordenadas de menor a mayor precio
+  // 2. BEBIDAS
   {
     id: "bebida-cafe",
     name: "CAFE PASADO",
@@ -285,6 +146,13 @@ export const DEFAULT_MENU_CHONE = [
     name: "DEL VALLE",
     category: "BEBIDAS",
     price: 0.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-agua-mineral",
+    name: "AGUA MINERAL",
+    category: "BEBIDAS",
+    price: 1.0,
     pricingMode: "fixed",
   },
   {
@@ -310,14 +178,14 @@ export const DEFAULT_MENU_CHONE = [
   },
   {
     id: "bebida-gaseosa-1l",
-    name: "GASEOSA DE SABORES 1L",
+    name: "GASEOSA SABORES 1L",
     category: "BEBIDAS",
     price: 1.25,
     pricingMode: "fixed",
   },
   {
     id: "bebida-jugo-frozen",
-    name: "JUGO FROZEN",
+    name: "JUGOS FROZEN",
     category: "BEBIDAS",
     price: 1.5,
     pricingMode: "fixed",
@@ -331,7 +199,7 @@ export const DEFAULT_MENU_CHONE = [
   },
   {
     id: "bebida-gaseosa-coca-1-3l",
-    name: "GASEOSA COCA DE 1.3L",
+    name: "GASEOSA COCA 1.3L",
     category: "BEBIDAS",
     price: 2.0,
     pricingMode: "fixed",
@@ -365,13 +233,6 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
   {
-    id: "bebida-copa-sangria",
-    name: "COPA DE SANGRIA",
-    category: "BEBIDAS",
-    price: 3.5,
-    pricingMode: "fixed",
-  },
-  {
     id: "bebida-jarra-sangria",
     name: "JARRA DE SANGRIA",
     category: "BEBIDAS",
@@ -379,140 +240,171 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
 
+  // 3. PLATOS FUERTES
   {
-    id: "extra-pina",
-    name: "PORCION DE PINA",
-    category: "PORCIONES EXTRA",
-    price: 1.25,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-papa",
-    name: "PORCION DE PAPA CECILIA",
-    category: "PORCIONES EXTRA",
-    price: 0.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-c-f-hierb",
-    name: "PORCION DE FINAS HIERBAS",
-    category: "PORCIONES EXTRA",
-    price: 1.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-patacones",
-    name: "PORCION DE PATACONES",
-    category: "PORCIONES EXTRA",
-    price: 1.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-moro",
-    name: "PORCION DE MORO",
-    category: "PORCIONES EXTRA",
-    price: 2.0,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-choclo",
-    name: "PORCION DE CHOCLO",
-    category: "PORCIONES EXTRA",
-    price: 2.5,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-moroclo",
-    name: "PORCION DE MOROCLO",
-    category: "PORCIONES EXTRA",
+    id: "fuerte-taco-taco",
+    name: "TACO TACO",
+    category: "PLATOS FUERTES",
     price: 3.0,
     pricingMode: "fixed",
   },
   {
-    id: "extra-maduro",
-    name: "PORCION DE MADURO",
-    category: "PORCIONES EXTRA",
-    price: 1.75,
+    id: "fuerte-costillitas",
+    name: "COSTILLITAS",
+    category: "PLATOS FUERTES",
+    price: 6.0,
     pricingMode: "fixed",
   },
   {
-    id: "extra-moro-extrachicloso",
-    name: "PORCION DE MORO EXTRACHICLOSO",
-    category: "PORCIONES EXTRA",
-    price: 2.5,
+    id: "fuerte-come-solo",
+    name: "COME SOLO",
+    category: "PLATOS FUERTES",
+    price: 5.0,
     pricingMode: "fixed",
   },
   {
-    id: "extra-choclo-extrachicloso",
-    name: "PORCION DE CHOCLO EXTRACHICLOSO",
-    category: "PORCIONES EXTRA",
-    price: 3.5,
+    id: "fuerte-come-bien",
+    name: "COME BIEN",
+    category: "PLATOS FUERTES",
+    price: 6.0,
     pricingMode: "fixed",
   },
   {
-    id: "extra-moroclo-extrachicloso",
-    name: "PORCION DE MOROCLO EXTRACHICLOSO",
-    category: "PORCIONES EXTRA",
-    price: 3.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-chicloso",
-    name: "PORCION EXTRA CHICLOSO",
-    category: "PORCIONES EXTRA",
-    price: 2.5,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-pan",
-    name: "PORCION DE PAN",
-    category: "PORCIONES EXTRA",
-    price: 0.75,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-ensalada",
-    name: "PORCION DE ENSALADA",
-    category: "PORCIONES EXTRA",
+    id: "fuerte-cambio-arroz",
+    name: "CAMBIO POR CHOCLO",
+    category: "PLATOS FUERTES",
     price: 0.5,
     pricingMode: "fixed",
   },
+
+  // 4. PICADITA ESPECIAL
   {
-    id: "extra-c-parri",
-    name: "PORCION DE C. PARRI",
-    category: "PORCIONES EXTRA",
+    id: "fuerte-bestia",
+    name: "LA BESTIA",
+    category: "PICADITA ESPECIAL",
+    price: 25.0,
+    pricingMode: "fixed",
+  },
+
+  // 5. GUESAS AL BARRIL
+  {
+    id: "guesa-pecado-barril",
+    name: "EL PECADO DEL BARRIL",
+    category: "GUESAS AL BARRIL",
+    price: 6.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "guesa-chone-en-casa",
+    name: "CHONE EN CASA",
+    category: "GUESAS AL BARRIL",
+    price: 6.0,
+    pricingMode: "fixed",
+  },
+
+  // 6. EXTRA DE SALSAS
+  {
+    id: "salsa-tocino",
+    name: "SALSA DE TOCINO",
+    category: "EXTRA DE SALSAS",
     price: 1.0,
     pricingMode: "fixed",
   },
   {
-    id: "extra-cerdo",
-    name: "PORCION DE CERDO",
-    category: "PORCIONES EXTRA",
-    price: 2.25,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-costilla",
-    name: "PORCION DE COSTILLA",
-    category: "PORCIONES EXTRA",
-    price: 2.5,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-longaniza",
-    name: "PORCION DE LONGANIZA",
-    category: "PORCIONES EXTRA",
-    price: 1.25,
-    pricingMode: "fixed",
-  },
-  {
-    id: "extra-papas-fritas",
-    name: "PORCION DE PAPAS FRITAS",
-    category: "PORCIONES EXTRA",
-    price: 2.5,
+    id: "salsa-guacamole",
+    name: "GUACAMOLE",
+    category: "EXTRA DE SALSAS",
+    price: 1.0,
     pricingMode: "fixed",
   },
 
+  // 7. CORTES - RES ASADA
+  {
+    id: "corte-t-bone-steak",
+    name: "T BONE STEAK",
+    category: "CORTES - RES ASADA",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-t-bone",
+  },
+  {
+    id: "corte-ribeye",
+    name: "RIB EYE",
+    category: "CORTES - RES ASADA",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-t-bone",
+  },
+
+  // 8. ASADOS
+  {
+    id: "corte-filete-pechuga-pollo",
+    name: "FILETE DE PECHUGA DE POLLO",
+    category: "ASADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-pechuga-pollo",
+  },
+  {
+    id: "asado-picadita-pollo",
+    name: "PICADITA DE POLLO",
+    category: "ASADOS",
+    price: 6.0,
+    pricingMode: "fixed",
+  },
+
+  // 9. CORTES AHUMADOS
+  {
+    id: "corte-lomo-fino",
+    name: "LOMO FINO",
+    category: "CORTES AHUMADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-costillas-san-luis",
+    name: "COSTILLAS SAN LUIS",
+    category: "CORTES AHUMADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-costillas-baby-back",
+    name: "COSTILLAS BABY BACK",
+    category: "CORTES AHUMADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-matambre-cerdo",
+    name: "MATAMBRE DE CERDO",
+    category: "CORTES AHUMADOS",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-ahumado",
+  },
+  {
+    id: "corte-longa-ahumada",
+    name: "LONGA AHUMADA",
+    category: "CORTES AHUMADOS",
+    price: 8.0,
+    pricingMode: "fixed",
+  },
+
+  // 10. PANCETA
+  {
+    id: "corte-panceta-cerdo",
+    name: "PANCETA DE CERDO",
+    category: "PANCETA",
+    price: 0,
+    pricingMode: "weight",
+    weightFormula: "corte-panceta",
+  },
+
+  // 11. ENTRADAS Y ACOMPAÑANTES
   {
     id: "entrada-salchipapa",
     name: "SALCHIPAPA",
@@ -541,6 +433,150 @@ export const DEFAULT_MENU_CHONE = [
     price: 3.5,
     pricingMode: "fixed",
   },
+
+  // 12. PORCIONES
+  {
+    id: "extra-ensalada",
+    name: "PORCION DE ENSALADA",
+    category: "PORCIONES",
+    price: 0.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-pan",
+    name: "PORCION DE PAN",
+    category: "PORCIONES",
+    price: 0.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-papa",
+    name: "PORCION DE PAPA CECILIA",
+    category: "PORCIONES",
+    price: 0.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-c-parri",
+    name: "PORCION DE C. PARRILLERO",
+    category: "PORCIONES",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-pina",
+    name: "PORCION DE PINA",
+    category: "PORCIONES",
+    price: 1.25,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-c-f-hierb",
+    name: "PORCION DE FINAS HIERBAS",
+    category: "PORCIONES",
+    price: 1.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-patacones",
+    name: "PORCION DE PATACONES",
+    category: "PORCIONES",
+    price: 1.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-maduro",
+    name: "PORCION DE MADURO",
+    category: "PORCIONES",
+    price: 1.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-longaniza",
+    name: "PORCION DE LONGANIZA",
+    category: "PORCIONES",
+    price: 2.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moro",
+    name: "PORCION DE MORO",
+    category: "PORCIONES",
+    price: 2.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-choclo",
+    name: "PORCION DE CHOCLO",
+    category: "PORCIONES",
+    price: 2.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-cerdo",
+    name: "PORCION DE CERDO",
+    category: "PORCIONES",
+    price: 2.25,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-costilla",
+    name: "PORCION DE COSTILLA",
+    category: "PORCIONES",
+    price: 2.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-papas-fritas",
+    name: "PORCION DE PAPAS FRITAS",
+    category: "PORCIONES",
+    price: 2.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moro-extrachicloso",
+    name: "MORO EXTRACHICLOSO",
+    category: "PORCIONES",
+    price: 2.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-choclo-extrachicloso",
+    name: "CHOCLO EXTRA CHICLOSO",
+    category: "PORCIONES",
+    price: 3.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moroclo",
+    name: "PORCION DE MOROCLO",
+    category: "PORCIONES",
+    price: 3.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moroclo-extrachicloso",
+    name: "MOROCLO EXTRA CHICLOSO",
+    category: "PORCIONES",
+    price: 3.75,
+    pricingMode: "fixed",
+  },
+];
+
+/** Orden fijo de categorías en la carta (app mesero / caja). */
+export const MENU_CATEGORY_ORDER = [
+  "PICADITAS CERDO",
+  "BEBIDAS",
+  "PLATOS FUERTES",
+  "PICADITA ESPECIAL",
+  "GUESAS AL BARRIL",
+  "EXTRA DE SALSAS",
+  "CORTES - RES ASADA",
+  "ASADOS",
+  "CORTES AHUMADOS",
+  "PANCETA",
+  "ENTRADAS Y ACOMPAÑANTES",
+  "PORCIONES",
 ];
 
 /** @deprecated Usa getDefaultMenuForBranch(branchSiteId) */
