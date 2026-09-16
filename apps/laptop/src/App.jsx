@@ -620,11 +620,14 @@ function isBeverageDashboardItem(item) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
-  if (category === "bebidas" || menuItemId.startsWith("bebida-")) {
+  // Todo lo que en el menú está en la sección BEBIDAS (incluye postres si están ahí)
+  if (category === "bebidas" || menuItemId.startsWith("bebida-") || menuItemId.startsWith("postres-")) {
     return true;
   }
 
-  return /^(agua natural|agua|jugo frozen|jugo|gaseosa personal|gaseosa de 1l|gaseosa|fuze te|del valle|cerveza sol|cerveza club|solveza|jarra de sangria|cafe)$/.test(name);
+  return /^(agua|jugo|gaseosa|fuze|del valle|cerveza|solveza|sangria|cafe|postre|monster|club|amstel|coca|cola)/.test(
+    name,
+  );
 }
 
 function getCashCloseStatus(difference) {
@@ -851,7 +854,7 @@ function buildDashboardMetrics({
   const topDishes = allDishes.slice(0, 5);
   const topDishes10 = allDishes.slice(0, 10);
   const weightedCuts = [...weightedCutMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
-  const beverages = [...beverageMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
+  const beverages = [...beverageMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total);
   const containers = [...containerMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
   const extras = [...extraMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
 
@@ -920,8 +923,6 @@ function buildDashboardMetrics({
       { icon: "💵", label: "Efectivo", value: efectivoToday, hint: "Cobros reales en caja", tone: "cash" },
       { icon: "🏦", label: "Transferencia", value: transferenciaToday, hint: "Cobros por transferencia", tone: "transfer" },
       { icon: "🧾", label: "Total Pedidos", value: totalPaidOrders, hint: "Solo pagados en la jornada", tone: "muted", plain: true },
-      { icon: "📦", label: "Contenedores", value: totalContainersSold, hint: `${formatCurrency(containerRevenue)} cobrados`, tone: "muted", plain: true, suffix: "vendidos" },
-      { icon: "🥤", label: "Bebidas", value: totalBeveragesSold, hint: `${formatCurrency(beverageRevenue)} cobrados`, tone: "muted", plain: true, suffix: "vendidas" },
     ],
     paymentRows,
     paymentTotal,
@@ -4094,7 +4095,7 @@ function App() {
                 </h2>
                 <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
                   {publicPagesView
-                    ? "Mismas tablas que en la laptop: platos, cortes, extras, bebidas y pagos."
+                    ? "Resumen de la jornada: ventas, pagos y productos adicionales."
                     : "Jornada actual desde el último cierre. El histórico queda separado en Días anteriores."}
                 </p>
               </div>
@@ -4236,87 +4237,37 @@ function App() {
             <section className="stats-panel">
               <div className="section-header stats-panel-head">
                 <div>
-                  <h3>Ranking de platos</h3>
+                  <h3>Productos adicionales cobrados</h3>
                   <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                    Ordenado del más vendido al menos vendido.
+                    Extras cobrados en pedidos pagados de la jornada.
                   </p>
                 </div>
-                <span className="stats-chip">Top 5 / Top 10</span>
+                <span className="stats-chip">
+                  {dashboardStats.extras.reduce((acc, item) => acc + item.quantity, 0)} extras
+                </span>
               </div>
 
-              <div className="stats-split-grid">
-                <article className="ranking-card">
-                  <h4>Top 5 más vendidos</h4>
-                  <div className="stats-bar-list">
-                    {dashboardStats.topDishes.map((dish, index) => (
-                      <div className="stats-bar-row" key={`${dish.label}-top-${index}`}>
-                        <div className="stats-bar-meta">
-                          <span>{index + 1}. {dish.label}</span>
-                          <small>{dish.quantity} · {formatCurrency(dish.total)}</small>
-                        </div>
-                        <div className="stats-bar-track">
-                          <div
-                            className="stats-bar-fill"
-                            style={getSalesIntensityStyle(dish.quantity, Math.max(...dashboardStats.topDishes.map((item) => item.quantity), 0))}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </article>
-
-                <article className="ranking-card">
-                  <h4>Top 10 detalle</h4>
-                  <div className="stats-table-card">
-                    <table className="stats-table">
-                      <thead>
-                        <tr>
-                          <th>Plato</th>
-                          <th>Cantidad</th>
-                          <th>Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dashboardStats.topDishes10.length > 0 ? (
-                          dashboardStats.topDishes10.map((dish) => (
-                            <tr key={`${dish.key}-top10`}>
-                              <td>{dish.label}</td>
-                              <td>{dish.quantity}</td>
-                              <td>{formatCurrency(dish.total)}</td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan="3">Sin platos pagados todavía.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </article>
-              </div>
-
-              <div className="stats-table-card" style={{ marginTop: 14 }}>
+              <div className="stats-table-card">
                 <table className="stats-table">
                   <thead>
                     <tr>
-                      <th>Todos los platos de la jornada actual</th>
+                      <th>Producto Extra</th>
                       <th>Cantidad</th>
                       <th>Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {dashboardStats.allDishes.length > 0 ? (
-                      dashboardStats.allDishes.map((dish) => (
-                        <tr key={`${dish.key}-all-dishes`}>
-                          <td>{dish.label}</td>
-                          <td>{dish.quantity}</td>
-                          <td>{formatCurrency(dish.total)}</td>
+                    {dashboardStats.extras.length > 0 ? (
+                      dashboardStats.extras.map((item) => (
+                        <tr key={`extra-${item.key}`}>
+                          <td>{item.label}</td>
+                          <td>{item.quantity}</td>
+                          <td>{formatCurrency(item.total)}</td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="3">Sin platos pagados en esta jornada.</td>
+                        <td colSpan="3">No hay extras cobrados en esta jornada.</td>
                       </tr>
                     )}
                   </tbody>
@@ -4327,84 +4278,43 @@ function App() {
             <section className="stats-panel">
               <div className="section-header stats-panel-head">
                 <div>
-                  <h3>Cortes, contenedores, extras y bebidas</h3>
+                  <h3>Bebidas</h3>
                   <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                    Todo sale de pedidos pagados, incluyendo peso, precio y cobros extra.
+                    Todo lo de la sección Bebidas del menú: agua, jugos, gaseosas,
+                    cervezas, sangría, café, postres y demás.
                   </p>
                 </div>
-                <span className="stats-chip">{dashboardStats.totalKgSold.toFixed(2)} kg</span>
+                <span className="stats-chip">
+                  {dashboardStats.beverages.reduce((acc, item) => acc + item.quantity, 0)}{" "}
+                  vendidas
+                </span>
               </div>
 
-              <div className="stats-category-grid">
-                {[
-                  {
-                    title: "Cortes de carne por peso",
-                    subtitle: `${dashboardStats.totalKgSold.toFixed(2)} kg vendidos en jornada`,
-                    empty: "No hay ventas por peso registradas en esta jornada.",
-                    rows: dashboardStats.weightedCuts,
-                    columns: ["Corte", "Kg vendidos", "Total"],
-                    render: (item) => [item.label, `${item.quantity.toFixed(2)} kg`, formatCurrency(item.total)],
-                  },
-                  {
-                    title: "Contenedores vendidos",
-                    subtitle: `${dashboardStats.containers.reduce((acc, item) => acc + item.quantity, 0)} vendidos en jornada`,
-                    empty: "Sin contenedores vendidos en esta jornada.",
-                    rows: dashboardStats.containers,
-                    columns: ["Contenedor", "Cantidad", "Total"],
-                    render: (item) => [item.label, item.quantity, formatCurrency(item.total)],
-                  },
-                  {
-                    title: "Productos adicionales cobrados",
-                    subtitle: `${dashboardStats.extras.reduce((acc, item) => acc + item.quantity, 0)} cobros extra`,
-                    empty: "No hay extras cobrados en esta jornada.",
-                    rows: dashboardStats.extras,
-                    columns: ["Producto Extra", "Cantidad", "Total"],
-                    render: (item) => [item.label, item.quantity, formatCurrency(item.total)],
-                  },
-                  {
-                    title: "Bebidas",
-                    subtitle: `${dashboardStats.beverages.reduce((acc, item) => acc + item.quantity, 0)} vendidas`,
-                    empty: "No hay bebidas cobradas en esta jornada.",
-                    rows: dashboardStats.beverages,
-                    columns: ["Bebida", "Cantidad", "Total"],
-                    render: (item) => [item.label, item.quantity, formatCurrency(item.total)],
-                  },
-                ].map((block) => (
-                  <article className="stats-category-block" key={block.title}>
-                    <div className="stats-block-head">
-                      <div>
-                        <p className="stats-block-label">{block.title}</p>
-                        <h4>{block.subtitle}</h4>
-                      </div>
-                    </div>
-                    <div className="stats-table-card">
-                      <table className="stats-table">
-                        <thead>
-                          <tr>
-                            {block.columns.map((column) => (
-                              <th key={column}>{column}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {block.rows.length > 0 ? (
-                            block.rows.map((item) => (
-                              <tr key={`${block.title}-${item.key}`}>
-                                {block.render(item).map((value, index) => (
-                                  <td key={`${item.key}-${index}`}>{value}</td>
-                                ))}
-                              </tr>
-                            ))
-                          ) : (
-                            <tr>
-                              <td colSpan={block.columns.length}>{block.empty}</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </article>
-                ))}
+              <div className="stats-table-card">
+                <table className="stats-table">
+                  <thead>
+                    <tr>
+                      <th>Bebida</th>
+                      <th>Cantidad</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboardStats.beverages.length > 0 ? (
+                      dashboardStats.beverages.map((item) => (
+                        <tr key={`bebida-${item.key}`}>
+                          <td>{item.label}</td>
+                          <td>{item.quantity}</td>
+                          <td>{formatCurrency(item.total)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="3">No hay bebidas cobradas en esta jornada.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </section>
 
