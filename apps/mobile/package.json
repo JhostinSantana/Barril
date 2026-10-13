@@ -16,14 +16,14 @@
     "@react-native-async-storage/async-storage": "2.1.2",
     "expo": "~53.0.27",
     "expo-asset": "~11.1.7",
-    "expo-constants": "~17.1.8",
     "expo-camera": "~16.1.11",
+    "expo-constants": "~17.1.8",
     "expo-network": "~7.1.5",
     "react": "19.0.0",
     "react-native": "0.79.6",
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "babel-preset-expo": "^13.1.0"
+    "babel-preset-expo": "~13.2.5"
   }
 }

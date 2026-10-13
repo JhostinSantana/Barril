@@ -475,6 +475,9 @@ export async function initializeDatabase() {
   if (!menuColumns.some((column) => column.name === 'weight_formula')) {
     await run("ALTER TABLE menu_items ADD COLUMN weight_formula TEXT");
   }
+  if (!menuColumns.some((column) => column.name === 'menu_group')) {
+    await run('ALTER TABLE menu_items ADD COLUMN menu_group TEXT');
+  }
 
   const orderItemColumnsAfterMenu = await all('PRAGMA table_info(order_items)');
   if (!orderItemColumnsAfterMenu.some((column) => column.name === 'weight_formula')) {
@@ -542,6 +545,7 @@ export async function initializeDatabase() {
   const branchSiteId = await resolveMenuBranchId();
   await syncMenuForBranch(branchSiteId);
   await repairMispricedOpenOrders();
+  await repriceOpenOrdersNowFixed();
 }
 
 async function resolveMenuBranchId() {
@@ -565,8 +569,8 @@ export async function syncMenuForBranch(branchSiteId) {
     await run('DELETE FROM menu_items');
     for (const [index, item] of menu.entries()) {
       await run(
-        'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [item.id, item.name, item.category, item.price, item.pricingMode ?? 'fixed', item.weightFormula ?? null, index]
+        'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, menu_group, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [item.id, item.name, item.category, item.price, item.pricingMode ?? 'fixed', item.weightFormula ?? null, item.menuGroup ?? null, index]
       );
     }
   }
@@ -581,7 +585,7 @@ async function syncMenuItemsFromDefault(menu, versionKey) {
   for (const [index, item] of menu.entries()) {
     await run(
       `UPDATE menu_items
-       SET name = ?, category = ?, price = ?, pricing_mode = ?, weight_formula = ?, sort_order = ?
+       SET name = ?, category = ?, price = ?, pricing_mode = ?, weight_formula = ?, menu_group = ?, sort_order = ?
        WHERE id = ?`,
       [
         item.name,
@@ -589,6 +593,7 @@ async function syncMenuItemsFromDefault(menu, versionKey) {
         item.price,
         item.pricingMode ?? 'fixed',
         item.weightFormula ?? null,
+        item.menuGroup ?? null,
         index,
         item.id
       ]
@@ -608,7 +613,7 @@ async function syncMissingMenuItems(menu) {
     if (existingIds.has(item.id)) continue;
 
     await run(
-      'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, menu_group, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         item.id,
         item.name,
@@ -616,6 +621,7 @@ async function syncMissingMenuItems(menu) {
         item.price,
         item.pricingMode ?? 'fixed',
         item.weightFormula ?? null,
+        item.menuGroup ?? null,
         sortOrder
       ]
     );
@@ -718,7 +724,7 @@ export async function deleteWaiter(name) {
 
 export async function getMenu() {
   return all(
-    'SELECT id, name, category, price, pricing_mode AS pricingMode, weight_formula AS weightFormula FROM menu_items ORDER BY sort_order ASC'
+    'SELECT id, name, category, price, pricing_mode AS pricingMode, weight_formula AS weightFormula, menu_group AS menuGroup FROM menu_items ORDER BY sort_order ASC'
   );
 }
 
@@ -1268,6 +1274,68 @@ async function repairMispricedOpenOrders() {
   );
 }
 
+async function repriceOpenOrdersNowFixed() {
+  const migrationKey = '2026-10-13-carta-precios-fijos';
+  const doneRow = await get('SELECT value FROM settings WHERE key = ?', [migrationKey]);
+  if (doneRow?.value === 'done') return;
+
+  const menu = await getMenu();
+  const menuById = new Map(menu.map((item) => [item.id, item]));
+  const orders = await all(`
+    SELECT id, paid_amount AS paidAmount, expenses_json AS expensesJson
+    FROM orders
+    WHERE status IN ('pending', 'partial')
+  `);
+
+  for (const order of orders) {
+    const rawItems = await listOrderItems(order.id);
+    let changed = false;
+
+    for (const item of rawItems) {
+      const menuItem = menuById.get(item.menuItemId);
+      if (!menuItem || menuItem.pricingMode === 'weight') continue;
+      if (item.pricingMode !== 'weight' && item.name === menuItem.name && Number(item.unitPrice) === Number(menuItem.price)) {
+        continue;
+      }
+      if (item.pricingMode !== 'weight' && item.menuItemId !== 'corte-longa-ahumada') continue;
+
+      const quantity = Math.max(1, Number(item.quantity) || 1);
+      const unitPrice = roundMoney(menuItem.price);
+      const subtotal = roundMoney(unitPrice * quantity);
+
+      await run(
+        `UPDATE order_items
+         SET name = ?, category = ?, unit_price = ?, subtotal = ?, weight_grams = NULL, weight_breakdown_json = NULL, pricing_mode = 'fixed', weight_formula = NULL
+         WHERE order_id = ? AND menu_item_id = ?`,
+        [
+          menuItem.name,
+          menuItem.category,
+          unitPrice,
+          subtotal,
+          order.id,
+          item.menuItemId
+        ]
+      );
+      changed = true;
+    }
+
+    if (!changed) continue;
+
+    const refreshedItems = await listOrderItems(order.id);
+    const expenses = normalizeOrderExpenses(parseJsonArray(order.expensesJson));
+    const total = roundMoney(
+      refreshedItems.reduce((acc, item) => acc + Number(item.subtotal ?? 0), 0) + calculateExpensesTotal(expenses)
+    );
+    await run('UPDATE orders SET total = ? WHERE id = ?', [total, order.id]);
+  }
+
+  await run(
+    `INSERT INTO settings(key, value) VALUES(?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [migrationKey, 'done']
+  );
+}
+
 async function listOrderPayments(orderId) {
   return all(
     'SELECT id, payment_method AS paymentMethod, amount, tendered_amount AS tenderedAmount, change_given AS changeGiven, transfer_number AS transferenceNumber, created_at AS createdAt FROM order_payments WHERE order_id = ? ORDER BY id ASC',
@@ -1301,7 +1369,7 @@ export async function restoreData(payload) {
     if (Array.isArray(payload.menu)) {
       for (const item of payload.menu) {
         await run(
-          'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO menu_items(id, name, category, price, pricing_mode, weight_formula, menu_group, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [
             item.id,
             item.name,
@@ -1309,6 +1377,7 @@ export async function restoreData(payload) {
             item.price,
             item.pricing_mode ?? item.pricingMode ?? 'fixed',
             item.weight_formula ?? item.weightFormula ?? null,
+            item.menu_group ?? item.menuGroup ?? null,
             item.sort_order ?? 0
           ]
         );

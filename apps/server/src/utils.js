@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-09-16-menu-orden-carta-v3";
-export const MENU_VERSION_PORTOVIEJO = "2026-09-16-menu-orden-carta-v3";
+export const MENU_VERSION_CHONE = "2026-10-13-bloque-desayunos";
+export const MENU_VERSION_PORTOVIEJO = "2026-10-13-bloque-desayunos";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -88,48 +88,55 @@ export function createContainerExpense(quantity = 1) {
   };
 }
 
-export const DEFAULT_MENU_CHONE = [
-  // 1. PICADITAS CERDO
+const DEFAULT_MENU_CHONE_SOURCE = [
+  // 1. PICADITAS
   {
     id: "picaditas-probar",
     name: "PARA PROBAR",
-    category: "PICADITAS CERDO",
+    category: "PICADITAS",
     price: 3.0,
     pricingMode: "fixed",
   },
   {
     id: "picaditas-picar",
     name: "PARA PICAR",
-    category: "PICADITAS CERDO",
+    category: "PICADITAS",
     price: 4.0,
     pricingMode: "fixed",
   },
   {
     id: "picaditas-gozar",
     name: "PARA GOZAR",
-    category: "PICADITAS CERDO",
+    category: "PICADITAS",
     price: 6.0,
     pricingMode: "fixed",
   },
   {
     id: "picaditas-familiar",
     name: "PARA ENAMORAR",
-    category: "PICADITAS CERDO",
+    category: "PICADITAS",
     price: 10.0,
     pricingMode: "fixed",
   },
   {
     id: "picaditas-fritas",
     name: "PAPAS FRITAS",
-    category: "PICADITAS CERDO",
-    price: 1.25,
+    category: "PICADITAS",
+    price: 1.0,
     pricingMode: "fixed",
   },
   {
     id: "picaditas-patacones",
     name: "PATACONES",
-    category: "PICADITAS CERDO",
-    price: 1.25,
+    category: "PICADITAS",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "fuerte-bestia",
+    name: "LA BESTIA",
+    category: "PICADITAS",
+    price: 25.0,
     pricingMode: "fixed",
   },
 
@@ -138,26 +145,26 @@ export const DEFAULT_MENU_CHONE = [
     id: "bebida-cafe",
     name: "CAFE PASADO",
     category: "BEBIDAS",
-    price: 0.75,
+    price: 0.5,
     pricingMode: "fixed",
   },
   {
     id: "bebida-del-valle",
     name: "DEL VALLE",
     category: "BEBIDAS",
-    price: 0.75,
+    price: 0.5,
     pricingMode: "fixed",
   },
   {
     id: "bebida-agua-mineral",
-    name: "AGUA MINERAL",
+    name: "AGUA CON GAS",
     category: "BEBIDAS",
     price: 1.0,
     pricingMode: "fixed",
   },
   {
     id: "bebida-agua",
-    name: "AGUA NATURAL",
+    name: "AGUA NATURAL DASANI",
     category: "BEBIDAS",
     price: 1.0,
     pricingMode: "fixed",
@@ -166,21 +173,28 @@ export const DEFAULT_MENU_CHONE = [
     id: "bebida-gaseosa-personal",
     name: "GASEOSA PERSONAL",
     category: "BEBIDAS",
-    price: 1.0,
+    price: 0.75,
     pricingMode: "fixed",
   },
   {
     id: "bebida-fuze-te",
     name: "FUZE TE",
     category: "BEBIDAS",
-    price: 1.0,
+    price: 0.75,
     pricingMode: "fixed",
   },
   {
     id: "bebida-gaseosa-1l",
     name: "GASEOSA SABORES 1L",
     category: "BEBIDAS",
-    price: 1.25,
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-jugo-natural",
+    name: "JUGO NATURAL",
+    category: "BEBIDAS",
+    price: 1.0,
     pricingMode: "fixed",
   },
   {
@@ -191,15 +205,8 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
   {
-    id: "postres-porcion",
-    name: "POSTRE",
-    category: "BEBIDAS",
-    price: 1.75,
-    pricingMode: "fixed",
-  },
-  {
     id: "bebida-gaseosa-coca-1-3l",
-    name: "GASEOSA COCA 1.3L",
+    name: "GASEOSA COCA 1L",
     category: "BEBIDAS",
     price: 2.0,
     pricingMode: "fixed",
@@ -208,14 +215,14 @@ export const DEFAULT_MENU_CHONE = [
     id: "bebida-cerveza-club",
     name: "CLUB VERDE PLATINO",
     category: "BEBIDAS",
-    price: 2.25,
+    price: 2.0,
     pricingMode: "fixed",
   },
   {
     id: "bebida-cerveza-sol",
     name: "CERVEZA AMSTEL",
     category: "BEBIDAS",
-    price: 2.25,
+    price: 2.0,
     pricingMode: "fixed",
   },
   {
@@ -237,6 +244,55 @@ export const DEFAULT_MENU_CHONE = [
     name: "JARRA DE SANGRIA",
     category: "BEBIDAS",
     price: 11.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-taza-leche",
+    name: "TAZA DE LECHE",
+    category: "BEBIDAS",
+    price: 0.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-taza-te",
+    name: "TAZA DE TE",
+    category: "BEBIDAS",
+    price: 0.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-cafe-avellanas",
+    name: "CAFE DE AVELLANAS PASADO",
+    category: "BEBIDAS",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-leche-chocolate",
+    name: "LECHE CON CHOCOLATE",
+    category: "BEBIDAS",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-leche-cafe",
+    name: "LECHE CON CAFE",
+    category: "BEBIDAS",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-capuchino-frio",
+    name: "CAPUCHINO FRIO",
+    category: "BEBIDAS",
+    price: 1.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "bebida-latte-espanol",
+    name: "LATTE ESPAÑOL",
+    category: "BEBIDAS",
+    price: 2.5,
     pricingMode: "fixed",
   },
 
@@ -271,34 +327,32 @@ export const DEFAULT_MENU_CHONE = [
   },
   {
     id: "fuerte-cambio-arroz",
-    name: "CAMBIO POR CHOCLO",
+    name: "CAMBIO POR CHOCLO O PANAMITO",
     category: "PLATOS FUERTES",
     price: 0.5,
     pricingMode: "fixed",
   },
-
-  // 4. PICADITA ESPECIAL
   {
-    id: "fuerte-bestia",
-    name: "LA BESTIA",
-    category: "PICADITA ESPECIAL",
-    price: 25.0,
+    id: "fuerte-cambio-frejol",
+    name: "CAMBIO POR FREJOL ROJO",
+    category: "PLATOS FUERTES",
+    price: 1.0,
     pricingMode: "fixed",
   },
 
-  // 5. GUESAS AL BARRIL
+  // 5. HAMBURGUESAS
   {
     id: "guesa-pecado-barril",
     name: "EL PECADO DEL BARRIL",
-    category: "GUESAS AL BARRIL",
-    price: 6.5,
+    category: "HAMBURGUESAS",
+    price: 5.5,
     pricingMode: "fixed",
   },
   {
     id: "guesa-chone-en-casa",
     name: "CHONE EN CASA",
-    category: "GUESAS AL BARRIL",
-    price: 6.0,
+    category: "HAMBURGUESAS",
+    price: 5.0,
     pricingMode: "fixed",
   },
 
@@ -318,32 +372,27 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
 
-  // 7. CORTES - RES ASADA
+  // 7. ASADOS
   {
     id: "corte-t-bone-steak",
     name: "T BONE STEAK",
-    category: "CORTES - RES ASADA",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-t-bone",
+    category: "ASADOS",
+    price: 10.0,
+    pricingMode: "fixed",
   },
   {
     id: "corte-ribeye",
     name: "RIB EYE",
-    category: "CORTES - RES ASADA",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-t-bone",
+    category: "ASADOS",
+    price: 10.0,
+    pricingMode: "fixed",
   },
-
-  // 8. ASADOS
   {
     id: "corte-filete-pechuga-pollo",
-    name: "FILETE DE PECHUGA DE POLLO",
+    name: "FILETE DE POLLO",
     category: "ASADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-pechuga-pollo",
+    price: 5.5,
+    pricingMode: "fixed",
   },
   {
     id: "asado-picadita-pollo",
@@ -352,84 +401,106 @@ export const DEFAULT_MENU_CHONE = [
     price: 6.0,
     pricingMode: "fixed",
   },
+  {
+    id: "asado-cerdo",
+    name: "CERDO ASADO",
+    category: "ASADOS",
+    price: 5.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "asado-res",
+    name: "RES ASADA",
+    category: "ASADOS",
+    price: 7.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "asado-chuleta-cerdo",
+    name: "CHULETA DE CERDO",
+    category: "ASADOS",
+    price: 5.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "corte-panceta-cerdo",
+    name: "PANCETA DE CERDO",
+    category: "ASADOS",
+    price: 10.0,
+    pricingMode: "fixed",
+  },
 
   // 9. CORTES AHUMADOS
   {
     id: "corte-lomo-fino",
     name: "LOMO FINO",
     category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
+    price: 10.0,
+    pricingMode: "fixed",
   },
   {
     id: "corte-costillas-san-luis",
     name: "COSTILLAS SAN LUIS",
     category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
+    price: 10.0,
+    pricingMode: "fixed",
   },
   {
     id: "corte-costillas-baby-back",
     name: "COSTILLAS BABY BACK",
     category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
+    price: 10.0,
+    pricingMode: "fixed",
   },
   {
     id: "corte-matambre-cerdo",
     name: "MATAMBRE DE CERDO",
     category: "CORTES AHUMADOS",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-ahumado",
+    price: 10.0,
+    pricingMode: "fixed",
   },
   {
     id: "corte-longa-ahumada",
-    name: "LONGA AHUMADA",
+    name: "LONGANIZA AHUMADA",
     category: "CORTES AHUMADOS",
-    price: 8.0,
+    price: 6.0,
     pricingMode: "fixed",
   },
-  // 10. PANCETA
   {
-    id: "corte-panceta-cerdo",
-    name: "PANCETA DE CERDO",
-    category: "PANCETA",
-    price: 0,
-    pricingMode: "weight",
-    weightFormula: "corte-panceta",
+    id: "fin-tonga-costilla",
+    name: "TONGA DE COSTILLA AHUMADA",
+    category: "TONGAS",
+    price: 6.5,
+    pricingMode: "fixed",
   },
 
-  // 11. ENTRADAS Y ACOMPAÑANTES
+  // 11. ENTRADAS
   {
     id: "entrada-salchipapa",
     name: "SALCHIPAPA",
-    category: "ENTRADAS Y ACOMPAÑANTES",
-    price: 3.5,
+    category: "ENTRADAS",
+    price: 3.0,
     pricingMode: "fixed",
   },
   {
     id: "entrada-papas-cheddar",
     name: "PAPAS CON CHEDDAR",
-    category: "ENTRADAS Y ACOMPAÑANTES",
+    category: "ENTRADAS",
     price: 3.0,
     pricingMode: "fixed",
   },
   {
     id: "entrada-patacones-chicle",
     name: "PATACONES CON CHICLE",
-    category: "ENTRADAS Y ACOMPAÑANTES",
-    price: 3.5,
+    category: "ENTRADAS",
+    price: 3.0,
     pricingMode: "fixed",
   },
   {
     id: "entrada-maduro-chicle",
     name: "MADURO CON CHICLE",
-    category: "ENTRADAS Y ACOMPAÑANTES",
-    price: 3.5,
+    category: "ENTRADAS",
+    price: 3.0,
     pricingMode: "fixed",
   },
 
@@ -438,21 +509,21 @@ export const DEFAULT_MENU_CHONE = [
     id: "extra-ensalada",
     name: "PORCION DE ENSALADA",
     category: "PORCIONES",
-    price: 0.5,
+    price: 0,
     pricingMode: "fixed",
   },
   {
     id: "extra-pan",
     name: "PORCION DE PAN",
     category: "PORCIONES",
-    price: 0.75,
+    price: 0.5,
     pricingMode: "fixed",
   },
   {
     id: "extra-papa",
     name: "PORCION DE PAPA CECILIA",
     category: "PORCIONES",
-    price: 0.75,
+    price: 0.5,
     pricingMode: "fixed",
   },
   {
@@ -466,6 +537,13 @@ export const DEFAULT_MENU_CHONE = [
     id: "extra-pina",
     name: "PORCION DE PINA",
     category: "PORCIONES",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-media-papas-fritas",
+    name: "MEDIA PORCION DE PAPAS FRITAS",
+    category: "PORCIONES",
     price: 1.25,
     pricingMode: "fixed",
   },
@@ -473,21 +551,21 @@ export const DEFAULT_MENU_CHONE = [
     id: "extra-c-f-hierb",
     name: "PORCION DE FINAS HIERBAS",
     category: "PORCIONES",
-    price: 1.75,
+    price: 1.25,
     pricingMode: "fixed",
   },
   {
     id: "extra-patacones",
     name: "PORCION DE PATACONES",
     category: "PORCIONES",
-    price: 1.75,
+    price: 1.5,
     pricingMode: "fixed",
   },
   {
     id: "extra-maduro",
     name: "PORCION DE MADURO",
     category: "PORCIONES",
-    price: 1.75,
+    price: 1.25,
     pricingMode: "fixed",
   },
   {
@@ -529,14 +607,14 @@ export const DEFAULT_MENU_CHONE = [
     id: "extra-papas-fritas",
     name: "PORCION DE PAPAS FRITAS",
     category: "PORCIONES",
-    price: 2.5,
+    price: 2.0,
     pricingMode: "fixed",
   },
   {
     id: "extra-moro-extrachicloso",
     name: "MORO EXTRACHICLOSO",
     category: "PORCIONES",
-    price: 2.5,
+    price: 2.75,
     pricingMode: "fixed",
   },
   {
@@ -548,9 +626,16 @@ export const DEFAULT_MENU_CHONE = [
   },
   {
     id: "extra-moroclo",
-    name: "PORCION DE MOROCLO",
+    name: "PORCION DE MOROCLO MIXTO",
     category: "PORCIONES",
-    price: 3.0,
+    price: 3.25,
+    pricingMode: "fixed",
+  },
+  {
+    id: "extra-moro-frejol",
+    name: "MORO DE FREJOL ROJO",
+    category: "PORCIONES",
+    price: 3.5,
     pricingMode: "fixed",
   },
   {
@@ -561,22 +646,156 @@ export const DEFAULT_MENU_CHONE = [
     pricingMode: "fixed",
   },
 
+  // 13. POSTRES
+  {
+    id: "postre-cheesecake-maracuya",
+    name: "CHEESECAKE DE MARACUYA",
+    category: "POSTRES",
+    price: 1.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "postre-cheesecake-frutos-rojos",
+    name: "CHEESECAKE DE FRUTOS ROJOS",
+    category: "POSTRES",
+    price: 1.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "postre-cheesecake-vaquita",
+    name: "CHEESECAKE DE VAQUITA",
+    category: "POSTRES",
+    price: 1.75,
+    pricingMode: "fixed",
+  },
+
+  // 14. PLATANO
+  {
+    id: "platano-bola-brava",
+    name: "BOLA BRAVA",
+    category: "PLATANO",
+    price: 3.75,
+    pricingMode: "fixed",
+  },
+  {
+    id: "platano-tigre",
+    name: "TIGRE",
+    category: "PLATANO",
+    price: 6.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "platano-patatum",
+    name: "PATATUM",
+    category: "PLATANO",
+    price: 3.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "platano-tosta-mora",
+    name: "TOSTA MORA",
+    category: "PLATANO",
+    price: 2.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "platano-complemento-queso",
+    name: "COMPLEMENTO QUESO",
+    category: "PLATANO",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "platano-complemento-jamon",
+    name: "COMPLEMENTO JAMON",
+    category: "PLATANO",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "platano-complemento-chicharron",
+    name: "COMPLEMENTO CHICHARRON",
+    category: "PLATANO",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "platano-complemento-longaniza",
+    name: "COMPLEMENTO LONGANIZA",
+    category: "PLATANO",
+    price: 1.0,
+    pricingMode: "fixed",
+  },
+
+  // 15. ESPECIALES
+  {
+    id: "especial-spagueti-pancakes",
+    name: "SPAGUETI DE PANCAKES",
+    category: "ESPECIALES",
+    price: 3.5,
+    pricingMode: "fixed",
+  },
+  {
+    id: "especial-sandwich-frio",
+    name: "SANDWICH FRIO",
+    category: "ESPECIALES",
+    price: 2.0,
+    pricingMode: "fixed",
+  },
+  {
+    id: "especial-sandwich-proteina",
+    name: "SANDWICH PROTEINA",
+    category: "ESPECIALES",
+    price: 4.25,
+    pricingMode: "fixed",
+  },
+  {
+    id: "especial-taco-breack",
+    name: "TACO BREACK",
+    category: "ESPECIALES",
+    price: 2.0,
+    pricingMode: "fixed",
+  },
+
 ];
+
+const DESAYUNO_DRINK_IDS = new Set([
+  "bebida-taza-leche",
+  "bebida-taza-te",
+  "bebida-cafe-avellanas",
+  "bebida-leche-chocolate",
+  "bebida-leche-cafe",
+  "bebida-capuchino-frio",
+  "bebida-latte-espanol",
+]);
+
+export const DEFAULT_MENU_CHONE = DEFAULT_MENU_CHONE_SOURCE.map((item) => {
+  if (
+    item.category === "PLATANO" ||
+    item.category === "ESPECIALES" ||
+    DESAYUNO_DRINK_IDS.has(item.id)
+  ) {
+    return { ...item, menuGroup: "DESAYUNOS" };
+  }
+  return item;
+});
 
 /** Orden fijo de categorías en la carta (app mesero / caja). */
 export const MENU_CATEGORY_ORDER = [
-  "PICADITAS CERDO",
-  "BEBIDAS",
+  "PICADITAS",
   "PLATOS FUERTES",
-  "PICADITA ESPECIAL",
-  "GUESAS AL BARRIL",
-  "EXTRA DE SALSAS",
-  "CORTES - RES ASADA",
-  "ASADOS",
   "CORTES AHUMADOS",
-  "PANCETA",
-  "ENTRADAS Y ACOMPAÑANTES",
+  "ASADOS",
+  "ENTRADAS",
+  "HAMBURGUESAS",
+  "POSTRES",
+  "BEBIDAS",
   "PORCIONES",
+  "TONGAS",
+  "EXTRA DE SALSAS",
+  "DESAYUNOS",
+  "PLATANO",
+  "ESPECIALES",
 ];
 
 /** @deprecated Usa getDefaultMenuForBranch(branchSiteId) */
@@ -641,11 +860,13 @@ function resolveOrderItemDetails(item, menuItem) {
   const weightBreakdown = normalizeWeightBreakdown(
     item.weightBreakdown ?? item.weightBreakdownJson,
   );
-  const isWeighted =
-    pricingMode === "weight" ||
-    isWeightedMenuItem(menuItem) ||
-    weightGrams > 0 ||
-    weightBreakdown.length > 0;
+  // El menú manda: si el plato ya es de precio fijo, un gramaje viejo
+  // guardado en la cuenta no puede volver a calcular ni bloquear el cobro.
+  const isWeighted = menuItem
+    ? isWeightedMenuItem(menuItem)
+    : pricingMode === "weight" ||
+      weightGrams > 0 ||
+      weightBreakdown.length > 0;
 
   if (isWeighted) {
     const weightFormula = item?.weightFormula ?? resolveWeightFormula(menuItem);
@@ -689,15 +910,21 @@ function resolveOrderItemDetails(item, menuItem) {
     };
   }
 
-  const unitPrice = hasProvidedMoney(item.unitPrice)
-    ? roundMoney(item.unitPrice)
-    : roundMoney(menuItem?.price ?? 0);
-  const subtotal = hasProvidedMoney(item.subtotal)
-    ? roundMoney(item.subtotal)
-    : roundMoney(unitPrice * quantity);
+  const staleWeight =
+    Boolean(menuItem) &&
+    !isWeightedMenuItem(menuItem) &&
+    (pricingMode === "weight" || weightGrams > 0 || weightBreakdown.length > 0);
+  const unitPrice =
+    staleWeight || !hasProvidedMoney(item.unitPrice)
+      ? roundMoney(menuItem?.price ?? 0)
+      : roundMoney(item.unitPrice);
+  const subtotal =
+    staleWeight || !hasProvidedMoney(item.subtotal)
+      ? roundMoney(unitPrice * quantity)
+      : roundMoney(item.subtotal);
 
   return {
-    pricingMode,
+    pricingMode: "fixed",
     weightGrams: null,
     weightBreakdown: null,
     unitPrice,
