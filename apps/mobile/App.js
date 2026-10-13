@@ -186,42 +186,86 @@ export default function App() {
     [quantities]
   );
 
-  const MENU_CATEGORY_ORDER = [
-    'PICADITAS CERDO',
-    'BEBIDAS',
-    'PLATOS FUERTES',
-    'PICADITA ESPECIAL',
-    'GUESAS AL BARRIL',
-    'EXTRA DE SALSAS',
-    'CORTES - RES ASADA',
-    'ASADOS',
-    'CORTES AHUMADOS',
-    'PANCETA',
-    'ENTRADAS Y ACOMPAÑANTES',
-    'PORCIONES',
+  const MENU_SECTION_ORDER = [
+    { group: '', category: 'PICADITAS' },
+    { group: '', category: 'PLATOS FUERTES' },
+    { group: '', category: 'CORTES AHUMADOS' },
+    { group: '', category: 'ASADOS' },
+    { group: '', category: 'ENTRADAS' },
+    { group: '', category: 'HAMBURGUESAS' },
+    { group: '', category: 'POSTRES' },
+    { group: '', category: 'BEBIDAS' },
+    { group: '', category: 'PORCIONES' },
+    { group: '', category: 'TONGAS' },
+    { group: '', category: 'EXTRA DE SALSAS' },
+    { group: 'DESAYUNOS', category: 'PLATANO' },
+    { group: 'DESAYUNOS', category: 'ESPECIALES' },
+    { group: 'DESAYUNOS', category: 'BEBIDAS' },
+  ];
+
+  const BREAKFAST_DRINK_ORDER = [
+    'bebida-cafe',
+    'bebida-taza-leche',
+    'bebida-taza-te',
+    'bebida-fuze-te',
+    'bebida-gaseosa-personal',
+    'bebida-cafe-avellanas',
+    'bebida-agua',
+    'bebida-agua-mineral',
+    'bebida-jugo-natural',
+    'bebida-leche-chocolate',
+    'bebida-leche-cafe',
+    'bebida-jugo-frozen',
+    'bebida-capuchino-frio',
+    'bebida-latte-espanol',
   ];
 
   const menuSections = useMemo(() => {
-    const grouped = menu.reduce((acc, item) => {
+    const grouped = new Map();
+    for (const item of menu) {
+      const group = item.menuGroup || '';
       const category = item.category || 'Sin categoria';
-      if (!acc[category]) acc[category] = [];
-      acc[category].push(item);
-      return acc;
-    }, {});
+      const key = `${group}::${category}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, { kind: 'section', key, group, category, items: [] });
+      }
+      grouped.get(key).items.push(item);
+    }
 
-    return Object.entries(grouped)
-      .sort(([a], [b]) => {
-        const ia = MENU_CATEGORY_ORDER.indexOf(a);
-        const ib = MENU_CATEGORY_ORDER.indexOf(b);
-        const ra = ia === -1 ? 999 : ia;
-        const rb = ib === -1 ? 999 : ib;
-        if (ra !== rb) return ra - rb;
-        return a.localeCompare(b);
-      })
-      .map(([category, items]) => ({
-        category,
-        items,
-      }));
+    const byId = new Map(menu.map((item) => [item.id, item]));
+    const breakfastDrinks = BREAKFAST_DRINK_ORDER
+      .map((id) => byId.get(id))
+      .filter(Boolean);
+    if (breakfastDrinks.length > 0) {
+      grouped.set('DESAYUNOS::BEBIDAS', {
+        kind: 'section',
+        key: 'DESAYUNOS::BEBIDAS',
+        group: 'DESAYUNOS',
+        category: 'BEBIDAS',
+        items: breakfastDrinks,
+      });
+    }
+
+    const orderedKeys = MENU_SECTION_ORDER.map(({ group, category }) => `${group}::${category}`);
+    const sections = [...grouped.values()].sort((left, right) => {
+      const ia = orderedKeys.indexOf(left.key);
+      const ib = orderedKeys.indexOf(right.key);
+      const ra = ia === -1 ? 999 : ia;
+      const rb = ib === -1 ? 999 : ib;
+      if (ra !== rb) return ra - rb;
+      return left.category.localeCompare(right.category);
+    });
+
+    const withDivider = [];
+    let breakfastOpened = false;
+    for (const section of sections) {
+      if (section.group === 'DESAYUNOS' && !breakfastOpened) {
+        withDivider.push({ kind: 'divider', key: 'divider-DESAYUNOS', group: 'DESAYUNOS', title: 'DESAYUNOS' });
+        breakfastOpened = true;
+      }
+      withDivider.push(section);
+    }
+    return withDivider;
   }, [menu]);
 
   const [menuQuery, setMenuQuery] = useState('');
@@ -230,12 +274,20 @@ export default function App() {
   const filteredMenuSections = useMemo(() => {
     const q = (menuQuery || '').trim().toLowerCase();
     if (!q) return menuSections;
-    return menuSections
-      .map((section) => ({
-        ...section,
-        items: section.items.filter((it) => (it.name || '').toLowerCase().includes(q))
-      }))
-      .filter((s) => (s.items || []).length > 0);
+    const matched = menuSections
+      .map((section) => {
+        if (section.kind === 'divider') return section;
+        return {
+          ...section,
+          items: section.items.filter((it) => (it.name || '').toLowerCase().includes(q))
+        };
+      })
+      .filter((section) => section.kind === 'divider' || (section.items || []).length > 0);
+
+    return matched.filter((section, index, list) => {
+      if (section.kind !== 'divider') return true;
+      return list.slice(index + 1).some((next) => next.kind !== 'divider' && next.group === section.group);
+    });
   }, [menuSections, menuQuery]);
 
   useEffect(() => {
@@ -245,7 +297,10 @@ export default function App() {
       // if already initialized, keep existing state
       if (Object.keys(cur).length > 0) return cur;
       const next = {};
-      for (const s of menuSections) next[s.category] = true;
+      for (const s of menuSections) {
+        if (s.kind === 'divider') continue;
+        next[s.key] = true;
+      }
       return next;
     });
   }, [menuSections]);
@@ -1066,11 +1121,19 @@ export default function App() {
         {loading || connecting ? <ActivityIndicator color="#1f8f73" /> : null}
 
         {filteredMenuSections.map((section) => {
+          if (section.kind === 'divider') {
+            return (
+              <View key={section.key} style={styles.menuDivider}>
+                <Text style={styles.menuDividerText}>{section.title}</Text>
+              </View>
+            );
+          }
+
           const isSearching = (menuQuery || '').trim().length > 0;
-          const isCollapsed = isSearching ? false : (collapsedSections[section.category] ?? true);
+          const isCollapsed = isSearching ? false : (collapsedSections[section.key] ?? true);
           return (
-            <View key={section.category} style={styles.sectionCard}>
-              <Pressable style={styles.sectionHeaderRow} onPress={() => toggleSection(section.category)}>
+            <View key={section.key} style={styles.sectionCard}>
+              <Pressable style={styles.sectionHeaderRow} onPress={() => toggleSection(section.key)}>
                 <Text style={styles.sectionCategory}>{section.category}</Text>
                 <Text style={styles.sectionToggleText}>{isCollapsed ? '+' : '-'}</Text>
               </Pressable>
@@ -1613,6 +1676,21 @@ const styles = StyleSheet.create({
     color: '#8f6d45',
     fontWeight: '800',
     fontSize: 18
+  },
+  menuDivider: {
+    marginTop: 18,
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#1c140e',
+    borderRadius: 12
+  },
+  menuDividerText: {
+    color: '#fffaf3',
+    textAlign: 'center',
+    letterSpacing: 1.4,
+    fontSize: 14,
+    fontWeight: '800'
   },
   menuCard: {
     backgroundColor: '#fffdf9',
