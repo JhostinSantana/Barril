@@ -1044,6 +1044,12 @@ button {
   font-weight: 700;
 }
 
+.order-item-cut,
+.order-item-cut strong {
+  color: #b91c1c;
+  font-weight: 900;
+}
+
 .order-edit-summary {
   margin: 12px 0 6px;
   padding: 10px 12px;

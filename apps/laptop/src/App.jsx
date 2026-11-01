@@ -619,6 +619,11 @@ function getEditChangeLabel(change) {
   return "Editado";
 }
 
+function isSlowCutCategory(category) {
+  const value = `${category ?? ""}`.trim().toUpperCase();
+  return value === "ASADOS" || value === "CORTES ASADOS" || value === "CORTES AHUMADOS";
+}
+
 function isWeightedItem(item) {
   return item?.pricingMode === "weight";
 }
@@ -3346,6 +3351,7 @@ function App() {
           h1, h2, p { margin: 0 0 8px; }
           ul { margin: 0; padding-left: 18px; }
           .edited { color: #b42318; font-weight: 700; }
+          .cut { color: #b91c1c; font-weight: 900; }
           .summary { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #b42318; }
         </style>
       </head>
@@ -3367,11 +3373,12 @@ function App() {
               const editedClass = editedIds.has(item.menuItemId)
                 ? "edited"
                 : "";
+              const cutClass = isSlowCutCategory(item.category) ? "cut" : "";
               const note = getItemNotes(item);
               const noteLabel = note
                 ? `<div class="item-plate-note">${note}</div>`
                 : "";
-              return `<li class="${editedClass}">${item.category} - ${item.quantity} x ${item.name}${weightLabel}${noteLabel}</li>`;
+              return `<li class="${editedClass} ${cutClass}">${item.category} - ${item.quantity} x ${item.name}${weightLabel}${noteLabel}</li>`;
             })
             .join("")}
         </ul>
@@ -3948,11 +3955,10 @@ function App() {
                       {order.items.map((item) => (
                         <li
                           key={`${order.id}-${item.menuItemId}`}
-                          className={
-                            editedIds.has(item.menuItemId)
-                              ? "order-item-edited"
-                              : ""
-                          }
+                          className={[
+                            editedIds.has(item.menuItemId) ? "order-item-edited" : "",
+                            isSlowCutCategory(item.category) ? "order-item-cut" : "",
+                          ].filter(Boolean).join(" ")}
                         >
                           {item.category} - {item.quantity} x {item.name}
                           {formatWeightBreakdown(item)
@@ -6872,11 +6878,10 @@ function App() {
                     {selectedPaidOrder.items.map((item) => (
                       <div
                         key={`${selectedPaidOrder.id}-${item.menuItemId}`}
-                        className={
-                          editedIds.has(item.menuItemId)
-                            ? "order-item-edited"
-                            : ""
-                        }
+                        className={[
+                          editedIds.has(item.menuItemId) ? "order-item-edited" : "",
+                          isSlowCutCategory(item.category) ? "order-item-cut" : "",
+                        ].filter(Boolean).join(" ")}
                         style={{
                           padding: "6px 0",
                           borderBottom: "1px solid #f0e6d2",

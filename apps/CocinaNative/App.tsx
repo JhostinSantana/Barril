@@ -45,6 +45,7 @@ type EditChange = {
 type PedidoItem = {
   id: string;
   nombre: string;
+  categoria?: string;
   cantidad: number;
   cantidadPreparada?: number;
   cantidadPendiente?: number;
@@ -68,6 +69,11 @@ type Pedido = {
   kitchenFulfilledItems: Array<{menuItemId: string; nombre: string; quantity: number}>;
   estado: KitchenStatus;
 };
+
+function isSlowCutCategory(category: unknown) {
+  const value = String(category ?? '').trim().toUpperCase();
+  return value === 'ASADOS' || value === 'CORTES ASADOS' || value === 'CORTES AHUMADOS';
+}
 
 function isPickupServiceType(serviceType: unknown) {
   const value = String(serviceType ?? '').toLowerCase();
@@ -313,6 +319,7 @@ function mapServerOrderToKitchen(order: any): PedidoVista {
         return {
           id: menuItemId,
           nombre: String(item.name ?? item.nombre ?? 'Item'),
+          categoria: String(item.category ?? item.categoria ?? ''),
           cantidad,
           cantidadPreparada,
           cantidadPendiente,
@@ -1050,6 +1057,7 @@ function KitchenItemRows({item}: {item: PedidoItem}) {
   const preparada = item.cantidadPreparada ?? 0;
   const pendiente = item.cantidadPendiente ?? item.cantidad;
   const todoPreparado = Boolean(item.preparado) || pendiente <= 0;
+  const esCorte = isSlowCutCategory(item.categoria);
 
   if (todoPreparado && preparada > 0) {
     return (
@@ -1081,13 +1089,13 @@ function KitchenItemRows({item}: {item: PedidoItem}) {
         </View>
       ) : null}
       {pendiente > 0 ? (
-        <View style={[styles.itemRow, item.editado && styles.itemRowEdited]}>
-          <View style={[styles.quantityBubble, item.editado && styles.quantityBubbleEdited]}>
+        <View style={[styles.itemRow, esCorte && styles.itemRowCut, item.editado && styles.itemRowEdited]}>
+          <View style={[styles.quantityBubble, esCorte && styles.quantityBubbleCut, item.editado && styles.quantityBubbleEdited]}>
             <Text style={styles.quantityText}>{pendiente}</Text>
           </View>
           <View style={{flex: 1}}>
-            <Text style={styles.itemLabel}>{item.editado ? 'Por preparar' : 'Item'}</Text>
-            <Text style={styles.itemName}>{item.nombre}</Text>
+            <Text style={[styles.itemLabel, esCorte && styles.itemLabelCut]}>{item.editado ? 'Por preparar' : 'Item'}</Text>
+            <Text style={[styles.itemName, esCorte && styles.itemNameCut]}>{item.nombre}</Text>
             <PlateNote notas={item.notas} />
           </View>
         </View>
@@ -1161,6 +1169,9 @@ const OrderCard = memo(function OrderCard({
   const showDetailLink = item.items.length > 4 || item.comments.length > 1;
   const fueModificado = pedidoFueModificado(item);
   const tieneHistorialPreparado = pedidoTieneHistorialPreparado(item);
+  const tieneCortePendiente = item.items.some(
+    entry => isSlowCutCategory(entry.categoria) && (entry.cantidadPendiente ?? entry.cantidad) > 0,
+  );
   const [editAlertCollapsed, setEditAlertCollapsed] = useState(false);
   const editSummarySignature = item.editSummary
     .map(change => `${change.menuItemId}:${change.type}:${change.quantity}`)
@@ -1177,6 +1188,7 @@ const OrderCard = memo(function OrderCard({
         isMobile && styles.cardMobile,
         (fueModificado || tieneHistorialPreparado) && styles.cardModified,
         tieneHistorialPreparado && styles.cardReopened,
+        tieneCortePendiente && styles.cardCut,
         {width: cardWidth},
       ]}
     >
@@ -1665,6 +1677,15 @@ const styles = StyleSheet.create({
     borderColor: '#f59e0b',
     borderWidth: 2,
   },
+  itemRowCut: {
+    backgroundColor: '#fee2e2',
+    borderColor: '#b91c1c',
+    borderWidth: 2,
+  },
+  cardCut: {
+    borderWidth: 3,
+    borderColor: '#b91c1c',
+  },
   itemRowPrepared: {
     backgroundColor: '#f3f4f6',
     borderColor: '#d1d5db',
@@ -1712,6 +1733,9 @@ const styles = StyleSheet.create({
   quantityBubbleEdited: {
     backgroundColor: '#ea580c',
   },
+  quantityBubbleCut: {
+    backgroundColor: '#b91c1c',
+  },
   quantityText: {
     color: '#fff',
     fontWeight: '900',
@@ -1724,11 +1748,17 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
+  itemLabelCut: {
+    color: '#b91c1c',
+  },
   itemName: {
     color: '#2f2016',
     fontSize: 16,
     fontWeight: '900',
     marginTop: 2,
+  },
+  itemNameCut: {
+    color: '#b91c1c',
   },
   plateNoteCard: {
     marginTop: 8,
