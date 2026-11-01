@@ -196,6 +196,7 @@ function normalizeClosingReport(value) {
     reviewPaidOrders: Array.isArray(value.reviewPaidOrders)
       ? value.reviewPaidOrders
       : [],
+    kitchenTimings: Array.isArray(value.kitchenTimings) ? value.kitchenTimings : null,
     status:
       differenceTotal === 0
         ? "matched"
@@ -386,6 +387,161 @@ function getKitchenStatusClass(status) {
   if (status === "completado") return "kitchen-status-lista";
   if (status === "en_preparacion") return "kitchen-status-preparando";
   return "kitchen-status-pendiente";
+}
+
+const KITCHEN_LATE_MS = 10 * 60 * 1000;
+
+function parseTimestamp(value) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function formatBogotaClock(value) {
+  const time = parseTimestamp(value);
+  if (time == null) return "—";
+  return new Date(time).toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: BOGOTA_TIME_ZONE,
+  });
+}
+
+function formatPhaseDuration(ms) {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "—";
+  const totalMinutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  if (totalMinutes >= 60) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes ? `${hours} h ${minutes} min` : `${hours} h`;
+  }
+  if (totalMinutes <= 0) return `${seconds} s`;
+  return seconds ? `${totalMinutes} min ${seconds} s` : `${totalMinutes} min`;
+}
+
+function buildKitchenTimingRows(orders, now = Date.now()) {
+  const unique = new Map();
+  for (const order of Array.isArray(orders) ? orders : []) {
+    if (!order?.id || unique.has(order.id)) continue;
+    unique.set(order.id, order);
+  }
+
+  return [...unique.values()]
+    .map((order) => {
+      const sentAt = parseTimestamp(order.createdAt);
+      const startedAt = parseTimestamp(order.kitchenStartedAt);
+      const finishedAt = parseTimestamp(order.kitchenFinishedAt);
+      const waitingToStart = sentAt != null && startedAt == null && finishedAt == null;
+      const cooking = startedAt != null && finishedAt == null;
+      const waitMs = sentAt != null && startedAt != null
+        ? startedAt - sentAt
+        : waitingToStart
+          ? now - sentAt
+          : null;
+      const cookMs = startedAt != null
+        ? (finishedAt != null ? finishedAt - startedAt : now - startedAt)
+        : null;
+      const totalEnd = finishedAt ?? (sentAt != null ? now : null);
+      const totalMs = sentAt != null && totalEnd != null ? totalEnd - sentAt : null;
+
+      return {
+        id: order.id,
+        clientName: order.clientName || "Sin nombre",
+        location: formatOrderLocation(order),
+        waiterName: order.waiterName || "",
+        sentLabel: formatBogotaClock(order.createdAt),
+        startedLabel: startedAt != null ? formatBogotaClock(order.kitchenStartedAt) : "Sin marcar",
+        finishedLabel: finishedAt != null ? formatBogotaClock(order.kitchenFinishedAt) : "Sin marcar",
+        waitLabel: waitMs == null
+          ? "—"
+          : waitingToStart
+            ? `Lleva ${formatPhaseDuration(waitMs)} sin marcar`
+            : `Tardó ${formatPhaseDuration(waitMs)} en marcar`,
+        cookLabel: cookMs == null
+          ? finishedAt != null
+            ? "Completó sin marcar preparación"
+            : "Pendiente"
+          : cooking
+            ? `Lleva ${formatPhaseDuration(cookMs)} preparando`
+            : `Cocinó ${formatPhaseDuration(cookMs)}`,
+        totalLabel: totalMs != null ? formatPhaseDuration(totalMs) : "—",
+        totalHint: finishedAt != null ? "Desde el envío" : "En curso",
+        completed: finishedAt != null,
+        late: totalMs != null && totalMs > KITCHEN_LATE_MS,
+        sentAt: sentAt ?? 0,
+      };
+    })
+    .sort((left, right) => right.sentAt - left.sentAt);
+}
+
+function freezeKitchenTimingRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    id: row.id,
+    clientName: row.clientName,
+    location: row.location,
+    waiterName: row.waiterName,
+    sentLabel: row.sentLabel,
+    startedLabel: row.startedLabel,
+    finishedLabel: row.finishedLabel,
+    waitLabel: row.waitLabel,
+    cookLabel: row.cookLabel,
+    totalLabel: row.totalLabel,
+    totalHint: row.completed ? "Desde el envío" : "Quedó en curso al cierre",
+    late: Boolean(row.late),
+    sentAt: row.sentAt || null,
+  }));
+}
+
+function KitchenTimingTable({ rows, emptyText }) {
+  return (
+    <div className="stats-table-card kitchen-timing-card">
+      <table className="stats-table kitchen-timing-table">
+        <thead>
+          <tr>
+            <th>Pedido</th>
+            <th>Enviado</th>
+            <th>Preparación</th>
+            <th>Completado</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length > 0 ? (
+            rows.map((row) => (
+              <tr key={row.id} className={row.late ? "kitchen-timing-late" : undefined}>
+                <td>
+                  <strong>#{row.id}</strong>
+                  <small>{row.clientName} · {row.location}</small>
+                  {row.waiterName ? <small>Mesero: {row.waiterName}</small> : null}
+                </td>
+                <td>
+                  <strong>{row.sentLabel}</strong>
+                  <small>Llegó a cocina</small>
+                </td>
+                <td>
+                  <strong>{row.startedLabel}</strong>
+                  <small>{row.waitLabel}</small>
+                </td>
+                <td>
+                  <strong>{row.finishedLabel}</strong>
+                  <small>{row.cookLabel}</small>
+                </td>
+                <td className={row.late ? "kitchen-timing-total late" : "kitchen-timing-total"}>
+                  <strong>{row.totalLabel}</strong>
+                  <small>{row.totalHint}</small>
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan="5">{emptyText}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function KitchenStatusLine({ status }) {
@@ -1594,10 +1750,17 @@ function App() {
       const differenceCash = roundMoney(countedCash - expectedCash);
       const differenceTransfer = roundMoney(countedTransfer - expectedTransfer);
       const differenceTotal = roundMoney(countedTotal - expectedTotal);
+      const kitchenTimings = freezeKitchenTimingRows(
+        buildKitchenTimingRows(
+          [...pendingOrders, ...reviewPaidOrders],
+          new Date(closedAt).getTime(),
+        ),
+      );
       const closingReport = {
         id: `close-${Date.now()}`,
         date: bogotaDayKey,
         openingCash: parseMoneyInput(closingCashModal.openingCash),
+        kitchenTimings,
         efectivo,
         transferencia,
         totalSold: expectedTotal,
@@ -3422,6 +3585,35 @@ function App() {
         ? "Red Barril"
         : restaurantName;
 
+  const [kitchenTimingNow, setKitchenTimingNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (publicPagesView || activeView !== "cash") return undefined;
+    const timer = window.setInterval(() => setKitchenTimingNow(Date.now()), 15000);
+    return () => window.clearInterval(timer);
+  }, [activeView, publicPagesView]);
+
+  const kitchenTimingRows = useMemo(
+    () => buildKitchenTimingRows([...pendingOrders, ...paidOrders], kitchenTimingNow),
+    [kitchenTimingNow, paidOrders, pendingOrders],
+  );
+  const lateKitchenOrders = kitchenTimingRows.filter((row) => row.late).length;
+  const monthlyKitchenReports = useMemo(() => {
+    const monthKey = `${bogotaDayKey ?? ""}`.slice(0, 7);
+    return (Array.isArray(cashSession.closingHistory) ? cashSession.closingHistory : [])
+      .filter(
+        (report) =>
+          Array.isArray(report?.kitchenTimings) &&
+          `${report.date ?? ""}`.startsWith(monthKey),
+      )
+      .map((report) => ({
+        id: report.id ?? report.closedAt ?? report.date,
+        date: report.date,
+        closedAt: report.closedAt,
+        rows: report.kitchenTimings,
+        lateCount: report.kitchenTimings.filter((row) => row.late).length,
+      }));
+  }, [bogotaDayKey, cashSession.closingHistory]);
 
   return (
     <div
@@ -3700,6 +3892,25 @@ function App() {
                 Cierre de caja
               </button>
             </header>
+
+            <section className="stats-panel" style={{ marginBottom: 18 }}>
+              <div className="section-header stats-panel-head">
+                <div>
+                  <h3>Tiempos de cocina en vivo</h3>
+                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                    Cada pedido de esta jornada, con la hora de envío, preparación y completado.
+                    El total en rojo pasó de 10 minutos. Al cerrar caja esto se limpia y queda guardado para el reporte del mes.
+                  </p>
+                </div>
+                <span className={`stats-chip${lateKitchenOrders > 0 ? " kitchen-timing-chip-late" : ""}`}>
+                  {lateKitchenOrders} de {kitchenTimingRows.length} pasaron de 10 min
+                </span>
+              </div>
+              <KitchenTimingTable
+                rows={kitchenTimingRows}
+                emptyText="Todavía no hay pedidos en esta jornada."
+              />
+            </section>
 
             <h3 className="group-title">Cuentas pendientes</h3>
             <div className="card-grid">
@@ -4513,6 +4724,52 @@ function App() {
                 </div>
               </section>
             </div>
+
+            {statsRange === "mes" ? (
+              <section className="stats-panel">
+                <div className="section-header stats-panel-head">
+                  <div>
+                    <h3>Tiempos de cocina del mes</h3>
+                    <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                      Quedaron guardados en el cierre de cada jornada. El día en curso se ve en vivo en Cobro y caja.
+                    </p>
+                  </div>
+                  <span className="stats-chip">
+                    {monthlyKitchenReports.reduce((acc, report) => acc + report.rows.length, 0)} pedidos
+                  </span>
+                </div>
+
+                {monthlyKitchenReports.length > 0 ? (
+                  monthlyKitchenReports.map((report) => (
+                    <article key={report.id} style={{ marginTop: 16 }}>
+                      <div className="section-header stats-panel-head">
+                        <div>
+                          <h4 style={{ margin: 0 }}>
+                            {report.date ? formatCalendarDayLabel(report.date) : "Cierre"}
+                          </h4>
+                          <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                            {report.closedAt
+                              ? `Cierre ${new Date(report.closedAt).toLocaleString("es-CO", { timeZone: BOGOTA_TIME_ZONE })}`
+                              : "Cierre de jornada"}
+                          </p>
+                        </div>
+                        <span className={`stats-chip${report.lateCount > 0 ? " kitchen-timing-chip-late" : ""}`}>
+                          {report.lateCount} de {report.rows.length} pasaron de 10 min
+                        </span>
+                      </div>
+                      <KitchenTimingTable
+                        rows={report.rows}
+                        emptyText="Ese cierre no tuvo pedidos."
+                      />
+                    </article>
+                  ))
+                ) : (
+                  <p className="empty">
+                    Este mes todavía no tiene cierres con tiempos de cocina guardados.
+                  </p>
+                )}
+              </section>
+            ) : null}
           </section>
         ) : null}
 

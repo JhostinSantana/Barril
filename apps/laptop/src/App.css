@@ -283,6 +283,40 @@ button {
   background: #fff9f2;
 }
 
+.kitchen-timing-card {
+  overflow-x: auto;
+}
+
+.kitchen-timing-table td small {
+  display: block;
+  margin-top: 4px;
+  color: #6f5e4d;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.kitchen-timing-table td strong {
+  font-weight: 800;
+}
+
+.stats-table tbody tr.kitchen-timing-late,
+.stats-table tbody tr.kitchen-timing-late:hover {
+  background: #fff1ef;
+}
+
+.kitchen-timing-total.late,
+.kitchen-timing-total.late strong,
+.kitchen-timing-total.late small {
+  color: #c53030;
+  font-weight: 900;
+}
+
+.stats-chip.kitchen-timing-chip-late {
+  background: #fff1ef;
+  color: #c53030;
+  border-color: #f0c2bc;
+}
+
 .stats-panel-head {
   margin-bottom: 14px;
 }
@@ -1359,6 +1393,11 @@ button {
 .public-shell .stats-chip {
   background: linear-gradient(100deg, #1f1712, #d46a12);
   color: #fff7f0;
+}
+
+.public-shell .stats-chip.kitchen-timing-chip-late {
+  background: #fff1ef;
+  color: #c53030;
 }
 
 .public-shell .stats-item-row strong,

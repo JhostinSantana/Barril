@@ -1343,6 +1343,27 @@ async function listOrderPayments(orderId) {
   );
 }
 
+function readKitchenTimingReports(settings) {
+  const cashSessionSetting = (Array.isArray(settings) ? settings : []).find(
+    (setting) => setting.key === 'cashSession'
+  );
+  if (!cashSessionSetting?.value) return [];
+
+  try {
+    const session = JSON.parse(cashSessionSetting.value);
+    return (Array.isArray(session?.closingHistory) ? session.closingHistory : [])
+      .filter((report) => Array.isArray(report?.kitchenTimings))
+      .map((report) => ({
+        id: report.id ?? report.closedAt ?? null,
+        date: report.date ?? null,
+        closedAt: report.closedAt ?? null,
+        kitchenTimings: report.kitchenTimings
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export async function exportAllData() {
   const orders = await all('SELECT * FROM orders ORDER BY created_at ASC');
   const orderItems = await all('SELECT * FROM order_items ORDER BY id ASC');
@@ -1350,8 +1371,9 @@ export async function exportAllData() {
   const menu = await all('SELECT * FROM menu_items ORDER BY sort_order ASC');
   const settings = await all('SELECT key, value FROM settings');
   const waiters = await all('SELECT * FROM waiters ORDER BY created_at ASC');
+  const kitchenTimingReports = readKitchenTimingReports(settings);
 
-  return { orders, orderItems, payments, menu, settings, waiters };
+  return { orders, orderItems, payments, menu, settings, waiters, kitchenTimingReports };
 }
 
 export async function restoreData(payload) {
@@ -1400,8 +1422,8 @@ export async function restoreData(payload) {
     if (Array.isArray(payload.orders)) {
       for (const o of payload.orders) {
         await run(
-          `INSERT INTO orders(id, client_name, table_number, service_type, waiter_name, status, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, expenses_json, edited_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO orders(id, client_name, table_number, service_type, waiter_name, status, kitchen_status, kitchen_started_at, kitchen_finished_at, kitchen_fulfilled_items_json, payment_method, total, paid_amount, created_at, paid_at, edit_summary_json, comments_json, expenses_json, edited_at, dispatched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             o.id,
             o.client_name ?? o.clientName,
@@ -1411,6 +1433,10 @@ export async function restoreData(payload) {
             ),
             o.waiter_name ?? o.waiterName ?? '',
             o.status ?? 'pending',
+            o.kitchen_status ?? o.kitchenStatus ?? 'pendiente',
+            o.kitchen_started_at ?? o.kitchenStartedAt ?? null,
+            o.kitchen_finished_at ?? o.kitchenFinishedAt ?? null,
+            o.kitchen_fulfilled_items_json ?? o.kitchenFulfilledItemsJson ?? '[]',
             o.payment_method ?? o.paymentMethod ?? null,
             o.total ?? 0,
             o.paid_amount ?? o.paidAmount ?? 0,
@@ -1419,7 +1445,8 @@ export async function restoreData(payload) {
             o.edit_summary_json ?? o.editSummaryJson ?? '[]',
             o.comments_json ?? o.commentsJson ?? '[]',
             o.expenses_json ?? o.expensesJson ?? '[]',
-            o.edited_at ?? o.editedAt ?? null
+            o.edited_at ?? o.editedAt ?? null,
+            o.dispatched_at ?? o.dispatchedAt ?? null
           ]
         );
       }
