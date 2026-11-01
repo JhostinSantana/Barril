@@ -221,6 +221,8 @@ function normalizeCashSession(value) {
     openingCash: Number.isFinite(openingCash) ? openingCash : 0,
     openingConfirmed: Boolean(value?.openingConfirmed),
     sessionKey: typeof value?.sessionKey === "string" ? value.sessionKey : null,
+    jornadaStartedAt:
+      typeof value?.jornadaStartedAt === "string" ? value.jornadaStartedAt : null,
     closingReport,
     closingHistory,
   };
@@ -1020,7 +1022,7 @@ function buildDashboardMetrics({
   const extras = [...extraMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
 
   const totalPaidOrders = paidOrdersList.length;
-  const totalSalesToday = roundMoney(todaySales);
+  const totalSalesToday = roundMoney(totalSales);
   const efectivoToday = roundMoney(paymentMap.get("efectivo")?.total ?? 0);
   const transferenciaToday = roundMoney(paymentMap.get("transferencia")?.total ?? 0);
   const paymentTotal = roundMoney(paymentRows.reduce((acc, row) => acc + Number(row.total ?? 0), 0));
@@ -1224,6 +1226,30 @@ function getLastConfirmedCloseAt(cashSession) {
       if (!entry?.adminConfirmed || !entry.closedAt) return latest;
       return !latest || entry.closedAt > latest ? entry.closedAt : latest;
     }, "");
+}
+
+function getJornadaCutoff(cashSession) {
+  const startedAt =
+    typeof cashSession?.jornadaStartedAt === "string" ? cashSession.jornadaStartedAt : "";
+  const closedAt = getLastConfirmedCloseAt(cashSession);
+  if (startedAt && closedAt) return startedAt > closedAt ? startedAt : closedAt;
+  return startedAt || closedAt || "";
+}
+
+function filterOrdersForPublicJornada(orders, cashSession, { pending = false } = {}) {
+  const cutoff = getJornadaCutoff(cashSession);
+  return (Array.isArray(orders) ? orders : []).filter((order) => {
+    if (pending) {
+      if (order?.status !== "pending" && order?.status !== "partial") return false;
+    } else if (order?.status !== "paid") {
+      return false;
+    }
+    const movementAt = pending
+      ? order?.createdAt ?? order?.paidAt
+      : order?.paidAt ?? order?.createdAt;
+    if (!movementAt) return !cutoff;
+    return !cutoff || movementAt > cutoff;
+  });
 }
 
 function filterPaidOrdersForCurrentJornada(orders, cashSession) {
@@ -1833,7 +1859,9 @@ function App() {
     if (Array.isArray(snapshot.pendingOrders)) {
       setPendingOrders(
         publicPagesView
-          ? snapshot.pendingOrders
+          ? filterOrdersForPublicJornada(snapshot.pendingOrders, normalizedSnapshotSession, {
+              pending: true,
+            })
           : filterOrdersByCashSession(snapshot.pendingOrders, cashSessionCutoff),
       );
     }
@@ -1845,7 +1873,7 @@ function App() {
                 snapshot.paidOrders,
                 normalizedSnapshotSession,
               )
-            : filterPaidOrdersForCurrentJornada(
+            : filterOrdersForPublicJornada(
                 snapshot.paidOrders,
                 normalizedSnapshotSession,
               )
@@ -1883,7 +1911,9 @@ function App() {
     if (Array.isArray(snapshot.pendingOrders)) {
       setPendingOrders(
         publicPagesView
-          ? snapshot.pendingOrders
+          ? filterOrdersForPublicJornada(snapshot.pendingOrders, normalizedSnapshotSession, {
+              pending: true,
+            })
           : filterOrdersByCashSession(snapshot.pendingOrders, cashSessionCutoff),
       );
     }
@@ -1895,7 +1925,7 @@ function App() {
                 snapshot.paidOrders,
                 normalizedSnapshotSession,
               )
-            : filterPaidOrdersForCurrentJornada(
+            : filterOrdersForPublicJornada(
                 snapshot.paidOrders,
                 normalizedSnapshotSession,
               )
@@ -2011,9 +2041,13 @@ function App() {
         return { site, runtime, metrics: null };
       }
 
-      const paidOrdersList = Array.isArray(snapshot.paidOrders)
-        ? snapshot.paidOrders.filter((order) => order.status === "paid")
-        : [];
+      const sessionForMetrics = snapshot.cashSession
+        ? normalizeCashSession(snapshot.cashSession)
+        : snapshot.cashSession;
+      const paidOrdersList = filterOrdersForPublicJornada(
+        snapshot.paidOrders,
+        sessionForMetrics,
+      );
       const metrics = buildDashboardMetrics({
         paidOrders: paidOrdersList,
         historyGrouped: snapshot.historyGrouped ?? [],
@@ -2307,12 +2341,20 @@ function App() {
     setPublicSiteRuntime(nextRuntime);
     setPublicBackendConnected(anyConnected);
 
-    if (publicDashboardMode === "multi") {
+    const activeRuntime =
+      activePublicSite !== COMBINED_PUBLIC_SITE_ID
+        ? nextRuntime[activePublicSite]
+        : null;
+    if (activeRuntime?.connected && activeRuntime.snapshot) {
+      applyDashboardSnapshot(activeRuntime.snapshot);
+      setNetworkStatus("");
+    } else if (publicDashboardMode === "multi") {
       setNetworkStatus(buildMultiSiteStatusLabel(nextRuntime));
+      setLoading(false);
     }
 
     return nextRuntime;
-  }, [publicDashboardMode]);
+  }, [activePublicSite, publicDashboardMode]);
 
   const handlePublicSiteChange = useCallback(
     (siteId) => {
@@ -2356,12 +2398,7 @@ function App() {
       refreshPublicMultiSiteDashboard().catch(() => {
         setNetworkStatus("Sin conexion con las sedes. Mostrando ultimos estados guardados.");
       });
-
-      const refreshTimer = window.setInterval(() => {
-        refreshPublicMultiSiteDashboard().catch(() => {});
-      }, 45000);
-
-      return () => window.clearInterval(refreshTimer);
+      return;
     }
 
     loadPublicDashboardSnapshot().catch(() => {
@@ -3408,9 +3445,6 @@ function App() {
 
   useEffect(() => {
     setApiBaseUrl(getApiBaseUrl());
-    if (publicPagesView) {
-      hydratePublicDashboardSnapshot();
-    }
 
     const socket = getSocket();
 
@@ -3502,7 +3536,7 @@ function App() {
           refreshPublicMultiSiteDashboard().catch(() => {
             setPublicBackendConnected(false);
           });
-        }, 30000);
+        }, 8000);
       } else {
         loadPublicDashboardSnapshot().catch(() => {
           setPublicBackendConnected(false);
@@ -3522,7 +3556,7 @@ function App() {
             }
           });
           loadRecentHistory(7).catch(() => {});
-        }, 30000);
+        }, 8000);
       }
     } else {
       loadCashView();
@@ -4364,27 +4398,6 @@ function App() {
                 </button>
               ) : null}
             </header>
-
-            {publicPagesView ? (
-              <section className="stats-panel">
-                <div className="section-header stats-panel-head">
-                  <div>
-                    <h3>Tiempos de cocina en vivo</h3>
-                    <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                      Cada pedido de esta jornada, con la hora de envío, preparación y completado.
-                      El total en rojo pasó de 10 minutos.
-                    </p>
-                  </div>
-                  <span className={`stats-chip${lateKitchenOrders > 0 ? " kitchen-timing-chip-late" : ""}`}>
-                    {lateKitchenOrders} de {kitchenTimingRows.length} pasaron de 10 min
-                  </span>
-                </div>
-                <KitchenTimingTable
-                  rows={kitchenTimingRows}
-                  emptyText="Todavía no hay pedidos en esta jornada."
-                />
-              </section>
-            ) : null}
 
             <div className="stats-summary-grid">
               {dashboardStats.summaryCards.map((card) => (

@@ -87,8 +87,13 @@ export async function fetchTunnelRegistryUrls() {
   if (!registryUrl) return {};
 
   try {
-    const response = await fetch(registryUrl, { cache: "no-store" });
-    if (!response.ok) return {};
+    const response = await Promise.race([
+      fetch(registryUrl, { cache: "no-store" }),
+      new Promise((resolve) => {
+        setTimeout(() => resolve(null), 2000);
+      }),
+    ]);
+    if (!response?.ok) return {};
     const payload = await response.json();
     if (!payload || typeof payload !== "object") return {};
 
@@ -357,7 +362,7 @@ export async function fetchPublicDashboardSnapshot(apiBaseUrl) {
     "/api/dashboard/snapshot",
     baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
   ).toString();
-  const response = await fetch(requestUrl);
+  const response = await fetch(requestUrl, { cache: "no-store" });
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     throw new Error(errorBody.message ?? "No se pudo leer el dashboard.");

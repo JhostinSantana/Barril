@@ -414,6 +414,26 @@ async function buildRecentHistoryGrouped(days = 7) {
   return list;
 }
 
+function getSnapshotJornadaCutoff(cashSession) {
+  const startedAt =
+    typeof cashSession?.jornadaStartedAt === "string" ? cashSession.jornadaStartedAt : "";
+  const closedAt = (Array.isArray(cashSession?.closingHistory) ? cashSession.closingHistory : [])
+    .reduce((latest, entry) => {
+      if (!entry?.adminConfirmed || !entry?.closedAt) return latest;
+      return !latest || entry.closedAt > latest ? entry.closedAt : latest;
+    }, "");
+  if (startedAt && closedAt) return startedAt > closedAt ? startedAt : closedAt;
+  return startedAt || closedAt || "";
+}
+
+function isOrderInJornada(order, cutoff, pending) {
+  if (!cutoff) return true;
+  const movementAt = pending
+    ? order?.createdAt ?? order?.paidAt
+    : order?.paidAt ?? order?.createdAt;
+  return Boolean(movementAt) && movementAt > cutoff;
+}
+
 async function buildDashboardSnapshot() {
   const [menu, orders, restaurantName, cashSession, historyGrouped] =
     await Promise.all([
@@ -427,14 +447,22 @@ async function buildDashboardSnapshot() {
   const todayKey = getDateKey(new Date().toISOString());
   const todayStart = `${todayKey}T00:00:00.000Z`;
   const todayEnd = `${todayKey}T23:59:59.999Z`;
+  const parsedCashSession = parseDashboardCashSession(cashSession);
+  const jornadaCutoff = getSnapshotJornadaCutoff(parsedCashSession);
+  const pendingOrders = orders.filter(
+    (order) =>
+      (order.status === "pending" || order.status === "partial") &&
+      isOrderInJornada(order, jornadaCutoff, true),
+  );
+  const paidOrders = orders.filter(
+    (order) => order.status === "paid" && isOrderInJornada(order, jornadaCutoff, false),
+  );
 
   return {
     restaurantName,
-    pendingOrders: orders.filter(
-      (order) => order.status === "pending" || order.status === "partial",
-    ),
-    paidOrders: orders.filter((order) => order.status === "paid"),
-    cashClose: getCashClose(orders, todayKey),
+    pendingOrders,
+    paidOrders,
+    cashClose: getCashClose(paidOrders, todayKey),
     dailyStats: getStats(orders, menu, todayStart, todayEnd),
     allTimeStats: getStats(
       orders,
@@ -479,6 +507,8 @@ function parseDashboardCashSession(rawValue) {
         ? parsed.closingHistory
         : [],
       sessionKey: typeof parsed.sessionKey === "string" ? parsed.sessionKey : null,
+      jornadaStartedAt:
+        typeof parsed.jornadaStartedAt === "string" ? parsed.jornadaStartedAt : null,
     };
   } catch {
     return {
