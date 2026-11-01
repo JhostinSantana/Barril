@@ -187,37 +187,15 @@ export default function App() {
   );
 
   const MENU_SECTION_ORDER = [
-    { group: '', category: 'PICADITAS' },
-    { group: '', category: 'PLATOS FUERTES' },
-    { group: '', category: 'CORTES AHUMADOS' },
-    { group: '', category: 'ASADOS' },
     { group: '', category: 'ENTRADAS' },
-    { group: '', category: 'HAMBURGUESAS' },
     { group: '', category: 'POSTRES' },
     { group: '', category: 'BEBIDAS' },
+    { group: '', category: 'PICADITAS Y ESPECIALES' },
+    { group: '', category: 'CORTES AHUMADOS' },
+    { group: '', category: 'CORTES ASADOS' },
+    { group: '', category: 'ASADOS' },
+    { group: '', category: 'HAMBURGUESAS' },
     { group: '', category: 'PORCIONES' },
-    { group: '', category: 'TONGAS' },
-    { group: '', category: 'EXTRA DE SALSAS' },
-    { group: 'DESAYUNOS', category: 'PLATANO' },
-    { group: 'DESAYUNOS', category: 'ESPECIALES' },
-    { group: 'DESAYUNOS', category: 'BEBIDAS' },
-  ];
-
-  const BREAKFAST_DRINK_ORDER = [
-    'bebida-cafe',
-    'bebida-taza-leche',
-    'bebida-taza-te',
-    'bebida-fuze-te',
-    'bebida-gaseosa-personal',
-    'bebida-cafe-avellanas',
-    'bebida-agua',
-    'bebida-agua-mineral',
-    'bebida-jugo-natural',
-    'bebida-leche-chocolate',
-    'bebida-leche-cafe',
-    'bebida-jugo-frozen',
-    'bebida-capuchino-frio',
-    'bebida-latte-espanol',
   ];
 
   const menuSections = useMemo(() => {
@@ -232,22 +210,8 @@ export default function App() {
       grouped.get(key).items.push(item);
     }
 
-    const byId = new Map(menu.map((item) => [item.id, item]));
-    const breakfastDrinks = BREAKFAST_DRINK_ORDER
-      .map((id) => byId.get(id))
-      .filter(Boolean);
-    if (breakfastDrinks.length > 0) {
-      grouped.set('DESAYUNOS::BEBIDAS', {
-        kind: 'section',
-        key: 'DESAYUNOS::BEBIDAS',
-        group: 'DESAYUNOS',
-        category: 'BEBIDAS',
-        items: breakfastDrinks,
-      });
-    }
-
     const orderedKeys = MENU_SECTION_ORDER.map(({ group, category }) => `${group}::${category}`);
-    const sections = [...grouped.values()].sort((left, right) => {
+    return [...grouped.values()].sort((left, right) => {
       const ia = orderedKeys.indexOf(left.key);
       const ib = orderedKeys.indexOf(right.key);
       const ra = ia === -1 ? 999 : ia;
@@ -255,17 +219,6 @@ export default function App() {
       if (ra !== rb) return ra - rb;
       return left.category.localeCompare(right.category);
     });
-
-    const withDivider = [];
-    let breakfastOpened = false;
-    for (const section of sections) {
-      if (section.group === 'DESAYUNOS' && !breakfastOpened) {
-        withDivider.push({ kind: 'divider', key: 'divider-DESAYUNOS', group: 'DESAYUNOS', title: 'DESAYUNOS' });
-        breakfastOpened = true;
-      }
-      withDivider.push(section);
-    }
-    return withDivider;
   }, [menu]);
 
   const [menuQuery, setMenuQuery] = useState('');
