@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-11-01-bandeja-30";
-export const MENU_VERSION_PORTOVIEJO = "2026-11-01-bandeja-30";
+export const MENU_VERSION_CHONE = "2026-11-01-contenedor";
+export const MENU_VERSION_PORTOVIEJO = "2026-11-01-contenedor";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -95,6 +95,7 @@ const DEFAULT_MENU_CHONE_SOURCE = [
   { id: "entrada-papas-cheddar", name: "PAPAS FRITAS CRUJIENTES CON SALSA DE QUESO CHEDDAR", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
   { id: "entrada-salchipapa", name: "SALCHIPAPA", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
   { id: "entrada-salsas", name: "SALSAS", category: "ENTRADAS", price: 0.25, pricingMode: "fixed" },
+  { id: "extra-contenedor", name: "CONTENEDOR", category: "ENTRADAS", price: 0.25, pricingMode: "fixed" },
 
   // POSTRES
   { id: "postre-cheesecake-vaquita", name: "PAVE DE LECHE VAQUITA", category: "POSTRES", price: 1.5, pricingMode: "fixed" },
