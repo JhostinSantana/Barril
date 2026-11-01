@@ -3588,7 +3588,7 @@ function App() {
   const [kitchenTimingNow, setKitchenTimingNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (publicPagesView || activeView !== "cash") return undefined;
+    if (!publicPagesView && activeView !== "cash") return undefined;
     const timer = window.setInterval(() => setKitchenTimingNow(Date.now()), 15000);
     return () => window.clearInterval(timer);
   }, [activeView, publicPagesView]);
@@ -4363,6 +4363,27 @@ function App() {
                 </button>
               ) : null}
             </header>
+
+            {publicPagesView ? (
+              <section className="stats-panel">
+                <div className="section-header stats-panel-head">
+                  <div>
+                    <h3>Tiempos de cocina en vivo</h3>
+                    <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                      Cada pedido de esta jornada, con la hora de envío, preparación y completado.
+                      El total en rojo pasó de 10 minutos.
+                    </p>
+                  </div>
+                  <span className={`stats-chip${lateKitchenOrders > 0 ? " kitchen-timing-chip-late" : ""}`}>
+                    {lateKitchenOrders} de {kitchenTimingRows.length} pasaron de 10 min
+                  </span>
+                </div>
+                <KitchenTimingTable
+                  rows={kitchenTimingRows}
+                  emptyText="Todavía no hay pedidos en esta jornada."
+                />
+              </section>
+            ) : null}
 
             <div className="stats-summary-grid">
               {dashboardStats.summaryCards.map((card) => (
