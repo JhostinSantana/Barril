@@ -3670,9 +3670,7 @@ function App() {
               <p className="eyebrow">Barril · panel del dueño</p>
               <h1 className="public-title">{publicHeaderTitle}</h1>
               <p className="public-lead">
-                {publicDashboardMode === "multi"
-                  ? "Vista de la sede. Los datos se consultan en el servidor del restaurante."
-                  : "Estadísticas completas de la jornada, histórico y días anteriores. Se actualiza con la última conexión al servidor del restaurante."}
+                Estadísticas completas de la jornada, histórico y días anteriores. Se actualiza con la última conexión al servidor del restaurante.
               </p>
             </div>
             <div className="public-status">
