@@ -1411,11 +1411,10 @@ function App() {
   const [branchSiteDraft, setBranchSiteDraft] = useState("");
   const [branchSiteConfigured, setBranchSiteConfigured] = useState(false);
   const [ownerUrlDrafts, setOwnerUrlDrafts] = useState({
-    portoviejo: "",
     chone: "",
   });
   const [activePublicSite, setActivePublicSite] = useState(
-    COMBINED_PUBLIC_SITE_ID,
+    PUBLIC_SITES.length === 1 ? PUBLIC_SITES[0].id : COMBINED_PUBLIC_SITE_ID,
   );
   const [publicSiteRuntime, setPublicSiteRuntime] = useState(() =>
     createInitialPublicSiteRuntime(),
@@ -3047,7 +3046,6 @@ function App() {
       setTunnelStatus(info.tunnel);
     }
     setOwnerUrlDrafts({
-      portoviejo: info.ownerDashboardUrls?.portoviejo ?? "",
       chone: info.ownerDashboardUrls?.chone ?? "",
     });
   }, [getJson]);
@@ -3068,7 +3066,7 @@ function App() {
       setNetworkStatus(
         result.permanentLinkReady
           ? "Link permanente del dueno listo. Ya no cambia al reiniciar."
-          : "URLs guardadas. Falta completar la otra sede para el link permanente.",
+          : "URL guardada. El link del dueño queda fijo al reiniciar.",
       );
     } catch (error) {
       setNetworkStatus(`No se pudieron guardar las URLs fijas: ${error.message}`);
@@ -3077,7 +3075,7 @@ function App() {
 
   async function confirmBranchSiteOnServer() {
     if (!isBranchSiteId(branchSiteDraft)) {
-      setNetworkStatus("Selecciona Portoviejo o Chone antes de guardar.");
+      setNetworkStatus("Selecciona la sede antes de guardar.");
       return;
     }
 
@@ -3632,8 +3630,7 @@ function App() {
           <p className="security-flag">Acceso restringido</p>
           <h2>Panel del dueño</h2>
           <p>
-            Este enlace es solo para el administrador. Ingresa el PIN para ver
-            Portoviejo y Chone.
+            Este enlace es solo para el administrador. Ingresa el PIN para ver la jornada.
           </p>
           <form
             className="public-setup-form"
@@ -3674,7 +3671,7 @@ function App() {
               <h1 className="public-title">{publicHeaderTitle}</h1>
               <p className="public-lead">
                 {publicDashboardMode === "multi"
-                  ? "Vista unificada de Portoviejo y Chone. Cada sede mantiene su base de datos local; aquí solo se consulta."
+                  ? "Vista de la sede. Los datos se consultan en el servidor del restaurante."
                   : "Estadísticas completas de la jornada, histórico y días anteriores. Se actualiza con la última conexión al servidor del restaurante."}
               </p>
             </div>
@@ -3697,7 +3694,7 @@ function App() {
             </div>
           </header>
 
-          {publicDashboardMode === "multi" ? (
+          {publicDashboardMode === "multi" && PUBLIC_SITES.length > 1 ? (
             <div className="public-site-row">
               <button
                 type="button"
@@ -4220,7 +4217,7 @@ function App() {
           <section className="public-combined-dashboard">
             <header className="section-header">
               <div>
-                <h2>Resumen de ambas sedes</h2>
+                <h2>Resumen de la sede</h2>
                 <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
                   Totales de la jornada actual. Toca una sede arriba para ver el detalle completo.
                 </p>
@@ -4236,17 +4233,17 @@ function App() {
               <article className="public-kpi-card">
                 <h3>Efectivo (red)</h3>
                 <strong>{formatCurrency(publicCombinedTotals.efectivoToday)}</strong>
-                <p>Suma de ambas sedes</p>
+                <p>Efectivo de la sede</p>
               </article>
               <article className="public-kpi-card">
                 <h3>Transferencia (red)</h3>
                 <strong>{formatCurrency(publicCombinedTotals.transferenciaToday)}</strong>
-                <p>Suma de ambas sedes</p>
+                <p>Transferencia de la sede</p>
               </article>
               <article className="public-kpi-card">
                 <h3>Cuentas pendientes</h3>
                 <strong>{publicCombinedTotals.pendingOrders}</strong>
-                <p>En las dos sedes</p>
+                <p>En la sede</p>
               </article>
             </div>
 
@@ -5277,9 +5274,7 @@ function App() {
               <article className="order-card">
                 <h4>Sede de esta laptop</h4>
                 <p>
-                  Tu eliges en cual sede trabaja ESTE servidor. No se adivina:
-                  debes seleccionar y confirmar. Hazlo una vez por laptop
-                  (Portoviejo en una, Chone en la otra).
+                  Tu eliges la sede de ESTE servidor. Confírmala una vez en esta laptop.
                 </p>
                 <select
                   value={branchSiteDraft}
@@ -5436,7 +5431,6 @@ function App() {
                     <p>
                       Escanea este QR en el celular del dueno para registrar{" "}
                       {PUBLIC_SITES.find((site) => site.id === branchSiteId)?.name}.
-                      Hazlo en cada laptop (Portoviejo y Chone).
                     </p>
                     <div className="actions">
                       <button
@@ -5533,7 +5527,7 @@ function App() {
                     </div>
                     <p>
                       Guarda este favorito en el celular del dueno. Aunque
-                      reinicies el servidor, el dashboard encuentra las dos sedes
+                      reinicies el servidor, el dashboard sigue encontrando la sede
                       leyendo el registro gratis de GitHub.
                     </p>
                     <div className="actions">
@@ -5579,23 +5573,11 @@ function App() {
                     }}
                   >
                     <p>
-                      Pega las URLs fijas HTTPS de cada sede (las de tu dominio
-                      Cloudflare). Cuando las dos esten guardadas, el link del
-                      dueno no cambia aunque reinicies el servidor.
+                      Pega la URL fija HTTPS de la sede (la de tu dominio
+                      Cloudflare). Cuando esté guardada, el link del
+                      dueño no cambia aunque reinicies el servidor.
                     </p>
-                    <label htmlFor="owner-url-portoviejo">URL fija Portoviejo</label>
-                    <input
-                      id="owner-url-portoviejo"
-                      value={ownerUrlDrafts.portoviejo}
-                      onChange={(event) =>
-                        setOwnerUrlDrafts((current) => ({
-                          ...current,
-                          portoviejo: event.target.value,
-                        }))
-                      }
-                      placeholder="https://portoviejo.tudominio.com"
-                    />
-                    <label htmlFor="owner-url-chone">URL fija Chone</label>
+                    <label htmlFor="owner-url-chone">URL fija de la sede</label>
                     <input
                       id="owner-url-chone"
                       value={ownerUrlDrafts.chone}

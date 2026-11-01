@@ -1,5 +1,4 @@
 export const PUBLIC_SITES = [
-  { id: "portoviejo", name: "Barril Portoviejo", shortName: "Portoviejo" },
   { id: "chone", name: "Barril Chone", shortName: "Chone" },
 ];
 
@@ -16,16 +15,13 @@ const SITE_SNAPSHOT_PREFIX = "barril.publicDashboardSnapshot.";
 
 export function getPresetFixedSiteUrls() {
   return {
-    portoviejo: normalizePublicBackendUrl(
-      import.meta.env.VITE_SITE_URL_PORTOVIEJO ?? "",
-    ),
     chone: normalizePublicBackendUrl(import.meta.env.VITE_SITE_URL_CHONE ?? ""),
   };
 }
 
 export function hasPresetFixedSiteUrls() {
   const preset = getPresetFixedSiteUrls();
-  return Boolean(preset.portoviejo || preset.chone);
+  return Boolean(preset.chone);
 }
 
 export function buildFreeMasterPublicDashboardUrl() {
@@ -255,17 +251,17 @@ export function migrateLegacyPublicDashboardStorage() {
   if (typeof window === "undefined") return;
 
   const legacySnapshotRaw = window.localStorage.getItem(LEGACY_SNAPSHOT_KEY);
-  if (legacySnapshotRaw && !readSiteSnapshot("portoviejo")) {
+  if (legacySnapshotRaw && !readSiteSnapshot("chone")) {
     try {
-      writeSiteSnapshot("portoviejo", JSON.parse(legacySnapshotRaw));
+      writeSiteSnapshot("chone", JSON.parse(legacySnapshotRaw));
     } catch {
       // Ignore invalid legacy snapshot.
     }
   }
 
   const legacyApi = window.localStorage.getItem(LEGACY_API_KEY);
-  if (legacyApi && !readSiteApiUrl("portoviejo")) {
-    writeSiteApiUrl("portoviejo", legacyApi);
+  if (legacyApi && !readSiteApiUrl("chone")) {
+    writeSiteApiUrl("chone", legacyApi);
   }
 }
 
