@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-11-01-contenedor";
-export const MENU_VERSION_PORTOVIEJO = "2026-11-01-contenedor";
+export const MENU_VERSION_CHONE = "2026-11-01-fuze-litro";
+export const MENU_VERSION_PORTOVIEJO = "2026-11-01-fuze-litro";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -107,6 +107,7 @@ const DEFAULT_MENU_CHONE_SOURCE = [
   { id: "bebida-del-valle", name: "DEL VALLE", category: "BEBIDAS", price: 0.5, pricingMode: "fixed" },
   { id: "bebida-gaseosa-personal", name: "GASEOSA PERSONAL", category: "BEBIDAS", price: 0.75, pricingMode: "fixed" },
   { id: "bebida-fuze-te", name: "FUZE TE", category: "BEBIDAS", price: 0.75, pricingMode: "fixed" },
+  { id: "bebida-fuze-te-litro", name: "FUZE TE LITRO", category: "BEBIDAS", price: 2.0, pricingMode: "fixed" },
   { id: "bebida-agua-mineral", name: "AGUA CON GAS", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
   { id: "bebida-agua", name: "AGUA NATURAL", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
   { id: "bebida-gaseosa-1l", name: "GASEOSA SABORES 1L", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
