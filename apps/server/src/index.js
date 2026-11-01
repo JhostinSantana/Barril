@@ -829,9 +829,19 @@ app.get("/api/settings/cash-session", async (_, res, next) => {
 
 app.patch("/api/settings/cash-session", async (req, res, next) => {
   try {
-    const current = parseDashboardCashSession(
-      await getSetting("cashSession"),
-    );
+    const rawCashSession = await getSetting("cashSession");
+    const current = parseDashboardCashSession(rawCashSession);
+    let previousJornadaStartedAt = null;
+    try {
+      const stored = JSON.parse(rawCashSession ?? "");
+      if (typeof stored?.jornadaStartedAt === "string") {
+        previousJornadaStartedAt = stored.jornadaStartedAt;
+      }
+    } catch {
+      previousJornadaStartedAt = null;
+    }
+    const startingNewDay =
+      req.body?.closingReport === null && Array.isArray(req.body?.closingHistory);
     const openingCash =
       req.body?.openingCash != null ? Number(req.body.openingCash) : current.openingCash;
     const openingConfirmed =
@@ -861,6 +871,9 @@ app.patch("/api/settings/cash-session", async (req, res, next) => {
       closingReport: closingReport ?? null,
       closingHistory: closingHistory.slice(0, 100),
       sessionKey: sessionKey ?? null,
+      jornadaStartedAt: startingNewDay
+        ? new Date().toISOString()
+        : previousJornadaStartedAt,
     };
 
     await setSetting("cashSession", JSON.stringify(nextValue));

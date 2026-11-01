@@ -3,6 +3,7 @@ import path from 'node:path';
 import sqlite3 from 'sqlite3';
 import {
     DEFAULT_RESTAURANT_NAME,
+    getDateKey,
     getDefaultMenuForBranch,
     getMenuVersionKey,
     isValidBranchSiteId,
@@ -1029,6 +1030,42 @@ async function listOrderPaymentsByOrderIds(orderIds) {
   return paymentsByOrderId;
 }
 
+async function getCurrentJornadaStartedAt() {
+  const raw = await getSetting('cashSession');
+  if (!raw) return null;
+
+  let session;
+  try {
+    session = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  const stamps = [];
+  if (typeof session?.jornadaStartedAt === 'string' && session.jornadaStartedAt) {
+    stamps.push(session.jornadaStartedAt);
+  }
+
+  for (const entry of Array.isArray(session?.closingHistory) ? session.closingHistory : []) {
+    if (typeof entry?.closedAt === 'string' && entry.closedAt) {
+      stamps.push(entry.closedAt);
+    }
+  }
+
+  const dayKey = getDateKey(new Date().toISOString());
+  const dayStart = dayKey ? `${dayKey}T05:00:00.000Z` : '';
+  if (dayStart) stamps.push(dayStart);
+
+  if (!stamps.length) return null;
+  return stamps.reduce((latest, value) => (value > latest ? value : latest), '');
+}
+
+function isOrderInCurrentJornada(order, jornadaStartedAt) {
+  if (!jornadaStartedAt) return true;
+  const createdAt = `${order?.createdAt ?? ''}`;
+  return Boolean(createdAt) && createdAt >= jornadaStartedAt;
+}
+
 export async function listOrdersForKitchen() {
   const rows = await all(
     `SELECT * FROM orders
@@ -1039,10 +1076,12 @@ export async function listOrdersForKitchen() {
      ORDER BY created_at ASC`
   );
   const itemsByOrderId = await listOrderItemsByOrderIds(rows.map((row) => row.id));
+  const jornadaStartedAt = await getCurrentJornadaStartedAt();
 
   return rows
     .map((row) => mapOrderRow(row, itemsByOrderId.get(row.id) ?? [], []))
-    .filter((order) => orderHasPendingKitchenWork(order));
+    .filter((order) => orderHasPendingKitchenWork(order))
+    .filter((order) => isOrderInCurrentJornada(order, jornadaStartedAt));
 }
 
 export async function listOrders({ status, query } = {}) {
@@ -1071,9 +1110,14 @@ export async function listOrders({ status, query } = {}) {
     listOrderPaymentsByOrderIds(orderIds),
   ]);
 
-  return rows.map((row) =>
+  const orders = rows.map((row) =>
     mapOrderRow(row, itemsByOrderId.get(row.id) ?? [], paymentsByOrderId.get(row.id) ?? [])
   );
+
+  if (status !== 'pending') return orders;
+
+  const jornadaStartedAt = await getCurrentJornadaStartedAt();
+  return orders.filter((order) => isOrderInCurrentJornada(order, jornadaStartedAt));
 }
 
 export async function listOrdersByDate(dateKey) {
