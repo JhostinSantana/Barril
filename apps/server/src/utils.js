@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-11-01-menu-ahumarte";
-export const MENU_VERSION_PORTOVIEJO = "2026-11-01-menu-ahumarte";
+export const MENU_VERSION_CHONE = "2026-11-01-bandeja-30";
+export const MENU_VERSION_PORTOVIEJO = "2026-11-01-bandeja-30";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -132,6 +132,7 @@ const DEFAULT_MENU_CHONE_SOURCE = [
   { id: "fuerte-come-bien", name: "COME BIEN", category: "PICADITAS Y ESPECIALES", price: 6.0, pricingMode: "fixed" },
   { id: "fuerte-cambio-arroz", name: "CAMBIO DE ARROZ CHOCLO", category: "PICADITAS Y ESPECIALES", price: 0.5, pricingMode: "fixed" },
   { id: "fuerte-cambio-frejol", name: "CAMBIO DE FREJOL ROJO", category: "PICADITAS Y ESPECIALES", price: 1.0, pricingMode: "fixed" },
+  { id: "especial-bandeja-corporativa", name: "BANDEJA CORPORATIVA", category: "PICADITAS Y ESPECIALES", price: 30.0, pricingMode: "fixed" },
 
   // CORTES AHUMADOS
   { id: "corte-lomo-fino", name: "LOMO FINO", category: "CORTES AHUMADOS", price: 10.0, pricingMode: "fixed" },
