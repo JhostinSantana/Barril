@@ -68,6 +68,51 @@ export function formatOrderLocation(order) {
   return table ? `Mesa ${table}` : "Mesa";
 }
 
+export function resolveOrderServiceType(order) {
+  const explicit = `${order?.serviceType ?? ""}`.trim();
+  if (explicit) {
+    return normalizeServiceType(explicit);
+  }
+  return inferServiceTypeFromTable(order?.tableNumber ?? order?.numeroMesa);
+}
+
+function foldKitchenText(value) {
+  return `${value ?? ""}`
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+/** Bebidas y postres no los despacha cocina en mesa. Para llevar sí van completos. */
+export function isBarOrDessertItem(item) {
+  const category = foldKitchenText(item?.category);
+  const menuItemId = foldKitchenText(item?.menuItemId ?? item?.id);
+  const name = foldKitchenText(item?.name ?? item?.nombre);
+
+  return (
+    category === "bebidas" ||
+    category === "postres" ||
+    category === "postre" ||
+    menuItemId.startsWith("bebida-") ||
+    menuItemId.startsWith("postres-") ||
+    menuItemId.startsWith("postre-") ||
+    name.startsWith("postre")
+  );
+}
+
+export function isKitchenDispatchItem(item, serviceType) {
+  if (isPickupServiceType(serviceType)) {
+    return true;
+  }
+  return !isBarOrDessertItem(item);
+}
+
+export function getKitchenDispatchItems(order) {
+  const serviceType = resolveOrderServiceType(order);
+  return (order?.items ?? []).filter((item) => isKitchenDispatchItem(item, serviceType));
+}
+
 export function normalizeContainerQuantity(quantity) {
   const numericQuantity = Math.floor(Number(quantity) || 0);
   return numericQuantity > 0 ? numericQuantity : 1;

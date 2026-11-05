@@ -11,9 +11,12 @@ import {
     capPaymentsToOrderLimit,
     defaultTableForServiceType,
     inferServiceTypeFromTable,
+    isKitchenDispatchItem,
     isPickupServiceType,
+    getKitchenDispatchItems,
     normalizeOrderExpenses,
     normalizeServiceType,
+    resolveOrderServiceType,
     summarizeItems
 } from './utils.js';
 
@@ -209,15 +212,20 @@ function buildKitchenFulfilledSnapshot(items) {
 }
 
 export function orderHasPendingKitchenWork(order) {
-  if (!order || order.kitchenStatus !== 'completado') {
-    return order?.kitchenStatus !== 'completado';
+  const kitchenItems = getKitchenDispatchItems(order);
+  if (!order || kitchenItems.length === 0) {
+    return false;
+  }
+
+  if (order.kitchenStatus !== 'completado') {
+    return true;
   }
 
   const fulfilledMap = new Map(
     (order.kitchenFulfilledItems ?? []).map((item) => [String(item.menuItemId), Number(item.quantity) || 0])
   );
 
-  for (const item of order.items ?? []) {
+  for (const item of kitchenItems) {
     const currentQty = Number(item.quantity) || 0;
     const fulfilledQty = fulfilledMap.get(String(item.menuItemId)) ?? 0;
     if (currentQty > fulfilledQty) {
@@ -228,8 +236,13 @@ export function orderHasPendingKitchenWork(order) {
   return false;
 }
 
-function editSummaryRequiresKitchenReopen(editSummary) {
-  return (editSummary ?? []).some((change) => change.type === 'added' || change.type === 'quantity-up');
+function editSummaryRequiresKitchenReopen(editSummary, serviceType) {
+  return (editSummary ?? []).some((change) => {
+    if (change.type !== 'added' && change.type !== 'quantity-up') {
+      return false;
+    }
+    return isKitchenDispatchItem(change, serviceType);
+  });
 }
 
 function normalizeItemNotes(value) {
@@ -240,12 +253,15 @@ function normalizeItemNotes(value) {
   return value.trim().slice(0, 240);
 }
 
-function itemNotesChanged(currentItems, nextItems) {
+function itemNotesChanged(currentItems, nextItems, serviceType) {
   const currentMap = new Map(
     (currentItems ?? []).map((item) => [String(item.menuItemId), normalizeItemNotes(item.notes)])
   );
 
   for (const item of nextItems ?? []) {
+    if (!isKitchenDispatchItem(item, serviceType)) {
+      continue;
+    }
     const key = String(item.menuItemId);
     const nextNotes = normalizeItemNotes(item.notes);
     if ((currentMap.get(key) ?? '') !== nextNotes) {
@@ -829,10 +845,14 @@ export async function updateOrderWithItems(orderId, order) {
   const editedAt = editSummary.length > 0 || commentText || metadataChanged
     ? new Date().toISOString()
     : currentOrder.editedAt ?? null;
+  const kitchenServiceType = resolveOrderServiceType({
+    serviceType: nextServiceType,
+    tableNumber: order.tableNumber || currentOrder.tableNumber,
+  });
   const shouldReopenKitchen =
     currentOrder.kitchenStatus === 'completado' &&
-    (editSummaryRequiresKitchenReopen(editSummary) ||
-      itemNotesChanged(currentOrder.items, order.items));
+    (editSummaryRequiresKitchenReopen(editSummary, kitchenServiceType) ||
+      itemNotesChanged(currentOrder.items, order.items, kitchenServiceType));
   const nextKitchenStatus = shouldReopenKitchen ? 'pendiente' : currentOrder.kitchenStatus;
 
   await run('BEGIN TRANSACTION');

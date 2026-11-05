@@ -12,10 +12,13 @@ import {
     CONTAINER_EXPENSE_DESCRIPTION,
     createContainerExpense,
     formatOrderLocation,
+    getKitchenDispatchItems,
     getServiceTypeLabel,
     inferServiceTypeFromTable,
     isContainerExpense,
+    isKitchenDispatchItem,
     isPickupServiceType,
+    resolveOrderServiceType,
     normalizeContainerQuantity,
     normalizeServiceType,
 } from "../../server/src/utils.js";
@@ -3374,7 +3377,19 @@ function App() {
   );
 
   function printKitchenTicket(order) {
-    const { summary, editedIds } = getEditSummary(order);
+    const kitchenServiceType = resolveOrderServiceType(order);
+    const kitchenOrder = {
+      ...order,
+      items: getKitchenDispatchItems(order),
+      editSummary: (Array.isArray(order?.editSummary) ? order.editSummary : []).filter((change) =>
+        isKitchenDispatchItem(change, kitchenServiceType),
+      ),
+    };
+    if (!kitchenOrder.items.length) {
+      setNetworkStatus(`Pedido ${order.id}: sin platos de cocina (solo bebidas o postres).`);
+      return;
+    }
+    const { summary, editedIds } = getEditSummary(kitchenOrder);
     const ticket = window.open("", "_blank", "width=360,height=640");
     if (!ticket) return;
     ticket.document.write(`
@@ -3396,11 +3411,11 @@ function App() {
         <p><strong>ID:</strong> ${order.id}</p>
         <p><strong>Cliente:</strong> ${order.clientName}</p>
         <p><strong>Mesero:</strong> ${order.waiterName}</p>
-        <p><strong>Ubicación:</strong> ${formatOrderLocation(order)}</p>
+        <p><strong>Ubicación:</strong> ${formatOrderLocation(kitchenOrder)}</p>
         <hr />
         <p><strong>Pedido</strong></p>
         <ul>
-          ${order.items
+          ${kitchenOrder.items
             .map((item) => {
               const weightLabel = formatWeightBreakdown(item)
                 ? ` - ${formatWeightBreakdown(item)}`

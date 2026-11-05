@@ -81,7 +81,33 @@ function isPickupServiceType(serviceType: unknown) {
     value === 'para_llevar' ||
     value === 'domicilio' ||
     value === 'delivery' ||
-    value === 'llevar'
+    value === 'llevar' ||
+    value === 'takeaway'
+  );
+}
+
+function foldKitchenText(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+/** En mesa, cocina no despacha bebidas ni postres. Para llevar va la comanda completa. */
+function isBarOrDessertItem(item: any) {
+  const category = foldKitchenText(item?.category);
+  const menuItemId = foldKitchenText(item?.menuItemId ?? item?.id);
+  const name = foldKitchenText(item?.name ?? item?.nombre);
+
+  return (
+    category === 'bebidas' ||
+    category === 'postres' ||
+    category === 'postre' ||
+    menuItemId.startsWith('bebida-') ||
+    menuItemId.startsWith('postres-') ||
+    menuItemId.startsWith('postre-') ||
+    name.startsWith('postre')
   );
 }
 
@@ -249,6 +275,10 @@ function pedidoTieneHistorialPreparado(pedido: Pick<Pedido, 'items'>) {
 }
 
 function pedidoTieneTrabajoPendiente(pedido: Pick<Pedido, 'estado' | 'items'>) {
+  if (!pedido.items.length) {
+    return false;
+  }
+
   if (pedido.estado !== 'completado') {
     return true;
   }
@@ -302,37 +332,6 @@ function mergeKitchenOrderInList(current: PedidoVista[], mapped: PedidoVista): P
 }
 
 function mapServerOrderToKitchen(order: any): PedidoVista {
-  const editSummary = normalizeEditSummary(order);
-  const kitchenFulfilledItems = normalizeKitchenFulfilledItems(order);
-  const fulfilledMap = new Map(
-    kitchenFulfilledItems.map(item => [String(item.menuItemId), item.quantity]),
-  );
-  const editedMenuIds = new Set(
-    editSummary.filter(change => change.type !== 'removed').map(change => String(change.menuItemId)),
-  );
-  const items = Array.isArray(order?.items)
-    ? order.items.map((item: any, index: number) => {
-        const menuItemId = String(item.menuItemId ?? `item-${index}`);
-        const cantidad = Number(item.quantity ?? item.cantidad ?? 1);
-        const cantidadPreparada = Math.min(fulfilledMap.get(menuItemId) ?? 0, cantidad);
-        const cantidadPendiente = Math.max(0, cantidad - cantidadPreparada);
-        return {
-          id: menuItemId,
-          nombre: String(item.name ?? item.nombre ?? 'Item'),
-          categoria: String(item.category ?? item.categoria ?? ''),
-          cantidad,
-          cantidadPreparada,
-          cantidadPendiente,
-          notas: String(item.notes ?? item.notas ?? ''),
-          editado: editedMenuIds.has(menuItemId) && cantidadPendiente > 0,
-          preparado: cantidad > 0 && cantidadPendiente <= 0,
-        };
-      })
-    : [];
-  const comments = normalizeComments(order);
-  const createdAt = String(order?.createdAt ?? new Date().toISOString());
-  const editedAt = order?.editedAt ? String(order.editedAt) : null;
-
   const tableLabel = normalizeTextId(order?.tableNumber ?? order?.numeroMesa, '0');
   let serviceType = String(order?.serviceType ?? '').toLowerCase();
   if (!serviceType) {
@@ -347,6 +346,45 @@ function mapServerOrderToKitchen(order: any): PedidoVista {
       serviceType = 'mesa';
     }
   }
+
+  const pickup = isPickupServiceType(serviceType);
+  const sourceItems = Array.isArray(order?.items) ? order.items : [];
+  const sourceSummary = Array.isArray(order?.editSummary) ? order.editSummary : [];
+  const visibleSourceItems = pickup
+    ? sourceItems
+    : sourceItems.filter((item: any) => !isBarOrDessertItem(item));
+  const visibleSourceSummary = pickup
+    ? sourceSummary
+    : sourceSummary.filter((change: any) => !isBarOrDessertItem(change));
+
+  const editSummary = normalizeEditSummary({editSummary: visibleSourceSummary});
+  const kitchenFulfilledItems = normalizeKitchenFulfilledItems(order);
+  const fulfilledMap = new Map(
+    kitchenFulfilledItems.map(item => [String(item.menuItemId), item.quantity]),
+  );
+  const editedMenuIds = new Set(
+    editSummary.filter(change => change.type !== 'removed').map(change => String(change.menuItemId)),
+  );
+  const items = visibleSourceItems.map((item: any, index: number) => {
+    const menuItemId = String(item.menuItemId ?? `item-${index}`);
+    const cantidad = Number(item.quantity ?? item.cantidad ?? 1);
+    const cantidadPreparada = Math.min(fulfilledMap.get(menuItemId) ?? 0, cantidad);
+    const cantidadPendiente = Math.max(0, cantidad - cantidadPreparada);
+    return {
+      id: menuItemId,
+      nombre: String(item.name ?? item.nombre ?? 'Item'),
+      categoria: String(item.category ?? item.categoria ?? ''),
+      cantidad,
+      cantidadPreparada,
+      cantidadPendiente,
+      notas: String(item.notes ?? item.notas ?? ''),
+      editado: editedMenuIds.has(menuItemId) && cantidadPendiente > 0,
+      preparado: cantidad > 0 && cantidadPendiente <= 0,
+    };
+  });
+  const comments = normalizeComments(order);
+  const createdAt = String(order?.createdAt ?? new Date().toISOString());
+  const editedAt = order?.editedAt ? String(order.editedAt) : null;
 
   return {
     id: normalizeTextId(order?.id ?? order?.orderId ?? order?._id, `pedido-${Date.now()}`),
@@ -568,14 +606,23 @@ export default function App(): React.JSX.Element {
     };
 
     const onOrderNew = (rawOrder: unknown) => {
-      notifyNewOrder();
+      if (!isSocketOrderPayload(rawOrder)) {
+        notifyNewOrder();
+        applyOrderFromSocket(rawOrder);
+        return;
+      }
+
+      const mapped = mapServerOrderToKitchen(rawOrder);
+      if (pedidoVisibleEnCocina(mapped)) {
+        notifyNewOrder();
+      }
       applyOrderFromSocket(rawOrder);
     };
 
     const onOrdersChanged = (rawOrder: unknown) => {
       if (isSocketOrderPayload(rawOrder)) {
         const mapped = mapServerOrderToKitchen(rawOrder);
-        if (pedidoTieneHistorialPreparado(mapped)) {
+        if (pedidoVisibleEnCocina(mapped) && pedidoEsReapertura(mapped)) {
           if (soundOnRef.current) {
             try {
               Vibration.vibrate(250);

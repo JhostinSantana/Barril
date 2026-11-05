@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { getKitchenDispatchItems } from './utils.js';
 
 function getPrinterSettings() {
   const host = process.env.KITCHEN_PRINTER_HOST?.trim();
@@ -41,12 +42,17 @@ function buildTicketText(order, restaurantName) {
 }
 
 export async function printKitchenTicket(order, restaurantName) {
+  const kitchenItems = getKitchenDispatchItems(order);
+  if (!kitchenItems.length) {
+    return { printed: false, reason: 'Sin platos de cocina (solo bebidas o postres).' };
+  }
+
   const { host, port } = getPrinterSettings();
   if (!host) {
     return { printed: false, reason: 'printer-not-configured' };
   }
 
-  const ticketText = buildTicketText(order, restaurantName);
+  const ticketText = buildTicketText({ ...order, items: kitchenItems }, restaurantName);
 
   await new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port }, () => {
