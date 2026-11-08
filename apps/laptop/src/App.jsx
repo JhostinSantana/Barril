@@ -332,7 +332,8 @@ function formatCalendarDayLabel(dateKey) {
   const [year, month, day] = `${dateKey ?? ""}`.split("-").map(Number);
   if (!year || !month || !day) return dateKey ?? "";
 
-  return new Date(year, month - 1, day).toLocaleDateString("es-CO", {
+  return new Date(Date.UTC(year, month - 1, day, 17, 0, 0)).toLocaleDateString("es-CO", {
+    timeZone: BOGOTA_TIME_ZONE,
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -824,6 +825,7 @@ function buildDashboardMetrics({
   historyDate,
   statsRange,
   sessionKey,
+  calendarDay = false,
 }) {
   const todayKey = getBogotaDateKey();
   const yesterdayDate = new Date();
@@ -1085,10 +1087,10 @@ function buildDashboardMetrics({
   return {
     hasData: paidOrdersList.length > 0 || historyComparisonRows.length > 0,
     summaryCards: [
-      { icon: "💰", label: "Ventas Jornada", value: totalSalesToday, hint: `${totalPaidOrders} pedidos pagados desde el último cierre`, tone: "warm" },
+      { icon: "💰", label: "Ventas Jornada", value: totalSalesToday, hint: calendarDay ? `${totalPaidOrders} pedidos pagados de hoy` : `${totalPaidOrders} pedidos pagados desde el último cierre`, tone: "warm" },
       { icon: "💵", label: "Efectivo", value: efectivoToday, hint: "Cobros reales en caja", tone: "cash" },
       { icon: "🏦", label: "Transferencia", value: transferenciaToday, hint: "Cobros por transferencia", tone: "transfer" },
-      { icon: "🧾", label: "Total Pedidos", value: totalPaidOrders, hint: "Solo pagados en la jornada", tone: "muted", plain: true },
+      { icon: "🧾", label: "Total Pedidos", value: totalPaidOrders, hint: calendarDay ? "Solo pagados de hoy" : "Solo pagados en la jornada", tone: "muted", plain: true },
     ],
     paymentRows,
     paymentTotal,
@@ -1231,16 +1233,7 @@ function getLastConfirmedCloseAt(cashSession) {
     }, "");
 }
 
-function getJornadaCutoff(cashSession) {
-  const startedAt =
-    typeof cashSession?.jornadaStartedAt === "string" ? cashSession.jornadaStartedAt : "";
-  const closedAt = getLastConfirmedCloseAt(cashSession);
-  if (startedAt && closedAt) return startedAt > closedAt ? startedAt : closedAt;
-  return startedAt || closedAt || "";
-}
-
-function filterOrdersForPublicJornada(orders, cashSession, { pending = false } = {}) {
-  const cutoff = getJornadaCutoff(cashSession);
+function filterOrdersForPublicDay(orders, dayKey, { pending = false } = {}) {
   return (Array.isArray(orders) ? orders : []).filter((order) => {
     if (pending) {
       if (order?.status !== "pending" && order?.status !== "partial") return false;
@@ -1250,8 +1243,8 @@ function filterOrdersForPublicJornada(orders, cashSession, { pending = false } =
     const movementAt = pending
       ? order?.createdAt ?? order?.paidAt
       : order?.paidAt ?? order?.createdAt;
-    if (!movementAt) return !cutoff;
-    return !cutoff || movementAt > cutoff;
+    if (!movementAt || !dayKey) return false;
+    return getBogotaDateKey(movementAt) === dayKey;
   });
 }
 
@@ -1859,10 +1852,11 @@ function App() {
       ? normalizeCashSession(snapshot.cashSession)
       : null;
 
+    const publicDayKey = getBogotaDateKey();
     if (Array.isArray(snapshot.pendingOrders)) {
       setPendingOrders(
         publicPagesView
-          ? filterOrdersForPublicJornada(snapshot.pendingOrders, normalizedSnapshotSession, {
+          ? filterOrdersForPublicDay(snapshot.pendingOrders, publicDayKey, {
               pending: true,
             })
           : filterOrdersByCashSession(snapshot.pendingOrders, cashSessionCutoff),
@@ -1871,15 +1865,7 @@ function App() {
     if (Array.isArray(snapshot.paidOrders)) {
       setPaidOrders(
         publicPagesView
-          ? hasActivePendingClosing(normalizedSnapshotSession, bogotaDayKey)
-            ? filterOrdersForPendingClosing(
-                snapshot.paidOrders,
-                normalizedSnapshotSession,
-              )
-            : filterOrdersForPublicJornada(
-                snapshot.paidOrders,
-                normalizedSnapshotSession,
-              )
+          ? filterOrdersForPublicDay(snapshot.paidOrders, publicDayKey)
           : hasActivePendingClosing(normalizedSnapshotSession, bogotaDayKey)
             ? filterOrdersForPendingClosing(snapshot.paidOrders, normalizedSnapshotSession)
             : filterOrdersByCashSession(snapshot.paidOrders, cashSessionCutoff),
@@ -1911,10 +1897,11 @@ function App() {
       setRestaurantName(snapshot.restaurantName);
       setRestaurantNameDraft(snapshot.restaurantName);
     }
+    const publicDayKey = getBogotaDateKey();
     if (Array.isArray(snapshot.pendingOrders)) {
       setPendingOrders(
         publicPagesView
-          ? filterOrdersForPublicJornada(snapshot.pendingOrders, normalizedSnapshotSession, {
+          ? filterOrdersForPublicDay(snapshot.pendingOrders, publicDayKey, {
               pending: true,
             })
           : filterOrdersByCashSession(snapshot.pendingOrders, cashSessionCutoff),
@@ -1923,15 +1910,7 @@ function App() {
     if (Array.isArray(snapshot.paidOrders)) {
       setPaidOrders(
         publicPagesView
-          ? hasActivePendingClosing(normalizedSnapshotSession, bogotaDayKey)
-            ? filterOrdersForPendingClosing(
-                snapshot.paidOrders,
-                normalizedSnapshotSession,
-              )
-            : filterOrdersForPublicJornada(
-                snapshot.paidOrders,
-                normalizedSnapshotSession,
-              )
+          ? filterOrdersForPublicDay(snapshot.paidOrders, publicDayKey)
           : hasActivePendingClosing(normalizedSnapshotSession, bogotaDayKey)
             ? filterOrdersForPendingClosing(snapshot.paidOrders, normalizedSnapshotSession)
             : filterOrdersByCashSession(snapshot.paidOrders, cashSessionCutoff),
@@ -2019,6 +1998,7 @@ function App() {
         historyDate,
         statsRange,
         sessionKey: bogotaDayKey,
+        calendarDay: publicPagesView,
       }),
     [
       allTimeStats,
@@ -2029,6 +2009,7 @@ function App() {
       historyGrouped,
       historyOrders,
       paidOrdersForStats,
+      publicPagesView,
       statsRange,
       bogotaDayKey,
     ],
@@ -2044,12 +2025,9 @@ function App() {
         return { site, runtime, metrics: null };
       }
 
-      const sessionForMetrics = snapshot.cashSession
-        ? normalizeCashSession(snapshot.cashSession)
-        : snapshot.cashSession;
-      const paidOrdersList = filterOrdersForPublicJornada(
+      const paidOrdersList = filterOrdersForPublicDay(
         snapshot.paidOrders,
-        sessionForMetrics,
+        bogotaDayKey,
       );
       const metrics = buildDashboardMetrics({
         paidOrders: paidOrdersList,
@@ -2062,6 +2040,7 @@ function App() {
         historyDate,
         statsRange: "hoy",
         sessionKey: bogotaDayKey,
+        calendarDay: true,
       });
 
       return { site, runtime, metrics };
@@ -2093,14 +2072,16 @@ function App() {
         (acc, entry) => acc + Number(entry.metrics.totalPaidOrders ?? 0),
         0,
       ),
-      pendingOrders: summaries.reduce((acc, entry) => {
-        const pendingCount = Array.isArray(entry.runtime?.snapshot?.pendingOrders)
-          ? entry.runtime.snapshot.pendingOrders.length
-          : 0;
-        return acc + pendingCount;
-      }, 0),
+      pendingOrders: summaries.reduce(
+        (acc, entry) =>
+          acc +
+          filterOrdersForPublicDay(entry.runtime?.snapshot?.pendingOrders, bogotaDayKey, {
+            pending: true,
+          }).length,
+        0,
+      ),
     };
-  }, [publicCombinedSiteSummaries]);
+  }, [bogotaDayKey, publicCombinedSiteSummaries]);
 
   const closingPreview = useMemo(() => {
     const openingCash =
@@ -4912,12 +4893,7 @@ function App() {
                               textTransform: "capitalize",
                             }}
                           >
-                            {new Date(group.date).toLocaleDateString("es-CO", {
-                              weekday: "long",
-                              day: "numeric",
-                              month: "long",
-                              year: "numeric",
-                            })}
+                            {formatCalendarDayLabel(group.date)}
                           </div>
                           <div style={{ color: "#8c7d6f", fontSize: 12 }}>
                             Día {group.date}

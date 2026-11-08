@@ -394,12 +394,25 @@ function stopTunnelProcess() {
   });
 }
 
+function getBogotaDayBounds(isoDate = new Date().toISOString()) {
+  const key = getDateKey(isoDate);
+  const [year, month, day] = `${key ?? ""}`.split("-").map(Number);
+  if (!year || !month || !day) return { key: key ?? "", from: "", to: "" };
+  return {
+    key,
+    from: new Date(Date.UTC(year, month - 1, day, 5, 0, 0, 0)).toISOString(),
+    to: new Date(Date.UTC(year, month - 1, day + 1, 4, 59, 59, 999)).toISOString(),
+  };
+}
+
 async function buildRecentHistoryGrouped(days = 7) {
   const list = [];
+  const today = getBogotaDayBounds();
+  const [year, month, day] = today.key.split("-").map(Number);
+  if (!year || !month || !day) return list;
 
   for (let index = 0; index < days; index += 1) {
-    const date = new Date();
-    date.setDate(date.getDate() - index);
+    const date = new Date(Date.UTC(year, month - 1, day - index, 17, 0, 0));
     const iso = getDateKey(date.toISOString());
     if (!iso) continue;
 
@@ -444,9 +457,10 @@ async function buildDashboardSnapshot() {
     buildRecentHistoryGrouped(7),
   ]);
 
-  const todayKey = getDateKey(new Date().toISOString());
-  const todayStart = `${todayKey}T00:00:00.000Z`;
-  const todayEnd = `${todayKey}T23:59:59.999Z`;
+  const today = getBogotaDayBounds();
+  const todayKey = today.key;
+  const todayStart = today.from;
+  const todayEnd = today.to;
   const parsedCashSession = parseDashboardCashSession(cashSession);
   const jornadaCutoff = getSnapshotJornadaCutoff(parsedCashSession);
   const pendingOrders = orders.filter(
