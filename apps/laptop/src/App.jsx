@@ -806,25 +806,40 @@ function getDashboardItemKey(item) {
   return `${item?.menuItemId ?? ""}|${item?.name ?? ""}|${item?.category ?? ""}`;
 }
 
-function isBeverageDashboardItem(item) {
-  const category = `${item?.category ?? ""}`
-    .trim()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  const menuItemId = `${item?.menuItemId ?? ""}`.trim().toLowerCase();
-  const name = `${item?.name ?? ""}`
-    .trim()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+function dashboardItemText(item) {
+  const fold = (value) =>
+    `${value ?? ""}`
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  return {
+    category: fold(item?.category),
+    menuItemId: fold(item?.menuItemId),
+    name: fold(item?.name),
+  };
+}
 
-  // Todo lo que en el menú está en la sección BEBIDAS (incluye postres si están ahí)
-  if (category === "bebidas" || menuItemId.startsWith("bebida-") || menuItemId.startsWith("postres-")) {
+function isDessertDashboardItem(item) {
+  const { category, menuItemId, name } = dashboardItemText(item);
+  return (
+    category === "postres" ||
+    category === "postre" ||
+    menuItemId.startsWith("postre-") ||
+    menuItemId.startsWith("postres-") ||
+    name.startsWith("postre")
+  );
+}
+
+function isBeverageDashboardItem(item) {
+  if (isDessertDashboardItem(item)) return false;
+  const { category, menuItemId, name } = dashboardItemText(item);
+
+  if (category === "bebidas" || menuItemId.startsWith("bebida-")) {
     return true;
   }
 
-  return /^(agua|jugo|gaseosa|fuze|del valle|cerveza|solveza|sangria|cafe|postre|monster|club|amstel|coca|cola)/.test(
+  return /^(agua|jugo|gaseosa|fuze|del valle|cerveza|solveza|sangria|cafe|monster|club|amstel|coca|cola)/.test(
     name,
   );
 }
@@ -871,6 +886,7 @@ function buildDashboardMetrics({
   const topDishMap = new Map();
   const weightedCutMap = new Map();
   const beverageMap = new Map();
+  const dessertMap = new Map();
   const containerMap = new Map();
   const extraMap = new Map();
   const paidByDate = new Map();
@@ -936,9 +952,14 @@ function buildDashboardMetrics({
       const revenue = roundMoney(subtotal > 0 ? subtotal : Number(item.unitPrice ?? 0) * quantity);
       const key = getDashboardItemKey(item);
       const itemLabel = item.name ?? item.category ?? "Producto";
+      const dessertItem = isDessertDashboardItem(item);
       const beverageItem = isBeverageDashboardItem(item);
 
-      if (!beverageItem) {
+      if (dessertItem) {
+        const dessertBucket = addBucket(dessertMap, key, itemLabel);
+        dessertBucket.quantity += quantity;
+        dessertBucket.total = roundMoney(dessertBucket.total + revenue);
+      } else if (!beverageItem) {
         const topBucket = addBucket(topDishMap, key, itemLabel);
         topBucket.quantity += quantity;
         topBucket.total = roundMoney(topBucket.total + revenue);
@@ -1087,6 +1108,7 @@ function buildDashboardMetrics({
   const topDishes10 = allDishes.slice(0, 10);
   const weightedCuts = [...weightedCutMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
   const beverages = [...beverageMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total);
+  const desserts = [...dessertMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total);
   const containers = [...containerMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
   const extras = [...extraMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
 
@@ -1164,6 +1186,7 @@ function buildDashboardMetrics({
     weightedCuts,
     totalKgSold,
     beverages,
+    desserts,
     containers,
     containerHistoryRows: [...containerHistoryMap.values()].sort((left, right) => right.date.localeCompare(left.date)),
     extras,
@@ -4542,7 +4565,7 @@ function App() {
                   <h3>Platos</h3>
                   <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
                     Picadas, cortes, porciones, platos fuertes y demás categorías
-                    (sin bebidas).
+                    (sin bebidas ni postres).
                   </p>
                 </div>
                 <span className="stats-chip">
@@ -4626,7 +4649,7 @@ function App() {
                   <h3>Bebidas</h3>
                   <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
                     Todo lo de la sección Bebidas del menú: agua, jugos, gaseosas,
-                    cervezas, sangría, café, postres y demás.
+                    cervezas, sangría, café y demás.
                   </p>
                 </div>
                 <span className="stats-chip">
@@ -4656,6 +4679,48 @@ function App() {
                     ) : (
                       <tr>
                         <td colSpan="3">No hay bebidas cobradas en esta jornada.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="stats-panel">
+              <div className="section-header stats-panel-head">
+                <div>
+                  <h3>Postres</h3>
+                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                    Cheesecakes, pavé y lo demás de la sección Postres del menú.
+                  </p>
+                </div>
+                <span className="stats-chip">
+                  {(dashboardStats.desserts ?? []).reduce((acc, item) => acc + item.quantity, 0)}{" "}
+                  vendidos
+                </span>
+              </div>
+
+              <div className="stats-table-card">
+                <table className="stats-table">
+                  <thead>
+                    <tr>
+                      <th>Postre</th>
+                      <th>Cantidad</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(dashboardStats.desserts ?? []).length > 0 ? (
+                      dashboardStats.desserts.map((item) => (
+                        <tr key={`postre-${item.key}`}>
+                          <td>{item.label}</td>
+                          <td>{item.quantity}</td>
+                          <td>{formatCurrency(item.total)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="3">No hay postres cobrados en esta jornada.</td>
                       </tr>
                     )}
                   </tbody>
