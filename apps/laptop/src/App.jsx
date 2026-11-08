@@ -328,6 +328,38 @@ function getSalesIntensityStyle(value, maxValue) {
   return { "--bar-fill": `${Math.min(normalized, 100)}%` };
 }
 
+function isContainerDashboardItem(item) {
+  const name = `${item?.name ?? ""}`
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  const menuItemId = `${item?.menuItemId ?? ""}`.trim().toLowerCase();
+  return name === "contenedor" || menuItemId.includes("contenedor");
+}
+
+function formatCloseStamp(report) {
+  const dayKey = `${report?.date ?? ""}`.trim() || (report?.closedAt ? getBogotaDateKey(report.closedAt) : "");
+  const day = dayKey ? formatCalendarDayLabel(dayKey) : "";
+  const time = report?.closedAt
+    ? new Date(report.closedAt).toLocaleTimeString("es-CO", {
+        timeZone: BOGOTA_TIME_ZONE,
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "";
+  return [day, time].filter(Boolean).join(", ");
+}
+
+function salesDayKey(orders, fallbackKey) {
+  let latest = "";
+  for (const order of Array.isArray(orders) ? orders : []) {
+    const key = getBogotaDateKey(order?.paidAt ?? order?.createdAt);
+    if (key && key > latest) latest = key;
+  }
+  return latest || fallbackKey;
+}
+
 function formatCalendarDayLabel(dateKey) {
   const [year, month, day] = `${dateKey ?? ""}`.split("-").map(Number);
   if (!year || !month || !day) return dateKey ?? "";
@@ -936,15 +968,6 @@ function buildDashboardMetrics({
         containerBucket.quantity += quantity;
         containerBucket.total = roundMoney(containerBucket.total + Number(expense.amount ?? 0));
         totalContainersSold += quantity;
-        const containerDay = containerHistoryMap.get(orderDateKey) ?? {
-          date: orderDateKey,
-          label: orderDateKey === todayKey ? "Hoy" : formatCalendarDayLabel(orderDateKey),
-          quantity: 0,
-          total: 0,
-        };
-        containerDay.quantity += quantity;
-        containerDay.total = roundMoney(containerDay.total + Number(expense.amount ?? 0));
-        containerHistoryMap.set(orderDateKey, containerDay);
         continue;
       }
 
@@ -953,6 +976,47 @@ function buildDashboardMetrics({
       extraBucket.quantity += 1;
       extraBucket.total = roundMoney(extraBucket.total + Number(expense.amount ?? 0));
     }
+  }
+
+  const countedContainerOrders = new Set();
+  const rememberContainers = (order) => {
+    if (!order || order.status !== "paid") return;
+    const id = `${order.id ?? ""}`;
+    if (id && countedContainerOrders.has(id)) return;
+    if (id) countedContainerOrders.add(id);
+    const orderDateKey = getBogotaDateKey(order.paidAt ?? order.createdAt);
+    if (!orderDateKey) return;
+    const bump = (quantity, total) => {
+      if (quantity <= 0 && total <= 0) return;
+      const containerDay = containerHistoryMap.get(orderDateKey) ?? {
+        date: orderDateKey,
+        label: orderDateKey === todayKey ? "Hoy" : formatCalendarDayLabel(orderDateKey),
+        quantity: 0,
+        total: 0,
+      };
+      containerDay.quantity += quantity;
+      containerDay.total = roundMoney(containerDay.total + total);
+      containerHistoryMap.set(orderDateKey, containerDay);
+    };
+    for (const expense of getOrderExpenses(order)) {
+      if (!isContainerExpense(expense)) continue;
+      bump(normalizeContainerQuantity(expense.quantity), Number(expense.amount ?? 0));
+    }
+    for (const item of Array.isArray(order.items) ? order.items : []) {
+      if (!isContainerDashboardItem(item)) continue;
+      const quantity = Math.max(1, Number(item.quantity ?? 0));
+      const subtotal = Number(item.subtotal ?? 0);
+      const revenue = roundMoney(subtotal > 0 ? subtotal : Number(item.unitPrice ?? 0) * quantity);
+      bump(quantity, revenue);
+    }
+  };
+  for (const entry of Array.isArray(historyGrouped) ? historyGrouped : []) {
+    for (const order of Array.isArray(entry.orders) ? entry.orders : []) {
+      rememberContainers(order);
+    }
+  }
+  for (const order of paidOrdersList) {
+    rememberContainers(order);
   }
 
   const paidTodayRows = [...paidByDate.values()]
@@ -1080,9 +1144,9 @@ function buildDashboardMetrics({
             closedAt: cashClose.closedAt,
           }
         : null);
-  const closingHistory = Array.isArray(cashSession?.closingHistory)
-    ? cashSession.closingHistory
-    : [];
+  const closingHistory = (Array.isArray(cashSession?.closingHistory) ? cashSession.closingHistory : [])
+    .slice()
+    .sort((left, right) => `${right.closedAt ?? right.date ?? ""}`.localeCompare(`${left.closedAt ?? left.date ?? ""}`));
 
   return {
     hasData: paidOrdersList.length > 0 || historyComparisonRows.length > 0,
@@ -1784,7 +1848,7 @@ function App() {
       );
       const closingReport = {
         id: `close-${Date.now()}`,
-        date: bogotaDayKey,
+        date: salesDayKey(reviewPaidOrders, bogotaDayKey),
         openingCash: parseMoneyInput(closingCashModal.openingCash),
         kitchenTimings,
         efectivo,
@@ -4706,9 +4770,7 @@ function App() {
                         dashboardStats.cashSummary.closingHistory.slice(0, 8).map((report) => (
                           <tr key={report.id ?? report.closedAt}>
                             <td>
-                              {report.closedAt
-                                ? new Date(report.closedAt).toLocaleString("es-CO")
-                                : report.date}
+                              {formatCloseStamp(report)}
                             </td>
                             <td>{formatCurrency(report.openingCash ?? 0)}</td>
                             <td>{formatCurrency(report.expectedTotal ?? 0)}</td>
@@ -4747,7 +4809,7 @@ function App() {
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="3">Sin histórico de contenedores en la jornada.</td>
+                          <td colSpan="3">No hay contenedores en los últimos días.</td>
                         </tr>
                       )}
                     </tbody>
