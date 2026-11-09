@@ -1603,6 +1603,7 @@ function App() {
     legacyPendingFinalizedRef.current = true;
     const reportForHistory = { ...report };
     delete reportForHistory.reviewPaidOrders;
+    delete reportForHistory.kitchenTimings;
     const closingHistory = [
       {
         ...reportForHistory,
@@ -1896,6 +1897,7 @@ function App() {
 
       const reportForHistory = { ...closingReport };
       delete reportForHistory.reviewPaidOrders;
+      delete reportForHistory.kitchenTimings;
       const closingHistory = [
         reportForHistory,
         ...(Array.isArray(cashSession.closingHistory)
