@@ -11,8 +11,8 @@ export {
 
 export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-11-01-fuze-litro";
-export const MENU_VERSION_PORTOVIEJO = "2026-11-01-fuze-litro";
+export const MENU_VERSION_CHONE = "2026-11-14-carta";
+export const MENU_VERSION_PORTOVIEJO = "2026-11-14-carta";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -135,98 +135,104 @@ export function createContainerExpense(quantity = 1) {
 
 const DEFAULT_MENU_CHONE_SOURCE = [
   // ENTRADAS
-  { id: "entrada-patacones-chicle", name: "PATACONES CON QUESO CHICLOSO DE LA CASA", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
-  { id: "entrada-maduro-chicle", name: "MADUROS CON QUESO CHICLOSO DE LA CASA", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
-  { id: "entrada-papas-cheddar", name: "PAPAS FRITAS CRUJIENTES CON SALSA DE QUESO CHEDDAR", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
+  { id: "entrada-patacones-chicle", name: "PATACONES CON CHICLE", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
+  { id: "entrada-maduro-chicle", name: "MADUROS CON CHICLE", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
   { id: "entrada-salchipapa", name: "SALCHIPAPA", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
-  { id: "entrada-salsas", name: "SALSAS", category: "ENTRADAS", price: 0.25, pricingMode: "fixed" },
-  { id: "extra-contenedor", name: "CONTENEDOR", category: "ENTRADAS", price: 0.25, pricingMode: "fixed" },
+  { id: "entrada-papas-cheddar", name: "PAPAS CHEDDAR", category: "ENTRADAS", price: 3.0, pricingMode: "fixed" },
 
   // POSTRES
-  { id: "postre-cheesecake-vaquita", name: "PAVE DE LECHE VAQUITA", category: "POSTRES", price: 1.5, pricingMode: "fixed" },
-  { id: "postre-cheesecake-maracuya", name: "CHEESECAKE DE MARACUYA", category: "POSTRES", price: 1.5, pricingMode: "fixed" },
-  { id: "postre-cheesecake-frutos-rojos", name: "CHEESECAKE DE FRUTOS ROJOS", category: "POSTRES", price: 1.5, pricingMode: "fixed" },
+  { id: "postre-cheesecake-vaquita", name: "PAVE DE LECHE VAQUITA", category: "POSTRES", price: 2.0, pricingMode: "fixed" },
+  { id: "postre-cheesecake-maracuya", name: "CHEESECAKE DE MARACUYA", category: "POSTRES", price: 2.0, pricingMode: "fixed" },
+  { id: "postre-cheesecake-frutos-rojos", name: "CHEESECAKE DE FRUTOS ROJOS", category: "POSTRES", price: 2.0, pricingMode: "fixed" },
 
   // BEBIDAS
   { id: "bebida-cafe", name: "CAFE PASADO", category: "BEBIDAS", price: 0.5, pricingMode: "fixed" },
   { id: "bebida-del-valle", name: "DEL VALLE", category: "BEBIDAS", price: 0.5, pricingMode: "fixed" },
   { id: "bebida-gaseosa-personal", name: "GASEOSA PERSONAL", category: "BEBIDAS", price: 0.75, pricingMode: "fixed" },
-  { id: "bebida-fuze-te", name: "FUZE TE", category: "BEBIDAS", price: 0.75, pricingMode: "fixed" },
+  { id: "bebida-fuze-te", name: "TE HELADO", category: "BEBIDAS", price: 0.75, pricingMode: "fixed" },
   { id: "bebida-fuze-te-litro", name: "FUZE TE LITRO", category: "BEBIDAS", price: 2.0, pricingMode: "fixed" },
-  { id: "bebida-agua-mineral", name: "AGUA CON GAS", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
+  { id: "bebida-agua-mineral", name: "AGUA GASIFICADA", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
   { id: "bebida-agua", name: "AGUA NATURAL", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
-  { id: "bebida-gaseosa-1l", name: "GASEOSA SABORES 1L", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
   { id: "bebida-jugo-natural", name: "JUGO NATURAL", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
+  { id: "bebida-gaseosa-1l", name: "GASEOSA LITRERA SABORES", category: "BEBIDAS", price: 1.0, pricingMode: "fixed" },
   { id: "bebida-jugo-frozen", name: "JUGO FROZEN", category: "BEBIDAS", price: 1.5, pricingMode: "fixed" },
-  { id: "bebida-gaseosa-coca-1-3l", name: "GASEOSA COCA 1L", category: "BEBIDAS", price: 2.0, pricingMode: "fixed" },
-  { id: "bebida-cerveza-club", name: "CLUB VERDE PLATINO", category: "BEBIDAS", price: 2.0, pricingMode: "fixed" },
+  { id: "bebida-gaseosa-coca-1-3l", name: "GASEOSA LITRERA COCA", category: "BEBIDAS", price: 2.0, pricingMode: "fixed" },
+  { id: "bebida-cerveza-club", name: "CERVEZA CLUB VERDE", category: "BEBIDAS", price: 2.0, pricingMode: "fixed" },
   { id: "bebida-cerveza-sol", name: "CERVEZA AMSTEL", category: "BEBIDAS", price: 2.0, pricingMode: "fixed" },
+  { id: "bebida-monster", name: "ENERGIZANTE MONSTER", category: "BEBIDAS", price: 2.5, pricingMode: "fixed" },
   { id: "bebida-solveza", name: "SOLVEZA", category: "BEBIDAS", price: 2.5, pricingMode: "fixed" },
-  { id: "bebida-monster", name: "MONSTER", category: "BEBIDAS", price: 2.5, pricingMode: "fixed" },
+  { id: "bebida-jarra-jugo", name: "JARRA DE JUGO", category: "BEBIDAS", price: 5.0, pricingMode: "fixed" },
   { id: "bebida-jarra-sangria", name: "JARRA DE SANGRIA", category: "BEBIDAS", price: 10.0, pricingMode: "fixed" },
 
-  // PICADITAS Y ESPECIALES
-  { id: "picaditas-probar", name: "PARA PROBAR", category: "PICADITAS Y ESPECIALES", price: 3.0, pricingMode: "fixed" },
-  { id: "picaditas-picar", name: "PARA PICAR", category: "PICADITAS Y ESPECIALES", price: 4.0, pricingMode: "fixed" },
-  { id: "picaditas-gozar", name: "PARA GOZAR", category: "PICADITAS Y ESPECIALES", price: 6.0, pricingMode: "fixed" },
-  { id: "picaditas-familiar", name: "PARA ENAMORAR", category: "PICADITAS Y ESPECIALES", price: 10.0, pricingMode: "fixed" },
-  { id: "fuerte-bestia", name: "LA BESTIA", category: "PICADITAS Y ESPECIALES", price: 25.0, pricingMode: "fixed" },
-  { id: "picaditas-patacones", name: "CAMBIO PATACONES", category: "PICADITAS Y ESPECIALES", price: 1.0, pricingMode: "fixed" },
-  { id: "picaditas-fritas", name: "CAMBIO FRITAS", category: "PICADITAS Y ESPECIALES", price: 1.0, pricingMode: "fixed" },
-  { id: "fuerte-taco-taco", name: "TACO TACO", category: "PICADITAS Y ESPECIALES", price: 3.0, pricingMode: "fixed" },
-  { id: "fuerte-costillitas", name: "COSTILLITAS", category: "PICADITAS Y ESPECIALES", price: 6.0, pricingMode: "fixed" },
-  { id: "fuerte-come-solo", name: "COME SOLO", category: "PICADITAS Y ESPECIALES", price: 5.0, pricingMode: "fixed" },
-  { id: "fuerte-come-bien", name: "COME BIEN", category: "PICADITAS Y ESPECIALES", price: 6.0, pricingMode: "fixed" },
-  { id: "fuerte-cambio-arroz", name: "CAMBIO DE ARROZ CHOCLO", category: "PICADITAS Y ESPECIALES", price: 0.5, pricingMode: "fixed" },
-  { id: "fuerte-cambio-frejol", name: "CAMBIO DE FREJOL ROJO", category: "PICADITAS Y ESPECIALES", price: 1.0, pricingMode: "fixed" },
-  { id: "especial-bandeja-corporativa", name: "BANDEJA CORPORATIVA", category: "PICADITAS Y ESPECIALES", price: 30.0, pricingMode: "fixed" },
+  // PICADITAS
+  { id: "picaditas-probar", name: "PARA PROBAR", category: "PICADITAS", price: 3.0, pricingMode: "fixed" },
+  { id: "picaditas-picar", name: "PARA PICAR", category: "PICADITAS", price: 4.0, pricingMode: "fixed" },
+  { id: "picaditas-gozar", name: "PARA GOZAR", category: "PICADITAS", price: 6.0, pricingMode: "fixed" },
+  { id: "picaditas-familiar", name: "PARA ENAMORAR", category: "PICADITAS", price: 10.0, pricingMode: "fixed" },
+  { id: "fuerte-bestia", name: "LA BESTIA", category: "PICADITAS", price: 25.0, pricingMode: "fixed" },
+
+  // ESPECIALES DE LA CASA
+  { id: "fuerte-taco-taco", name: "TACO TACO", category: "ESPECIALES DE LA CASA", price: 3.0, pricingMode: "fixed" },
+  { id: "fuerte-costillitas", name: "COSTILLITAS", category: "ESPECIALES DE LA CASA", price: 6.0, pricingMode: "fixed" },
+  { id: "fuerte-come-solo", name: "COME SOLO", category: "ESPECIALES DE LA CASA", price: 5.0, pricingMode: "fixed" },
+  { id: "fuerte-come-bien", name: "COME BIEN", category: "ESPECIALES DE LA CASA", price: 6.0, pricingMode: "fixed" },
+  { id: "especial-bandeja-corporativa", name: "BANDEJA CORPORATIVA", category: "ESPECIALES DE LA CASA", price: 30.0, pricingMode: "fixed" },
 
   // CORTES AHUMADOS
+  { id: "corte-alitas-ahumadas", name: "ALITAS AHUMADAS", category: "CORTES AHUMADOS", price: 5.5, pricingMode: "fixed" },
   { id: "corte-lomo-fino", name: "LOMO FINO", category: "CORTES AHUMADOS", price: 10.0, pricingMode: "fixed" },
   { id: "corte-costillas-san-luis", name: "COSTILLAS SAN LUIS", category: "CORTES AHUMADOS", price: 10.0, pricingMode: "fixed" },
   { id: "corte-costillas-baby-back", name: "COSTILLAS BABY BACK", category: "CORTES AHUMADOS", price: 10.0, pricingMode: "fixed" },
-  { id: "corte-matambre-cerdo", name: "MATAMBRE DE CERDO", category: "CORTES AHUMADOS", price: 10.0, pricingMode: "fixed" },
-  { id: "corte-longa-ahumada", name: "LONGANIZA AHUMADA", category: "CORTES AHUMADOS", price: 6.0, pricingMode: "fixed" },
+  { id: "corte-matambre-cerdo", name: "MATAMBRE", category: "CORTES AHUMADOS", price: 10.0, pricingMode: "fixed" },
+  { id: "corte-longa-ahumada", name: "LONGANIZA AHUMADA", category: "CORTES AHUMADOS", price: 10.0, pricingMode: "fixed" },
 
   // CORTES ASADOS
-  { id: "corte-t-bone-steak", name: "T BONE STEAK", category: "CORTES ASADOS", price: 10.0, pricingMode: "fixed" },
-  { id: "corte-ribeye", name: "RIB EYE STEAK", category: "CORTES ASADOS", price: 10.0, pricingMode: "fixed" },
-  { id: "corte-panceta-cerdo", name: "PANCETA DE CERDO", category: "CORTES ASADOS", price: 10.0, pricingMode: "fixed" },
+  { id: "corte-t-bone-steak", name: "T-BONE STEAK", category: "CORTES ASADOS", price: 10.0, pricingMode: "fixed" },
+  { id: "corte-ribeye", name: "RIBEYE STEAK", category: "CORTES ASADOS", price: 10.0, pricingMode: "fixed" },
+  { id: "corte-panceta-cerdo", name: "PANCETA", category: "CORTES ASADOS", price: 10.0, pricingMode: "fixed" },
 
   // ASADOS
   { id: "corte-filete-pechuga-pollo", name: "FILETE DE POLLO", category: "ASADOS", price: 5.75, pricingMode: "fixed" },
   { id: "asado-picadita-pollo", name: "PICADITA DE POLLO", category: "ASADOS", price: 6.0, pricingMode: "fixed" },
-  { id: "asado-cerdo", name: "CERDO ASADO", category: "ASADOS", price: 5.75, pricingMode: "fixed" },
-  { id: "asado-res", name: "CARNE DE RES ASADA", category: "ASADOS", price: 7.0, pricingMode: "fixed" },
+  { id: "asado-cerdo", name: "CARNE DE CERDO", category: "ASADOS", price: 5.75, pricingMode: "fixed" },
   { id: "asado-chuleta-cerdo", name: "CHULETA DE CERDO", category: "ASADOS", price: 5.75, pricingMode: "fixed" },
-  { id: "asado-cambio-arroz-menestra", name: "CAMBIO DE ARROZ Y MENESTRA", category: "ASADOS", price: 1.0, pricingMode: "fixed" },
+  { id: "asado-res", name: "CARNE DE RES", category: "ASADOS", price: 6.75, pricingMode: "fixed" },
 
   // HAMBURGUESAS
   { id: "guesa-pecado-barril", name: "EL PECADO DEL BARRIL", category: "HAMBURGUESAS", price: 5.5, pricingMode: "fixed" },
-  { id: "guesa-chone-en-casa", name: "CHONE EN CASA", category: "HAMBURGUESAS", price: 5.5, pricingMode: "fixed" },
+  { id: "guesa-chone-en-casa", name: "CHONE EN CASA", category: "HAMBURGUESAS", price: 5.75, pricingMode: "fixed" },
+
+  // EXTRAS
+  { id: "extra-contenedor", name: "CONTENEDOR", category: "EXTRAS", price: 0.25, pricingMode: "fixed" },
+  { id: "entrada-salsas", name: "SALSA EXTRA", category: "EXTRAS", price: 0.25, pricingMode: "fixed" },
+  { id: "asado-cambio-arroz-menestra", name: "CAMBIO MORO", category: "EXTRAS", price: 1.0, pricingMode: "fixed" },
+  { id: "picaditas-fritas", name: "CAMBIO PAPAS FRITAS", category: "EXTRAS", price: 1.0, pricingMode: "fixed" },
+  { id: "picaditas-patacones", name: "CAMBIO PATACONES", category: "EXTRAS", price: 1.0, pricingMode: "fixed" },
+  { id: "fuerte-cambio-arroz", name: "CAMBIO MORO CHOCLO", category: "EXTRAS", price: 1.5, pricingMode: "fixed" },
+  { id: "fuerte-cambio-frejol", name: "CAMBIO MORO FREJOL", category: "EXTRAS", price: 1.5, pricingMode: "fixed" },
 
   // PORCIONES
-  { id: "extra-ensalada", name: "PORCION DE ENSALADA", category: "PORCIONES", price: 0, pricingMode: "fixed" },
-  { id: "extra-pan", name: "PORCION DE PAN", category: "PORCIONES", price: 0.5, pricingMode: "fixed" },
-  { id: "extra-papa", name: "PORCION DE PAPA CECILIA", category: "PORCIONES", price: 0.5, pricingMode: "fixed" },
-  { id: "extra-c-parri", name: "PORCION DE C. PARRILLERO", category: "PORCIONES", price: 0.75, pricingMode: "fixed" },
-  { id: "extra-pina", name: "PORCION DE PINA", category: "PORCIONES", price: 1.0, pricingMode: "fixed" },
-  { id: "extra-media-papas-fritas", name: "MEDIA PORCION DE PAPAS FRITAS", category: "PORCIONES", price: 1.25, pricingMode: "fixed" },
-  { id: "extra-c-f-hierb", name: "PORCION DE FINAS HIERVAS", category: "PORCIONES", price: 1.25, pricingMode: "fixed" },
-  { id: "extra-patacones", name: "PORCION DE PATACONES", category: "PORCIONES", price: 1.5, pricingMode: "fixed" },
-  { id: "extra-maduro", name: "PORCION DE MADUROS", category: "PORCIONES", price: 1.25, pricingMode: "fixed" },
-  { id: "extra-longaniza", name: "PORCION DE LONGANIZA", category: "PORCIONES", price: 2.0, pricingMode: "fixed" },
-  { id: "extra-moro", name: "PORCION DE MORO", category: "PORCIONES", price: 2.0, pricingMode: "fixed" },
-  { id: "extra-papas-fritas", name: "PORCION DE PAPAS FRITAS", category: "PORCIONES", price: 2.0, pricingMode: "fixed" },
-  { id: "extra-cerdo", name: "PORCION DE CERDO", category: "PORCIONES", price: 2.25, pricingMode: "fixed" },
-  { id: "extra-costilla", name: "PORCION DE COSTILLAS", category: "PORCIONES", price: 2.5, pricingMode: "fixed" },
-  { id: "extra-choclo", name: "PORCION DE CHOCLO", category: "PORCIONES", price: 2.5, pricingMode: "fixed" },
-  { id: "extra-arroz-menestra", name: "PORCION DE ARROZ CON MENESTRA", category: "PORCIONES", price: 1.5, pricingMode: "fixed" },
+  { id: "extra-ensalada", name: "ENSALADA", category: "PORCIONES", price: 0, pricingMode: "fixed" },
+  { id: "extra-pan", name: "PAN DE AJO TOSTADO", category: "PORCIONES", price: 0.5, pricingMode: "fixed" },
+  { id: "extra-papa", name: "PAPAS CECILIA", category: "PORCIONES", price: 0.5, pricingMode: "fixed" },
+  { id: "extra-c-parri", name: "CHORIZO PARRILLERO", category: "PORCIONES", price: 0.75, pricingMode: "fixed" },
+  { id: "extra-pina", name: "PIÑA AHUMADA ESCARCHADA", category: "PORCIONES", price: 1.0, pricingMode: "fixed" },
+  { id: "extra-media-papas-fritas", name: "MEDIA DE PAPAS FRITAS", category: "PORCIONES", price: 1.25, pricingMode: "fixed" },
+  { id: "extra-c-f-hierb", name: "CHORIZO FINAS HIERVAS", category: "PORCIONES", price: 1.25, pricingMode: "fixed" },
+  { id: "extra-maduro", name: "MADURO", category: "PORCIONES", price: 1.25, pricingMode: "fixed" },
+  { id: "extra-patacones", name: "PATACONES", category: "PORCIONES", price: 1.5, pricingMode: "fixed" },
+  { id: "extra-arroz-menestra", name: "ARROZ CON MENESTRA", category: "PORCIONES", price: 2.0, pricingMode: "fixed" },
+  { id: "extra-longaniza", name: "LONGANIZA AHUMADA", category: "PORCIONES", price: 2.0, pricingMode: "fixed" },
+  { id: "extra-moro", name: "MORO", category: "PORCIONES", price: 2.0, pricingMode: "fixed" },
+  { id: "extra-papas-fritas", name: "PAPAS FRITAS", category: "PORCIONES", price: 2.5, pricingMode: "fixed" },
+  { id: "extra-cerdo", name: "CARNE AHUMADA DE CERDO", category: "PORCIONES", price: 2.25, pricingMode: "fixed" },
+  { id: "extra-costilla", name: "COSTILLA AHUMADA", category: "PORCIONES", price: 2.5, pricingMode: "fixed" },
+  { id: "extra-choclo", name: "CHOCLO", category: "PORCIONES", price: 2.5, pricingMode: "fixed" },
   { id: "extra-moro-extrachicloso", name: "MORO EXTRACHICLOSO", category: "PORCIONES", price: 2.75, pricingMode: "fixed" },
-  { id: "extra-moroclo", name: "PORCION DE MOROCLO MIXTO", category: "PORCIONES", price: 3.25, pricingMode: "fixed" },
-  { id: "extra-moro-frejol", name: "MORO DE FREJOL ROJO", category: "PORCIONES", price: 3.5, pricingMode: "fixed" },
+  { id: "extra-moroclo", name: "MORO MIXTO", category: "PORCIONES", price: 3.25, pricingMode: "fixed" },
   { id: "extra-choclo-extrachicloso", name: "CHOCLO EXTRACHICLOSO", category: "PORCIONES", price: 3.5, pricingMode: "fixed" },
-  { id: "extra-moroclo-extrachicloso", name: "MOROCLO EXTRACHICLOSO", category: "PORCIONES", price: 3.75, pricingMode: "fixed" },
+  { id: "extra-moro-frejol", name: "MORO DE FREJOL ROJO", category: "PORCIONES", price: 3.5, pricingMode: "fixed" },
+  { id: "extra-moroclo-extrachicloso", name: "MIXTO EXTRACHICLOSO", category: "PORCIONES", price: 3.75, pricingMode: "fixed" },
 ];
 
 export const DEFAULT_MENU_CHONE = DEFAULT_MENU_CHONE_SOURCE;
@@ -236,11 +242,13 @@ export const MENU_CATEGORY_ORDER = [
   "ENTRADAS",
   "POSTRES",
   "BEBIDAS",
-  "PICADITAS Y ESPECIALES",
+  "PICADITAS",
+  "ESPECIALES DE LA CASA",
   "CORTES AHUMADOS",
   "CORTES ASADOS",
   "ASADOS",
   "HAMBURGUESAS",
+  "EXTRAS",
   "PORCIONES",
 ];
 

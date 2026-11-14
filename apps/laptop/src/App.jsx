@@ -2693,8 +2693,6 @@ function App() {
     try {
       setLoading(true);
       const newCutoff = new Date().toISOString();
-      setCashSessionCutoff(newCutoff);
-      saveCashSessionCutoff(newCutoff);
       await getJson("/api/settings/cash-session", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2706,6 +2704,8 @@ function App() {
           sessionKey: bogotaDayKey,
         }),
       });
+      setCashSessionCutoff(newCutoff);
+      saveCashSessionCutoff(newCutoff);
       setCashSession((current) => ({
         ...current,
         openingCash: 0,
@@ -2919,6 +2919,7 @@ function App() {
         clientName: expenseModalOrder.clientName,
         tableNumber: expenseModalOrder.tableNumber,
         waiterName: expenseModalOrder.waiterName,
+        cashierEdit: true,
         items: expenseModalOrder.items,
         expenses: nextExpenses,
       }),
@@ -2974,6 +2975,7 @@ function App() {
           tableNumber: weightModalOrder.tableNumber,
           serviceType: weightModalOrder.serviceType,
           waiterName: weightModalOrder.waiterName,
+          cashierEdit: true,
           items: nextItems,
         }),
       });

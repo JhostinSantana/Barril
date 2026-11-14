@@ -190,11 +190,13 @@ export default function App() {
     { group: '', category: 'ENTRADAS' },
     { group: '', category: 'POSTRES' },
     { group: '', category: 'BEBIDAS' },
-    { group: '', category: 'PICADITAS Y ESPECIALES' },
+    { group: '', category: 'PICADITAS' },
+    { group: '', category: 'ESPECIALES DE LA CASA' },
     { group: '', category: 'CORTES AHUMADOS' },
     { group: '', category: 'CORTES ASADOS' },
     { group: '', category: 'ASADOS' },
     { group: '', category: 'HAMBURGUESAS' },
+    { group: '', category: 'EXTRAS' },
     { group: '', category: 'PORCIONES' },
   ];
 
@@ -367,7 +369,11 @@ export default function App() {
       tableNumber: overrides.tableNumber ?? tableNumber,
       commentDraft: overrides.commentDraft ?? commentDraft,
       quantities: overrides.quantities ?? quantities,
-      itemNotes: overrides.itemNotes ?? itemNotes
+      itemNotes: overrides.itemNotes ?? itemNotes,
+      originalQuantities: overrides.originalQuantities ?? originalQuantities,
+      selectedOrderId: Object.prototype.hasOwnProperty.call(overrides, 'selectedOrderId')
+        ? overrides.selectedOrderId
+        : selectedOrderId,
     };
     await getStorage().setItem(STORAGE_DRAFT_ORDER_KEY, JSON.stringify(draft));
     setHasDraft(true);
@@ -392,6 +398,8 @@ export default function App() {
           setCommentDraft(draft.commentDraft || '');
           setQuantities(draft.quantities || {});
           setItemNotes(draft.itemNotes || {});
+          setOriginalQuantities(draft.originalQuantities || {});
+          setSelectedOrderId(draft.selectedOrderId || null);
           setHasDraft(true);
         }
       }
@@ -593,6 +601,36 @@ export default function App() {
     });
   }
 
+  function sameWaiter(left, right) {
+    const normalize = (value) => `${value ?? ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
+    const owner = normalize(left);
+    const editor = normalize(right);
+    return owner.length > 0 && owner === editor;
+  }
+
+  function canEditOrder(order) {
+    return sameWaiter(order?.waiterName, waiterName);
+  }
+
+  useEffect(() => {
+    if (!waiterConfigured || !selectedOrderId || pendingOrders.length === 0) return;
+    const order = pendingOrders.find((item) => item.id === selectedOrderId);
+    if (!order || canEditOrder(order)) return;
+    resetDraft();
+    setStatus(`La cuenta ${order.id} es de ${order.waiterName}. Solo puedes verla.`);
+  }, [waiterConfigured, selectedOrderId, pendingOrders, waiterName]);
+
+  function showOrderPreview(order) {
+    const lines = (order.items || [])
+      .map((item) => `${item.quantity} x ${item.name}`)
+      .join('\n');
+    const owner = order.waiterName || 'quien la abrió';
+    Alert.alert(
+      order.clientName || order.id,
+      `Mesa ${order.tableNumber || '-'}\nMesero: ${owner}\n\n${lines || 'Sin productos'}\n\nSolo ${owner} puede agregar o quitar.`,
+    );
+  }
+
   function startOrderEdition(order) {
     const nextQuantities = order.items.reduce((acc, item) => {
       acc[item.menuItemId] = Number(item.quantity) || 0;
@@ -624,6 +662,16 @@ export default function App() {
     setItemNotes(nextItemNotes);
     setQuantities(nextQuantities);
     setOriginalQuantities(nextQuantities);
+    saveDraftOrder({
+      clientName: order.clientName ?? '',
+      serviceType: inferredService,
+      tableNumber: order.tableNumber ?? '',
+      commentDraft: '',
+      quantities: nextQuantities,
+      itemNotes: nextItemNotes,
+      originalQuantities: nextQuantities,
+      selectedOrderId: order.id,
+    });
     setStatus(`Editando ${order.id}. Los cambios actualizaran la misma cuenta.`);
   }
 
@@ -729,13 +777,14 @@ export default function App() {
       const payload = await response.json();
 
       if (!response.ok) {
-        if (response.status === 403) {
+        const serverMessage = payload.message ?? 'No se pudo enviar la comanda.';
+        if (response.status === 403 && /no autorizado/i.test(serverMessage)) {
           await getStorage().removeItem(STORAGE_WAITER_KEY);
           setWaiterName('');
           setWaiterDraft('');
           setWaiterConfigured(false);
         }
-        throw new Error(payload.message ?? 'No se pudo enviar la comanda.');
+        throw new Error(serverMessage);
       }
 
       const wasEditing = Boolean(selectedOrderId);
@@ -1033,15 +1082,24 @@ export default function App() {
           {showOpenOrders && (
             <>
               {pendingOrders.length === 0 ? (
-                <Text style={styles.serverBadge}>No hay comandas pendientes para editar.</Text>
+                <Text style={styles.serverBadge}>No hay comandas abiertas.</Text>
               ) : (
                 <View style={styles.openOrdersGrid}>
-                  {pendingOrders.map((order) => (
+                  {pendingOrders.map((order) => {
+                    const editable = canEditOrder(order);
+                    return (
                     <Pressable
                       key={order.id}
-                      style={[styles.openOrderCard, selectedOrderId === order.id ? styles.openOrderCardActive : null]}
-                      onPress={() => startOrderEdition(order)}
+                      style={[
+                        styles.openOrderCard,
+                        selectedOrderId === order.id ? styles.openOrderCardActive : null,
+                        editable ? null : styles.openOrderCardLocked,
+                      ]}
+                      onPress={() => (editable ? startOrderEdition(order) : showOrderPreview(order))}
                     >
+                      <Text style={editable ? styles.openOrderOwnerBadge : styles.openOrderLockedBadge}>
+                        {editable ? 'Tu cuenta' : 'Solo ver'}
+                      </Text>
                       {Array.isArray(order.comments) && order.comments.length > 0 ? (
                         <Text style={styles.openOrderCommentBadge}>
                           {order.comments.length} comentario{order.comments.length === 1 ? '' : 's'}
@@ -1049,9 +1107,11 @@ export default function App() {
                       ) : null}
                       <Text style={styles.openOrderTitle}>{order.clientName}</Text>
                       <Text style={styles.openOrderMeta}>{order.id} · Mesa {order.tableNumber}</Text>
+                      <Text style={styles.openOrderMeta}>Mesero: {order.waiterName || 'sin nombre'}</Text>
                       <Text style={styles.openOrderMeta}>{order.items.length} items</Text>
                     </Pressable>
-                  ))}
+                    );
+                  })}
                 </View>
               )}
             </>
@@ -1520,6 +1580,35 @@ const styles = StyleSheet.create({
   openOrderCardActive: {
     borderColor: '#f08a24',
     backgroundColor: '#fff3e6'
+  },
+  openOrderCardLocked: {
+    backgroundColor: '#f7f3ee'
+  },
+  openOrderOwnerBadge: {
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#e5f6ef',
+    color: '#0f7a52',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6
+  },
+  openOrderLockedBadge: {
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#efe8df',
+    color: '#6f5e4d',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6
   },
   openOrderTitle: {
     color: '#231a15',

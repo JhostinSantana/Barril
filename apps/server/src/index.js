@@ -1196,6 +1196,16 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
       return;
     }
 
+    const cashierEdit = req.body?.cashierEdit === true;
+    const ownerWaiter = `${currentOrder.waiterName ?? ""}`.trim().replace(/\s+/g, " ").toLowerCase();
+    const editorWaiter = `${waiterName ?? ""}`.trim().replace(/\s+/g, " ").toLowerCase();
+    if (!cashierEdit && ownerWaiter && ownerWaiter !== editorWaiter) {
+      res.status(403).json({
+        message: `Solo ${currentOrder.waiterName} puede agregar o quitar en esta cuenta. Los demás pueden verla.`,
+      });
+      return;
+    }
+
     const menu = await getMenu();
     const normalizedItems = items.map((item) => ({
       menuItemId: item.menuItemId,
@@ -1225,7 +1235,7 @@ app.patch("/api/orders/:orderId", async (req, res, next) => {
       clientName,
       tableNumber: resolvedTableNumber,
       serviceType,
-      waiterName,
+      waiterName: currentOrder.waiterName || waiterName,
       total,
       items: summarizedItems,
       expenses,

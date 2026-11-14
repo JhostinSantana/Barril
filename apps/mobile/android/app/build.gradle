@@ -9,10 +9,10 @@ def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
 react {
-    // Monorepo: node_modules lives at repo root; without this, Metro uses the wrong root and
-    // fails with "Unable to resolve module ./index.js" during :app:createBundleReleaseJsAndAssets.
-    root = rootDir.getAbsoluteFile().getParentFile()
-    entryFile = file("../../index.js")
+    // Monorepo: the waiter app lives in apps/mobile. node_modules is hoisted to the repo root.
+    def mobileRoot = new File(rootDir, "..")
+    root = mobileRoot
+    entryFile = new File(mobileRoot, "index.js")
     reactNativeDir = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
     hermesCommand = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsolutePath() + "/sdks/hermesc/%OS-BIN%/hermesc"
     codegenDir = new File(["node", "--print", "require.resolve('@react-native/codegen/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
@@ -95,8 +95,8 @@ android {
         applicationId 'com.asadosenelbarril.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 6
-        versionName "1.0.5"
+        versionCode 7
+        versionName "1.0.6"
     }
     signingConfigs {
         debug {
