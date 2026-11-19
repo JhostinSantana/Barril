@@ -153,7 +153,7 @@ function isWeightedMenuItem(item) {
 }
 
 export default function App() {
-  const [restaurantName, setRestaurantName] = useState('Ahumados Al Barril');
+  const [restaurantName, setRestaurantName] = useState('Ahumarte');
   const [menu, setMenu] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);

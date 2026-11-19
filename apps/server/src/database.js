@@ -132,6 +132,7 @@ function mapOrderRow(row, items, payments) {
     kitchenStatus: row.kitchen_status ?? 'pendiente',
     kitchenStartedAt: row.kitchen_started_at ?? null,
     kitchenFinishedAt: row.kitchen_finished_at ?? null,
+    kitchenRoundSentAt: row.kitchen_round_sent_at ?? null,
     kitchenFulfilledItems,
     paymentMethod: resolvePaymentMethod(paymentSummary, row.payment_method),
     paymentSummary,
@@ -390,6 +391,9 @@ export async function initializeDatabase() {
   if (!orderColumns.some((column) => column.name === 'kitchen_finished_at')) {
     await run('ALTER TABLE orders ADD COLUMN kitchen_finished_at TEXT');
   }
+  if (!orderColumns.some((column) => column.name === 'kitchen_round_sent_at')) {
+    await run('ALTER TABLE orders ADD COLUMN kitchen_round_sent_at TEXT');
+  }
   if (!orderColumns.some((column) => column.name === 'edit_summary_json')) {
     await run("ALTER TABLE orders ADD COLUMN edit_summary_json TEXT NOT NULL DEFAULT '[]'");
   }
@@ -557,6 +561,20 @@ export async function initializeDatabase() {
   const settingsCount = await get('SELECT COUNT(*) AS count FROM settings');
   if ((settingsCount?.count ?? 0) === 0) {
     await run('INSERT INTO settings(key, value) VALUES (?, ?)', ['restaurantName', DEFAULT_RESTAURANT_NAME]);
+  }
+
+  const storedName = `${(await getSetting('restaurantName')) ?? ''}`.trim().toLowerCase();
+  if (
+    !storedName
+    || storedName === 'asados en el barril'
+    || storedName === 'ahumados al barril'
+  ) {
+    await setSetting('restaurantName', DEFAULT_RESTAURANT_NAME);
+  }
+
+  const storedBranch = `${(await getSetting('branchSiteId')) ?? ''}`.trim();
+  if (!isValidBranchSiteId(storedBranch)) {
+    await setSetting('branchSiteId', 'chone');
   }
 
   const branchSiteId = await resolveMenuBranchId();
@@ -849,10 +867,12 @@ export async function updateOrderWithItems(orderId, order) {
     serviceType: nextServiceType,
     tableNumber: order.tableNumber || currentOrder.tableNumber,
   });
+  const addedKitchenWork = editSummaryRequiresKitchenReopen(editSummary, kitchenServiceType);
   const shouldReopenKitchen =
     currentOrder.kitchenStatus === 'completado' &&
-    (editSummaryRequiresKitchenReopen(editSummary, kitchenServiceType) ||
+    (addedKitchenWork ||
       itemNotesChanged(currentOrder.items, order.items, kitchenServiceType));
+  const resetKitchenClock = currentOrder.kitchenStatus === 'completado' && addedKitchenWork;
   const nextKitchenStatus = shouldReopenKitchen ? 'pendiente' : currentOrder.kitchenStatus;
 
   await run('BEGIN TRANSACTION');
@@ -906,6 +926,15 @@ export async function updateOrderWithItems(orderId, order) {
        WHERE id = ?`,
       [JSON.stringify(nextExpenses), orderId]
     );
+
+    if (resetKitchenClock) {
+      await run(
+        `UPDATE orders
+         SET kitchen_round_sent_at = ?, kitchen_started_at = NULL, kitchen_finished_at = NULL
+         WHERE id = ?`,
+        [new Date().toISOString(), orderId]
+      );
+    }
 
     await run('COMMIT');
   } catch (error) {

@@ -427,7 +427,7 @@ function getKitchenStatusClass(status) {
   return "kitchen-status-pendiente";
 }
 
-const KITCHEN_LATE_MS = 10 * 60 * 1000;
+const KITCHEN_LATE_MS = 15 * 60 * 1000;
 
 function parseTimestamp(value) {
   if (!value) return null;
@@ -467,7 +467,10 @@ function buildKitchenTimingRows(orders, now = Date.now()) {
 
   return [...unique.values()]
     .map((order) => {
-      const sentAt = parseTimestamp(order.createdAt);
+      const createdAt = parseTimestamp(order.createdAt);
+      const roundSentAt = parseTimestamp(order.kitchenRoundSentAt);
+      const sentAt = roundSentAt ?? createdAt;
+      const freshRound = roundSentAt != null && createdAt != null && roundSentAt - createdAt > 60 * 1000;
       const startedAt = parseTimestamp(order.kitchenStartedAt);
       const finishedAt = parseTimestamp(order.kitchenFinishedAt);
       const waitingToStart = sentAt != null && startedAt == null && finishedAt == null;
@@ -488,7 +491,7 @@ function buildKitchenTimingRows(orders, now = Date.now()) {
         clientName: order.clientName || "Sin nombre",
         location: formatOrderLocation(order),
         waiterName: order.waiterName || "",
-        sentLabel: formatBogotaClock(order.createdAt),
+        sentLabel: formatBogotaClock(sentAt),
         startedLabel: startedAt != null ? formatBogotaClock(order.kitchenStartedAt) : "Sin marcar",
         finishedLabel: finishedAt != null ? formatBogotaClock(order.kitchenFinishedAt) : "Sin marcar",
         waitLabel: waitMs == null
@@ -504,7 +507,9 @@ function buildKitchenTimingRows(orders, now = Date.now()) {
             ? `Lleva ${formatPhaseDuration(cookMs)} preparando`
             : `Cocinó ${formatPhaseDuration(cookMs)}`,
         totalLabel: totalMs != null ? formatPhaseDuration(totalMs) : "—",
-        totalHint: finishedAt != null ? "Desde el envío" : "En curso",
+        totalHint: finishedAt != null
+          ? (freshRound ? "Solo lo nuevo" : "Desde el envío")
+          : (freshRound ? "Pedido nuevo en curso" : "En curso"),
         completed: finishedAt != null,
         late: totalMs != null && totalMs > KITCHEN_LATE_MS,
         sentAt: sentAt ?? 0,
@@ -529,6 +534,41 @@ function freezeKitchenTimingRows(rows) {
     late: Boolean(row.late),
     sentAt: row.sentAt || null,
   }));
+}
+
+function KitchenTimingRail({ rows, lateCount }) {
+  return (
+    <aside className="timing-rail">
+      <div className="timing-rail-head">
+        <h2>Tiempos</h2>
+        <p>En rojo si pasa de 15 minutos. Un pedido nuevo no se suma al que ya salió.</p>
+        <span className={`stats-chip${lateCount > 0 ? " kitchen-timing-chip-late" : ""}`}>
+          {lateCount} de {rows.length} pasaron de 15 min
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="timing-rail-empty">Todavía no hay pedidos en esta jornada.</p>
+      ) : (
+        <div className="timing-rail-list">
+          {rows.map((row) => (
+            <article
+              key={row.id}
+              className={row.late ? "timing-card timing-card-late" : "timing-card"}
+            >
+              <div className="timing-card-top">
+                <strong>#{row.id}</strong>
+                <span className={row.late ? "timing-total late" : "timing-total"}>{row.totalLabel}</span>
+              </div>
+              <p>{row.clientName} · {row.location}</p>
+              {row.waiterName ? <p>Mesero: {row.waiterName}</p> : null}
+              <p>Enviado {row.sentLabel} · {row.totalHint}</p>
+              <p>{row.cookLabel}</p>
+            </article>
+          ))}
+        </div>
+      )}
+    </aside>
+  );
 }
 
 function KitchenTimingTable({ rows, emptyText }) {
@@ -952,6 +992,14 @@ function buildDashboardMetrics({
       const revenue = roundMoney(subtotal > 0 ? subtotal : Number(item.unitPrice ?? 0) * quantity);
       const key = getDashboardItemKey(item);
       const itemLabel = item.name ?? item.category ?? "Producto";
+      if (isContainerDashboardItem(item)) {
+        const containerBucket = addBucket(containerMap, key, itemLabel);
+        containerBucket.quantity += quantity;
+        containerBucket.total = roundMoney(containerBucket.total + revenue);
+        totalContainersSold += quantity;
+        continue;
+      }
+
       const dessertItem = isDessertDashboardItem(item);
       const beverageItem = isBeverageDashboardItem(item);
 
@@ -1109,7 +1157,7 @@ function buildDashboardMetrics({
   const weightedCuts = [...weightedCutMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
   const beverages = [...beverageMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total);
   const desserts = [...dessertMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total);
-  const containers = [...containerMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
+  const containers = [...containerMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total);
   const extras = [...extraMap.values()].sort((left, right) => right.quantity - left.quantity || right.total - left.total).slice(0, 5);
 
   const totalPaidOrders = paidOrdersList.length;
@@ -1378,7 +1426,7 @@ function buildCashCloseFromOrders(orders, date, openingCash = 0) {
 
 function App() {
   const [activeView, setActiveView] = useState("cash");
-  const [restaurantName, setRestaurantName] = useState("Ahumados Al Barril");
+  const [restaurantName, setRestaurantName] = useState("Ahumarte");
   const [pendingOrders, setPendingOrders] = useState([]);
   const [paidOrders, setPaidOrders] = useState([]);
   const [waiters, setWaiters] = useState([]);
@@ -3883,11 +3931,10 @@ function App() {
       ) : null}
 
       {!publicPagesView ? (
-      <aside className="sidebar">
-        <div>
+      <header className="topbar">
+        <div className="topbar-brand">
           <p className="eyebrow">Restaurante</p>
           <h1>{restaurantName}</h1>
-          <p className="hub-note">Laptop activa como centro de pedidos</p>
         </div>
 
         <nav className="nav">
@@ -3912,15 +3959,13 @@ function App() {
           ))}
         </nav>
 
-        <div className="sidebar-footer">
-          <span>{pendingOrders.length} cuentas pendientes</span>
+        <div className="topbar-meta">
+          <span>{pendingOrders.length} pendientes</span>
           <span>{paidOrdersForDisplay.length} pagadas</span>
           {pickupAwaitingDispatch.length > 0 ? (
             <span>{pickupAwaitingDispatch.length} por despachar</span>
           ) : null}
-          <span>API: {apiBaseUrl}</span>
-          <span>IP local: {networkInfo.localIp || "cargando..."}</span>
-          <div className="sidebar-actions" style={{ marginTop: 8 }}>
+          <div className="sidebar-actions">
             <button
               type="button"
               onClick={() =>
@@ -3984,7 +4029,11 @@ function App() {
             </label>
           </div>
         </div>
-      </aside>
+      </header>
+      ) : null}
+
+      {!publicPagesView ? (
+        <KitchenTimingRail rows={kitchenTimingRows} lateCount={lateKitchenOrders} />
       ) : null}
 
       {publicPagesView && !publicRemoteAccessUnlocked ? null : (
@@ -4015,25 +4064,6 @@ function App() {
                 Cierre de caja
               </button>
             </header>
-
-            <section className="stats-panel" style={{ marginBottom: 18 }}>
-              <div className="section-header stats-panel-head">
-                <div>
-                  <h3>Tiempos de cocina en vivo</h3>
-                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
-                    Cada pedido de esta jornada, con la hora de envío, preparación y completado.
-                    El total en rojo pasó de 10 minutos. Al cerrar caja esto se limpia y queda guardado para el reporte del mes.
-                  </p>
-                </div>
-                <span className={`stats-chip${lateKitchenOrders > 0 ? " kitchen-timing-chip-late" : ""}`}>
-                  {lateKitchenOrders} de {kitchenTimingRows.length} pasaron de 10 min
-                </span>
-              </div>
-              <KitchenTimingTable
-                rows={kitchenTimingRows}
-                emptyText="Todavía no hay pedidos en esta jornada."
-              />
-            </section>
 
             <h3 className="group-title">Cuentas pendientes</h3>
             <div className="card-grid">
@@ -4215,24 +4245,10 @@ function App() {
                       </button>
                       <button
                         type="button"
-                        className="ghost"
-                        onClick={() => openContainerModal(order)}
-                      >
-                        Contenedor
-                      </button>
-                      <button
-                        type="button"
                         onClick={() => openPayModal(order)}
                         disabled={needsWeightEntry}
                       >
                         Cobrar / Abonar
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() => printKitchenTicket(order)}
-                      >
-                        Ticket cocina
                       </button>
                       <button
                         type="button"
@@ -4297,13 +4313,6 @@ function App() {
                           onClick={() => setSelectedPaidOrder(order)}
                         >
                           Ver detalle
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => printKitchenTicket(order)}
-                        >
-                          Ticket cocina
                         </button>
                       </div>
                     </article>
@@ -4569,7 +4578,7 @@ function App() {
                   <h3>Platos</h3>
                   <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
                     Picadas, cortes, porciones, platos fuertes y demás categorías
-                    (sin bebidas ni postres).
+                    (sin bebidas, postres ni contenedores).
                   </p>
                 </div>
                 <span className="stats-chip">
@@ -4732,7 +4741,50 @@ function App() {
               </div>
             </section>
 
+            <section className="stats-panel">
+              <div className="section-header stats-panel-head">
+                <div>
+                  <h3>Contenedores</h3>
+                  <p style={{ margin: "6px 0 0", color: "#6f5e4d" }}>
+                    Contenedores cobrados hoy. Se limpia con el día, igual que platos y bebidas.
+                  </p>
+                </div>
+                <span className="stats-chip">
+                  {(dashboardStats.containers ?? []).reduce((acc, item) => acc + item.quantity, 0)}{" "}
+                  vendidos
+                </span>
+              </div>
+
+              <div className="stats-table-card">
+                <table className="stats-table">
+                  <thead>
+                    <tr>
+                      <th>Contenedor</th>
+                      <th>Cantidad</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(dashboardStats.containers ?? []).length > 0 ? (
+                      dashboardStats.containers.map((item) => (
+                        <tr key={`contenedor-${item.key}`}>
+                          <td>{item.label}</td>
+                          <td>{item.quantity}</td>
+                          <td>{formatCurrency(item.total)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="3">No hay contenedores cobrados en esta jornada.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
             <div className="stats-split-grid">
+              {!publicPagesView ? (
               <section className="stats-panel">
                 <div className="section-header stats-panel-head">
                   <div>
@@ -4812,6 +4864,7 @@ function App() {
                   </table>
                 </div>
               </section>
+              ) : null}
 
               <section className="stats-panel">
                 <div className="section-header stats-panel-head">
@@ -4857,33 +4910,6 @@ function App() {
                     </tbody>
                   </table>
                 </div>
-
-                <div className="stats-table-card">
-                  <table className="stats-table">
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Contenedores</th>
-                        <th>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dashboardStats.containerHistoryRows.length > 0 ? (
-                        dashboardStats.containerHistoryRows.slice(0, 6).map((row) => (
-                          <tr key={`${row.date}-containers`}>
-                            <td>{row.label}</td>
-                            <td>{row.quantity}</td>
-                            <td>{formatCurrency(row.total)}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan="3">No hay contenedores en los últimos días.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
               </section>
             </div>
 
@@ -4916,7 +4942,7 @@ function App() {
                           </p>
                         </div>
                         <span className={`stats-chip${report.lateCount > 0 ? " kitchen-timing-chip-late" : ""}`}>
-                          {report.lateCount} de {report.rows.length} pasaron de 10 min
+                          {report.lateCount} de {report.rows.length} pasaron de 15 min
                         </span>
                       </div>
                       <KitchenTimingTable
@@ -5342,7 +5368,7 @@ function App() {
                   onChange={(event) =>
                     setRestaurantNameDraft(event.target.value)
                   }
-                  placeholder="Ej: Ahumados Al Barril"
+                  placeholder="Ahumarte"
                 />
                 <div className="actions" style={{ marginTop: 10 }}>
                   <button type="button" onClick={saveRestaurantName}>
@@ -5406,47 +5432,19 @@ function App() {
 
               <article className="order-card">
                 <h4>Sede de esta laptop</h4>
-                <p>
-                  Tu eliges la sede de ESTE servidor. Confírmala una vez en esta laptop.
+                <p style={{ marginTop: 10, fontWeight: 700 }}>
+                  Sede activa: Barril Chone
                 </p>
-                <select
-                  value={branchSiteDraft}
-                  onChange={(event) => setBranchSiteDraft(event.target.value)}
-                >
-                  <option value="">Selecciona sede...</option>
-                  {PUBLIC_SITES.map((site) => (
-                    <option key={site.id} value={site.id}>
-                      {site.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="actions" style={{ marginTop: 10 }}>
-                  <button type="button" onClick={confirmBranchSiteOnServer}>
-                    Confirmar sede de esta laptop
-                  </button>
-                </div>
-                {branchSiteConfigured ? (
-                  <>
-                    <p style={{ marginTop: 10, fontWeight: 700 }}>
-                      Sede activa en este servidor:{" "}
-                      {PUBLIC_SITES.find((site) => site.id === branchSiteId)?.name}
-                    </p>
-                    {networkInfo.menuBranchLabel ? (
-                      <p style={{ marginTop: 6 }}>
-                        Menu activo: <strong>{networkInfo.menuBranchLabel}</strong>
-                        {networkInfo.menuVersion ? (
-                          <span style={{ display: "block", fontSize: "0.9em", color: "#5c4a32" }}>
-                            {networkInfo.menuVersion}
-                          </span>
-                        ) : null}
-                      </p>
+                {networkInfo.menuBranchLabel ? (
+                  <p style={{ marginTop: 6 }}>
+                    Menu activo: <strong>{networkInfo.menuBranchLabel}</strong>
+                    {networkInfo.menuVersion ? (
+                      <span style={{ display: "block", fontSize: "0.9em", color: "#5c4a32" }}>
+                        {networkInfo.menuVersion}
+                      </span>
                     ) : null}
-                  </>
-                ) : (
-                  <p style={{ marginTop: 10, color: "#b42318", fontWeight: 700 }}>
-                    Aun no has confirmado la sede de esta laptop.
                   </p>
-                )}
+                ) : null}
               </article>
 
               <article className="order-card">

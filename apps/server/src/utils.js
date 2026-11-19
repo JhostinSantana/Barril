@@ -9,10 +9,10 @@ export {
     WEIGHT_FORMULAS
 } from "./pricing.js";
 
-export const DEFAULT_RESTAURANT_NAME = "Ahumados Al Barril";
+export const DEFAULT_RESTAURANT_NAME = "Ahumarte";
 export const BRANCH_SITE_IDS = ["portoviejo", "chone"];
-export const MENU_VERSION_CHONE = "2026-11-14-carta";
-export const MENU_VERSION_PORTOVIEJO = "2026-11-14-carta";
+export const MENU_VERSION_CHONE = "2026-11-19-cambios";
+export const MENU_VERSION_PORTOVIEJO = "2026-11-19-cambios";
 export const DEFAULT_MENU_VERSION = MENU_VERSION_CHONE;
 export const CONTAINER_EXPENSE_DESCRIPTION = "Contenedor";
 export const CONTAINER_EXPENSE_AMOUNT = 0.25;
@@ -170,6 +170,8 @@ const DEFAULT_MENU_CHONE_SOURCE = [
   { id: "picaditas-gozar", name: "PARA GOZAR", category: "PICADITAS", price: 6.0, pricingMode: "fixed" },
   { id: "picaditas-familiar", name: "PARA ENAMORAR", category: "PICADITAS", price: 10.0, pricingMode: "fixed" },
   { id: "fuerte-bestia", name: "LA BESTIA", category: "PICADITAS", price: 25.0, pricingMode: "fixed" },
+  { id: "picaditas-fritas", name: "CAMBIO PAPAS FRITAS", category: "PICADITAS", price: 1.0, pricingMode: "fixed" },
+  { id: "picaditas-patacones", name: "CAMBIO PATACONES", category: "PICADITAS", price: 1.0, pricingMode: "fixed" },
 
   // ESPECIALES DE LA CASA
   { id: "fuerte-taco-taco", name: "TACO TACO", category: "ESPECIALES DE LA CASA", price: 3.0, pricingMode: "fixed" },
@@ -177,6 +179,8 @@ const DEFAULT_MENU_CHONE_SOURCE = [
   { id: "fuerte-come-solo", name: "COME SOLO", category: "ESPECIALES DE LA CASA", price: 5.0, pricingMode: "fixed" },
   { id: "fuerte-come-bien", name: "COME BIEN", category: "ESPECIALES DE LA CASA", price: 6.0, pricingMode: "fixed" },
   { id: "especial-bandeja-corporativa", name: "BANDEJA CORPORATIVA", category: "ESPECIALES DE LA CASA", price: 30.0, pricingMode: "fixed" },
+  { id: "fuerte-cambio-arroz", name: "CAMBIO POR CHOCLO", category: "ESPECIALES DE LA CASA", price: 0.5, pricingMode: "fixed" },
+  { id: "fuerte-cambio-frejol", name: "CAMBIO FREJOL", category: "ESPECIALES DE LA CASA", price: 1.0, pricingMode: "fixed" },
 
   // CORTES AHUMADOS
   { id: "corte-alitas-ahumadas", name: "ALITAS AHUMADAS", category: "CORTES AHUMADOS", price: 5.5, pricingMode: "fixed" },
@@ -197,19 +201,19 @@ const DEFAULT_MENU_CHONE_SOURCE = [
   { id: "asado-cerdo", name: "CARNE DE CERDO", category: "ASADOS", price: 5.75, pricingMode: "fixed" },
   { id: "asado-chuleta-cerdo", name: "CHULETA DE CERDO", category: "ASADOS", price: 5.75, pricingMode: "fixed" },
   { id: "asado-res", name: "CARNE DE RES", category: "ASADOS", price: 6.75, pricingMode: "fixed" },
+  { id: "asado-cambio-arroz-menestra", name: "CAMBIO MORO", category: "ASADOS", price: 1.0, pricingMode: "fixed" },
+  { id: "asado-cambio-papas-fritas", name: "CAMBIO PAPA FRITA", category: "ASADOS", price: 1.0, pricingMode: "fixed" },
+  { id: "asado-cambio-patacones", name: "CAMBIO PATACONES", category: "ASADOS", price: 1.0, pricingMode: "fixed" },
+  { id: "asado-cambio-moro-choclo", name: "CAMBIO MORO CHOCLO", category: "ASADOS", price: 1.5, pricingMode: "fixed" },
+  { id: "asado-cambio-moro-frejol", name: "CAMBIO MORO FREJOL", category: "ASADOS", price: 1.5, pricingMode: "fixed" },
 
   // HAMBURGUESAS
   { id: "guesa-pecado-barril", name: "EL PECADO DEL BARRIL", category: "HAMBURGUESAS", price: 5.5, pricingMode: "fixed" },
   { id: "guesa-chone-en-casa", name: "CHONE EN CASA", category: "HAMBURGUESAS", price: 5.75, pricingMode: "fixed" },
 
   // EXTRAS
-  { id: "extra-contenedor", name: "CONTENEDOR", category: "EXTRAS", price: 0.25, pricingMode: "fixed" },
   { id: "entrada-salsas", name: "SALSA EXTRA", category: "EXTRAS", price: 0.25, pricingMode: "fixed" },
-  { id: "asado-cambio-arroz-menestra", name: "CAMBIO MORO", category: "EXTRAS", price: 1.0, pricingMode: "fixed" },
-  { id: "picaditas-fritas", name: "CAMBIO PAPAS FRITAS", category: "EXTRAS", price: 1.0, pricingMode: "fixed" },
-  { id: "picaditas-patacones", name: "CAMBIO PATACONES", category: "EXTRAS", price: 1.0, pricingMode: "fixed" },
-  { id: "fuerte-cambio-arroz", name: "CAMBIO MORO CHOCLO", category: "EXTRAS", price: 1.5, pricingMode: "fixed" },
-  { id: "fuerte-cambio-frejol", name: "CAMBIO MORO FREJOL", category: "EXTRAS", price: 1.5, pricingMode: "fixed" },
+  { id: "extra-contenedor", name: "CONTENEDOR", category: "EXTRAS", price: 0.25, pricingMode: "fixed" },
 
   // PORCIONES
   { id: "extra-ensalada", name: "ENSALADA", category: "PORCIONES", price: 0, pricingMode: "fixed" },

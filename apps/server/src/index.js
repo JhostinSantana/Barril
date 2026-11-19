@@ -143,7 +143,9 @@ async function registerTunnelUrl(publicUrl) {
 
 async function resolveBranchSiteId() {
   const stored = `${(await getSetting("branchSiteId")) ?? ""}`.trim();
-  return VALID_BRANCH_SITE_IDS.has(stored) ? stored : null;
+  if (VALID_BRANCH_SITE_IDS.has(stored)) return stored;
+  await setSetting("branchSiteId", "chone");
+  return "chone";
 }
 
 async function updateOwnerDashboardUrlForSite(siteId, publicUrl) {
