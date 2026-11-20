@@ -536,38 +536,35 @@ function freezeKitchenTimingRows(rows) {
   }));
 }
 
-function KitchenTimingRail({ rows, lateCount }) {
+function KitchenTimingPanel({ rows, lateCount, collapsed, onToggle }) {
   return (
-    <aside className="timing-rail">
-      <div className="timing-rail-head">
-        <h2>Tiempos</h2>
-        <p>En rojo si pasa de 15 minutos. Un pedido nuevo no se suma al que ya salió.</p>
-        <span className={`stats-chip${lateCount > 0 ? " kitchen-timing-chip-late" : ""}`}>
-          {lateCount} de {rows.length} pasaron de 15 min
-        </span>
+    <section className="stats-panel kitchen-timing-panel">
+      <div className="section-header stats-panel-head">
+        <div>
+          <h3>Tiempos de cocina en vivo</h3>
+          <p>
+            Cada pedido de esta jornada. El total en rojo pasó de 15 minutos.
+            Un pedido nuevo no se suma al que ya salió.
+          </p>
+        </div>
+        <div className="kitchen-timing-tools">
+          <span className={`stats-chip${lateCount > 0 ? " kitchen-timing-chip-late" : ""}`}>
+            {lateCount} de {rows.length} pasaron de 15 min
+          </span>
+          <button type="button" className="ghost" onClick={onToggle}>
+            {collapsed ? "Mostrar" : "Minimizar"}
+          </button>
+        </div>
       </div>
-      {rows.length === 0 ? (
-        <p className="timing-rail-empty">Todavía no hay pedidos en esta jornada.</p>
-      ) : (
-        <div className="timing-rail-list">
-          {rows.map((row) => (
-            <article
-              key={row.id}
-              className={row.late ? "timing-card timing-card-late" : "timing-card"}
-            >
-              <div className="timing-card-top">
-                <strong>#{row.id}</strong>
-                <span className={row.late ? "timing-total late" : "timing-total"}>{row.totalLabel}</span>
-              </div>
-              <p>{row.clientName} · {row.location}</p>
-              {row.waiterName ? <p>Mesero: {row.waiterName}</p> : null}
-              <p>Enviado {row.sentLabel} · {row.totalHint}</p>
-              <p>{row.cookLabel}</p>
-            </article>
-          ))}
+      {collapsed ? null : (
+        <div className="kitchen-timing-scroll">
+          <KitchenTimingTable
+            rows={rows}
+            emptyText="Todavía no hay pedidos en esta jornada."
+          />
         </div>
       )}
-    </aside>
+    </section>
   );
 }
 
@@ -1425,7 +1422,9 @@ function buildCashCloseFromOrders(orders, date, openingCash = 0) {
 }
 
 function App() {
+  const contentRef = useRef(null);
   const [activeView, setActiveView] = useState("cash");
+  const [kitchenTimesCollapsed, setKitchenTimesCollapsed] = useState(false);
   const [restaurantName, setRestaurantName] = useState("Ahumarte");
   const [pendingOrders, setPendingOrders] = useState([]);
   const [paidOrders, setPaidOrders] = useState([]);
@@ -1639,6 +1638,10 @@ function App() {
       );
     }
   }, [bogotaDayKey, cashSession.sessionKey, cashSessionHydrated, publicPagesView]);
+
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [activeView]);
 
   useEffect(() => {
     if (publicPagesView || !cashSessionHydrated || legacyPendingFinalizedRef.current) {
@@ -4032,12 +4035,8 @@ function App() {
       </header>
       ) : null}
 
-      {!publicPagesView ? (
-        <KitchenTimingRail rows={kitchenTimingRows} lateCount={lateKitchenOrders} />
-      ) : null}
-
       {publicPagesView && !publicRemoteAccessUnlocked ? null : (
-      <main className="content">
+      <main className="content" ref={contentRef}>
         {loading ? <p className="loading">Cargando tablero...</p> : null}
 
         {!publicPagesView && activeView === "cash" ? (
@@ -4064,6 +4063,13 @@ function App() {
                 Cierre de caja
               </button>
             </header>
+
+            <KitchenTimingPanel
+              rows={kitchenTimingRows}
+              lateCount={lateKitchenOrders}
+              collapsed={kitchenTimesCollapsed}
+              onToggle={() => setKitchenTimesCollapsed((current) => !current)}
+            />
 
             <h3 className="group-title">Cuentas pendientes</h3>
             <div className="card-grid">

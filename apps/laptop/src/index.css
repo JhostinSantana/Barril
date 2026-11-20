@@ -24,11 +24,11 @@ body {
 .layout {
   height: 100vh;
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
-    "topbar topbar"
-    "times main";
+    "topbar"
+    "main";
   overflow: hidden;
 }
 
@@ -65,70 +65,32 @@ body {
   font-size: 0.82rem;
 }
 
-.timing-rail {
-  grid-area: times;
-  min-height: 0;
-  overflow: auto;
-  padding: 16px 14px 24px;
-  background: #fff8f1;
-  border-right: 1px solid #eadccb;
+.kitchen-timing-panel {
+  margin-bottom: 18px;
 }
 
-.timing-rail-head h2 {
-  margin: 0;
-  font-size: 1.2rem;
-}
-
-.timing-rail-head p {
-  margin: 6px 0 10px;
-  color: #6f5e4d;
-  font-size: 0.82rem;
-  line-height: 1.35;
-}
-
-.timing-rail-empty {
+.kitchen-timing-panel .section-header p {
+  margin: 6px 0 0;
   color: #6f5e4d;
 }
 
-.timing-rail-list {
-  display: grid;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.timing-card {
-  background: #fff;
-  border: 1px solid #eadccb;
-  border-radius: 14px;
-  padding: 10px 12px;
-}
-
-.timing-card p {
-  margin: 3px 0 0;
-  color: #6f5e4d;
-  font-size: 0.8rem;
-}
-
-.timing-card-top {
+.kitchen-timing-tools {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: baseline;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.timing-total {
-  font-weight: 800;
-  color: #1f6b45;
+.kitchen-timing-scroll {
+  max-height: 340px;
+  overflow: auto;
 }
 
-.timing-total.late,
-.timing-card-late {
-  color: #9d1c1c;
-}
-
-.timing-card-late {
-  background: #fff1f0;
-  border-color: #e7b4b0;
+.kitchen-timing-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fffaf4;
 }
 
 .layout > .content {
@@ -672,15 +634,6 @@ button:disabled {
 }
 
 @media (max-width: 980px) {
-  .layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(180px, 34vh) minmax(0, 1fr);
-    grid-template-areas:
-      "topbar"
-      "times"
-      "main";
-  }
-
   .topbar {
     flex-wrap: wrap;
   }
@@ -688,11 +641,6 @@ button:disabled {
   .topbar-meta {
     margin-left: 0;
     width: 100%;
-  }
-
-  .timing-rail {
-    border-right: 0;
-    border-bottom: 1px solid #eadccb;
   }
 
   .section-header {
