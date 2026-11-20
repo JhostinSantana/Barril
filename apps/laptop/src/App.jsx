@@ -2469,9 +2469,14 @@ function App() {
       activePublicSite !== COMBINED_PUBLIC_SITE_ID
         ? nextRuntime[activePublicSite]
         : null;
-    if (activeRuntime?.connected && activeRuntime.snapshot) {
+    if (activeRuntime?.snapshot) {
       applyDashboardSnapshot(activeRuntime.snapshot);
-      setNetworkStatus("");
+      setPublicBackendConnected(Boolean(activeRuntime.connected));
+      setNetworkStatus(
+        activeRuntime.connected
+          ? ""
+          : "Sin conexion ahora (laptop apagada o tunel caido). Datos viejos en pantalla.",
+      );
     } else if (publicDashboardMode === "multi") {
       setNetworkStatus(buildMultiSiteStatusLabel(nextRuntime));
       setLoading(false);
