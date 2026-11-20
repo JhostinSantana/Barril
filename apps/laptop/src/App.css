@@ -1109,35 +1109,22 @@ button {
 }
 
 body:has(.public-shell) {
-  background: #0c0907;
+  background-color: #0c0907;
+  background-image:
+    linear-gradient(180deg, rgba(12, 9, 7, 0.42), rgba(12, 9, 7, 0.58)),
+    url("./ahumarte-fondo.jpg");
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: cover;
+  background-attachment: fixed;
 }
 
 .public-shell {
-  width: min(1180px, calc(100% - 28px));
+  width: min(1120px, calc(100% - 28px));
   margin: 0 auto;
   min-height: 100vh;
   padding: 22px 0 48px;
-  display: grid;
-  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.35fr);
-  column-gap: 22px;
-  align-items: start;
   background: transparent;
-}
-
-.public-hero-art {
-  grid-column: 1;
-  grid-row: 1 / span 12;
-  position: sticky;
-  top: 18px;
-  width: 100%;
-  height: auto;
-  border-radius: 22px;
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.45);
-}
-
-.public-shell > :not(.public-hero-art) {
-  grid-column: 2;
-  min-width: 0;
 }
 
 .public-shell .content {
@@ -1563,18 +1550,33 @@ body:has(.public-shell) {
   color: #fff1df;
 }
 
+.public-shell .cash-difference.surplus,
+.public-shell .cash-status-label.surplus {
+  color: #3dd68c;
+  font-weight: 900;
+}
+
+.public-shell .cash-difference.short,
+.public-shell .cash-status-label.short {
+  color: #ff6b6b;
+  font-weight: 900;
+}
+
+.public-shell .cash-difference.matched,
+.public-shell .cash-status-label.matched {
+  color: #f6eadc;
+  font-weight: 900;
+}
+
 @media (max-width: 960px) {
+  body:has(.public-shell) {
+    background-attachment: scroll;
+    background-position: center top;
+  }
+
   .public-shell {
     width: min(100%, calc(100% - 20px));
     padding-top: 14px;
-    grid-template-columns: 1fr;
-  }
-
-  .public-hero-art,
-  .public-shell > :not(.public-hero-art) {
-    grid-column: 1;
-    grid-row: auto;
-    position: static;
   }
 
   .public-shell .public-pin-gate {

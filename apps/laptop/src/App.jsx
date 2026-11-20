@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ahumarteFondo from "./ahumarte-fondo.jpg";
 import { createPortal } from "react-dom";
 import { QRCode } from "react-qr-code";
 import { io } from "socket.io-client";
@@ -3803,9 +3802,6 @@ function App() {
       className={`${publicPagesView ? "public-shell" : "layout"} notranslate`}
       translate="no"
     >
-      {publicPagesView ? (
-        <img className="public-hero-art" src={ahumarteFondo} alt="AhumArte" />
-      ) : null}
       {publicPagesView && !publicRemoteAccessUnlocked ? (
         <section className="public-setup-panel public-pin-gate">
           <p className="security-flag">Acceso restringido</p>
@@ -4914,7 +4910,9 @@ function App() {
                             <td className={`cash-difference ${report.status}`}>
                               {formatSignedCurrency(report.differenceTotal ?? 0)}
                             </td>
-                            <td>{getCashCloseStatusLabel(report.status)}</td>
+                            <td className={`cash-status-label ${report.status}`}>
+                              {getCashCloseStatusLabel(report.status)}
+                            </td>
                           </tr>
                         ))
                       ) : (
