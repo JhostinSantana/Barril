@@ -87,7 +87,7 @@ function isDashboardSnapshot(value) {
 }
 
 const PUBLIC_DASHBOARD_PIN = "040420";
-const ADMIN_ACCESS_PIN = "0409";
+const ADMIN_ACCESS_PIN = "040409";
 const ADMIN_DASHBOARD_LINK_TARGET = "__admin-dashboard-link__";
 const PROTECTED_NAV_VIEW_IDS = new Set(["stats", "history"]);
 const PROTECTED_VIEW_COPY = {
